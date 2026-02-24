@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.13.1-pg16
+    container_name: instock_postgres
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-instock_pass}
+      POSTGRES_USER: ${POSTGRES_USER:-instock}
+      POSTGRES_DB: ${POSTGRES_DB:-instock}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-instock}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - instock_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: instock_redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - instock_network
+
+  app:
+    build: .
+    container_name: instock_app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock}@postgres:5432/${POSTGRES_DB:-instock}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock}@postgres:5432/${POSTGRES_DB:-instock}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./core:/app/core
+      - ./scripts:/app/scripts
+      - app_logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - instock_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: instock_frontend
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    ports:
+      - "3001:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - instock_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  instock_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_logs:

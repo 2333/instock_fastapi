@@ -1,0 +1,29 @@
+# Database Configuration
+database:
+  host: "localhost"
+  port: 3306
+  user: "root"
+  password: "password"
+  database: "instock"
+
+postgresql:
+  host: "localhost"
+  port: 5432
+  user: "instock"
+  password: "instock_pass"
+  database: "instock"
+
+# Tushare API Configuration
+tushare:
+  token: "your_tushare_token"
+
+# Redis Configuration (optional, for caching)
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

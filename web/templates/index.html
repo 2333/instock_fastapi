@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InStock API - 股票分析系统</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <h1>InStock API</h1>
+            <nav class="nav">
+                <a href="/docs">API 文档</a>
+                <a href="/redoc">ReDoc</a>
+                <a href="/health">健康检查</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="card">
+            <h2>系统信息</h2>
+            <p>欢迎使用 InStock 股票分析系统 API</p>
+            <p>版本: 1.0.0</p>
+        </div>
+
+        <div class="card">
+            <h2>可用 API 端点</h2>
+            <div class="api-list">
+                <div class="api-item">
+                    <h3>股票接口</h3>
+                    <code>GET /api/v1/stocks</code>
+                    <p>获取股票列表</p>
+                    <code>GET /api/v1/stocks/{code}</code>
+                    <p>获取股票详情</p>
+                </div>
+                <div class="api-item">
+                    <h3>ETF 接口</h3>
+                    <code>GET /api/v1/etf</code>
+                    <p>获取 ETF 列表</p>
+                </div>
+                <div class="api-item">
+                    <h3>技术指标</h3>
+                    <code>GET /api/v1/indicators</code>
+                    <p>获取技术指标</p>
+                </div>
+                <div class="api-item">
+                    <h3>策略选股</h3>
+                    <code>GET /api/v1/strategies</code>
+                    <p>获取策略列表</p>
+                    <code>POST /api/v1/strategies/run</code>
+                    <p>运行策略</p>
+                </div>
+                <div class="api-item">
+                    <h3>形态识别</h3>
+                    <code>GET /api/v1/patterns</code>
+                    <p>获取形态识别结果</p>
+                </div>
+                <div class="api-item">
+                    <h3>回测</h3>
+                    <code>POST /api/v1/backtest</code>
+                    <p>运行回测</p>
+                </div>
+                <div class="api-item">
+                    <h3>资金流向</h3>
+                    <code>GET /api/v1/fund-flow/{code}</code>
+                    <p>获取资金流向</p>
+                </div>
+                <div class="api-item">
+                    <h3>自选股</h3>
+                    <code>GET /api/v1/attention</code>
+                    <p>获取自选股列表</p>
+                    <code>POST /api/v1/attention</code>
+                    <p>添加自选股</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <p>InStock API - 股票分析系统</p>
+    </footer>
+</body>
+</html>

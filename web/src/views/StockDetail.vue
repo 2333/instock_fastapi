@@ -1,0 +1,574 @@
+<template>
+  <div class="stock-detail-page">
+    <div v-if="loading" class="loading-state">
+      <div class="spinner"></div>
+      <p>加载中...</p>
+    </div>
+    
+    <template v-else-if="stockInfo">
+      <div class="page-header">
+        <div class="stock-info">
+          <h1>{{ stockInfo.name }}</h1>
+          <div class="stock-meta">
+            <span class="stock-code">{{ stockInfo.code }}</span>
+            <span class="stock-market">{{ stockInfo.exchange === 'SSE' ? '上海' : '深圳' }}</span>
+          </div>
+        </div>
+        <div class="price-info">
+          <div class="current-price" :class="change >= 0 ? 'price-up' : 'price-down'">
+            {{ latestBar?.close?.toFixed(2) || '-' }}
+          </div>
+          <div class="price-change" :class="change >= 0 ? 'price-up' : 'price-down'">
+            {{ formatChange(change) }}
+            <span class="change-value">({{ changeValue >= 0 ? '+' : '' }}{{ changeValue.toFixed(2) }})</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="content-grid">
+        <div class="main-chart">
+          <KLineChart :title="stockInfo.name" :data="klineData" :loading="loading" />
+        </div>
+
+        <aside class="side-panel">
+          <div class="panel-section">
+            <h3>股票概况</h3>
+            <div class="profile-grid">
+              <div class="profile-item">
+                <span class="label">开盘价</span>
+                <span class="value">{{ latestBar?.open?.toFixed(2) || '-' }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">最高价</span>
+                <span class="value">{{ latestBar?.high?.toFixed(2) || '-' }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">最低价</span>
+                <span class="value">{{ latestBar?.low?.toFixed(2) || '-' }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">成交量</span>
+                <span class="value">{{ formatVolume(latestBar?.vol) }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">成交额</span>
+                <span class="value">{{ formatTurnover(latestBar?.amount) }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">所属行业</span>
+                <span class="value">{{ stockInfo.industry || '-' }}</span>
+              </div>
+              <div class="profile-item">
+                <span class="label">上市日期</span>
+                <span class="value">{{ stockInfo.list_date || '-' }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h3>快速操作</h3>
+            <div class="action-buttons">
+              <button class="action-btn primary" @click="showBacktest = true">
+                <span class="btn-icon">⚡</span>
+                <span>回测策略</span>
+              </button>
+              <button class="action-btn" @click="addToWatchlist">
+                <span class="btn-icon">⭐</span>
+                <span>{{ inWatchlist ? '取消关注' : '添加到关注' }}</span>
+              </button>
+              <button class="action-btn" @click="analyzePatterns">
+                <span class="btn-icon">🔍</span>
+                <span>分析形态</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-section">
+            <h3>相关形态</h3>
+            <div v-if="patterns.length > 0" class="pattern-list">
+              <div 
+                v-for="pattern in patterns" 
+                :key="pattern.pattern_name"
+                class="pattern-item"
+              >
+                <div class="pattern-info">
+                  <span class="pattern-name">{{ getPatternLabel(pattern.pattern_name) }}</span>
+                  <span class="pattern-date">{{ pattern.trade_date }}</span>
+                </div>
+                <div class="pattern-badge" :class="pattern.pattern_type">
+                  {{ pattern.confidence }}%
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              暂无形态数据
+            </div>
+          </div>
+        </aside>
+      </div>
+    </template>
+    
+    <div v-else class="error-state">
+      <p>未找到股票信息</p>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { stockApi, patternApi, attentionApi } from '@/api'
+
+interface KlineData {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+interface BarData {
+  open?: number
+  high?: number
+  low?: number
+  close?: number
+  vol?: number
+  amount?: number
+  trade_date?: string
+}
+
+const route = useRoute()
+const loading = ref(false)
+const showBacktest = ref(false)
+const inWatchlist = ref(false)
+
+const stockInfo = ref<any>(null)
+const klineData = ref<KlineData[]>([])
+const patterns = ref<any[]>([])
+
+const code = computed(() => route.params.code as string)
+
+const latestBar = computed<BarData | null>(() => {
+  if (klineData.value.length > 0) {
+    const last = klineData.value[klineData.value.length - 1]
+    return {
+      open: last.open,
+      high: last.high,
+      low: last.low,
+      close: last.close,
+      vol: last.volume,
+    }
+  }
+  return null
+})
+
+const change = computed(() => {
+  if (!latestBar.value) return 0
+  return Number(latestBar.value.close) - Number(latestBar.value.open)
+})
+
+const changeValue = computed(() => {
+  if (!latestBar.value) return 0
+  return ((Number(latestBar.value.close) - Number(latestBar.value.open)) / Number(latestBar.value.open)) * 100
+})
+
+const formatVolume = (volume: number | undefined) => {
+  if (!volume) return '-'
+  if (volume >= 1000000) return (volume / 1000000).toFixed(2) + 'M'
+  if (volume >= 1000) return (volume / 1000).toFixed(2) + 'K'
+  return volume.toString()
+}
+
+const formatTurnover = (turnover: number | undefined) => {
+  if (!turnover) return '-'
+  if (turnover >= 1000000000) return (turnover / 1000000000).toFixed(2) + 'B'
+  if (turnover >= 1000000) return (turnover / 1000000).toFixed(2) + 'M'
+  return (turnover / 1000).toFixed(2) + 'K'
+}
+
+const formatChange = (val: number) => {
+  const prefix = val >= 0 ? '+' : ''
+  return `${prefix}${val.toFixed(2)}%`
+}
+
+const getPatternLabel = (name: string) => {
+  const labels: Record<string, string> = {
+    'MORNING_STAR': '晨星',
+    'EVENING_STAR': '夜星',
+    'BREAKTHROUGH_HIGH': '突破高点',
+    'BREAKDOWN_LOW': '跌破低点',
+    'CONTINUOUS_RISE': '连续上涨',
+    'CONTINUOUS_FALL': '连续下跌',
+  }
+  return labels[name] || name
+}
+
+const fetchStockDetail = async () => {
+  loading.value = true
+  try {
+    const endDate = getLatestTradeDate()
+    const startDate = getStartDate(180)
+    
+    const [stockData, patternsData] = await Promise.all([
+      stockApi.getStockDetail(code.value, { start_date: startDate, end_date: endDate }),
+      patternApi.getPatterns(code.value, { limit: 10 }).catch(() => []),
+    ])
+    
+    stockInfo.value = stockData
+    patterns.value = patternsData || []
+    
+    if (stockData?.bars) {
+      klineData.value = stockData.bars.map((bar: any) => ({
+        date: bar.trade_date,
+        open: Number(bar.open),
+        high: Number(bar.high),
+        low: Number(bar.low),
+        close: Number(bar.close),
+        volume: Number(bar.vol),
+      }))
+    }
+  } catch (e) {
+    console.error('Failed to fetch stock detail:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+const getLatestTradeDate = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}${month}${day}`
+}
+
+const getStartDate = (daysBack: number) => {
+  const date = new Date()
+  date.setDate(date.getDate() - daysBack)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}${month}${day}`
+}
+
+const addToWatchlist = async () => {
+  try {
+    if (inWatchlist.value) {
+      await attentionApi.remove(code.value)
+    } else {
+      await attentionApi.add(code.value)
+    }
+    inWatchlist.value = !inWatchlist.value
+  } catch (e) {
+    console.error('Failed to update watchlist:', e)
+  }
+}
+
+const analyzePatterns = () => {
+  console.log('Analyzing patterns for', code.value)
+}
+
+// 监听路由参数变化，切换股票时重新加载
+watch(code, () => {
+  fetchStockDetail()
+})
+
+onMounted(() => {
+  fetchStockDetail()
+})
+</script>
+
+<style scoped lang="scss">
+.stock-detail-page {
+  padding: 24px;
+  height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+}
+
+.loading-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  
+  p {
+    margin-top: 16px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #2962FF;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.stock-info {
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+  }
+}
+
+.stock-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  
+  .stock-code {
+    font-family: 'JetBrains Mono', monospace;
+    color: rgba(255, 255, 255, 0.7);
+  }
+  
+  .stock-market {
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.price-info {
+  text-align: right;
+  
+  .current-price {
+    font-size: 36px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  
+  .price-change {
+    font-size: 16px;
+    margin-top: 4px;
+  }
+}
+
+.price-up {
+  color: #00C853;
+}
+
+.price-down {
+  color: #FF1744;
+}
+
+.change-value {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 24px;
+  flex: 1;
+  min-height: 0;
+}
+
+.main-chart {
+  background: rgba(26, 26, 26, 0.5);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-section {
+  background: rgba(26, 26, 26, 0.5);
+  border-radius: 12px;
+  padding: 20px;
+  
+  h3 {
+    margin: 0 0 16px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.profile-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  
+  .label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+  
+  .value {
+    font-size: 14px;
+    font-weight: 500;
+  }
+}
+
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  
+  &.primary {
+    background: rgba(41, 98, 255, 0.15);
+    border-color: #2962FF;
+    color: #2962FF;
+  }
+}
+
+.pattern-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pattern-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+.pattern-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  
+  .pattern-name {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  
+  .pattern-date {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+}
+
+.pattern-badge {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(0, 200, 83, 0.15);
+  color: #00C853;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+@media (max-width: 1200px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .side-panel {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  
+  .panel-section {
+    flex: 1;
+    min-width: 280px;
+  }
+}
+
+@media (max-width: 768px) {
+  .stock-detail-page {
+    padding: 16px;
+  }
+  
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .price-info {
+    text-align: left;
+  }
+  
+  .current-price {
+    font-size: 28px;
+  }
+  
+  .side-panel {
+    flex-direction: column;
+  }
+  
+  .panel-section {
+    min-width: auto;
+  }
+  
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .action-buttons {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-header h1 {
+    font-size: 22px;
+  }
+  
+  .stock-meta {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .current-price {
+    font-size: 24px;
+  }
+  
+  .price-change {
+    font-size: 14px;
+  }
+}
+</style>
