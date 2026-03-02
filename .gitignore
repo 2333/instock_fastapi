@@ -42,6 +42,7 @@ env/
 # Logs
 *.log
 logs/
+config/proxy.txt
 
 # Database
 *.db
@@ -64,3 +65,4 @@ htmlcov/
 .cache/
 .ruff_cache/
 .mypy_cache/
+web/node_modules/

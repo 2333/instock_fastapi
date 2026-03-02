@@ -20,23 +20,23 @@
       <nav class="header-nav">
         <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
           <span class="nav-icon">📊</span>
-          <span>Dashboard</span>
+          <span>{{ t('nav_dashboard') }}</span>
         </router-link>
         <router-link to="/stocks" class="nav-item" :class="{ active: $route.path.startsWith('/stocks') }">
           <span class="nav-icon">📈</span>
-          <span>Stocks</span>
+          <span>{{ t('nav_stocks') }}</span>
         </router-link>
         <router-link to="/patterns" class="nav-item" :class="{ active: $route.path === '/patterns' }">
           <span class="nav-icon">🔍</span>
-          <span>Patterns</span>
+          <span>{{ t('nav_patterns') }}</span>
         </router-link>
         <router-link to="/backtest" class="nav-item" :class="{ active: $route.path === '/backtest' }">
           <span class="nav-icon">⚡</span>
-          <span>Backtest</span>
+          <span>{{ t('nav_backtest') }}</span>
         </router-link>
         <router-link to="/selection" class="nav-item" :class="{ active: $route.path === '/selection' }">
           <span class="nav-icon">🎯</span>
-          <span>Selection</span>
+          <span>{{ t('nav_selection') }}</span>
         </router-link>
       </nav>
     </div>
@@ -44,34 +44,37 @@
     <div class="header-right">
       <div class="market-status" :class="{ active: marketOpen }">
         <span class="status-dot"></span>
-        <span class="status-text">{{ marketOpen ? 'Market Open' : 'Market Closed' }}</span>
+        <span class="status-text">{{ marketOpen ? t('market_open') : t('market_closed') }}</span>
       </div>
 
       <div class="header-actions">
-        <button class="action-btn" title="Refresh Data" @click="refreshData">
+        <button class="action-btn" :title="t('refresh')" @click="refreshData">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
             <path d="M21 3v5h-5" />
           </svg>
         </button>
-        <button class="action-btn" title="Settings" @click="openSettings">
+        <button class="action-btn" :title="t('settings')" @click="openSettings">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
+        </button>
+        <button class="action-btn lang-btn" title="Language" @click="toggleLocale">
+          <span>{{ t('lang_switch') }}</span>
         </button>
       </div>
 
       <div class="user-menu">
         <button class="user-btn" @click="toggleUserMenu">
           <div class="user-avatar">U</div>
-          <span class="user-name">User</span>
+          <span class="user-name">{{ t('user') }}</span>
         </button>
         <div v-if="showUserMenu" class="user-dropdown">
-          <a href="#" class="dropdown-item">Profile</a>
-          <a href="#" class="dropdown-item">Preferences</a>
+          <a href="#" class="dropdown-item">{{ t('profile') }}</a>
+          <a href="#" class="dropdown-item">{{ t('preferences') }}</a>
           <hr class="dropdown-divider" />
-          <a href="#" class="dropdown-item">Logout</a>
+          <a href="#" class="dropdown-item">{{ t('logout') }}</a>
         </div>
       </div>
     </div>
@@ -80,6 +83,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 
 const emit = defineEmits<{
   (e: 'refresh'): void
@@ -88,6 +92,7 @@ const emit = defineEmits<{
 
 const marketOpen = ref(false)
 const showUserMenu = ref(false)
+const { t, toggleLocale } = useLocale()
 
 const refreshData = () => emit('refresh')
 const openSettings = () => emit('settings')
@@ -264,6 +269,14 @@ onUnmounted(() => {
     background: rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.9);
   }
+}
+
+.lang-btn {
+  width: auto;
+  min-width: 36px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .user-menu {

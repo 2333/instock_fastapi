@@ -9,6 +9,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,7 +23,9 @@ from .base import (
     AdjustType,
     CrawlConfig,
     RateLimiter,
+    ProxyPool,
 )
+from core.proxy_manager import get_proxy_manager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +35,22 @@ class EastMoneyCrawler(BaseCrawler):
 
     def __init__(self, **kwargs):
         config = kwargs.pop("config", None)
-        super().__init__(config=config or CrawlConfig(min_delay=0.2))
+        proxy_pool = kwargs.pop("proxy_pool", None)
+        if proxy_pool is None and os.getenv("CRAWLER_PROXY_ENABLED", "false").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            proxy_manager = get_proxy_manager()
+            proxies = proxy_manager.load_proxies()
+            if proxies:
+                pool = ProxyPool(proxies=[f"http://{p}" for p in proxies])
+                logger.info("EastMoney 已启用代理池，代理数量: %s", len(pool.proxies))
+                proxy_pool = pool
+            else:
+                logger.warning("CRAWLER_PROXY_ENABLED=true，但未加载到可用代理")
+        super().__init__(config=config or CrawlConfig(min_delay=0.2), proxy_pool=proxy_pool)
 
     @property
     def data_source(self) -> DataSource:

@@ -13,17 +13,14 @@
         <span v-if="!collapsed" class="nav-section-title">自选股</span>
         <ul class="nav-list">
           <li v-for="stock in watchlist" :key="stock.code" class="nav-item">
-            <router-link :to="`/stocks/${stock.code}`" class="nav-link">
+            <router-link :to="`/stock/${stock.code}`" class="nav-link">
               <div class="stock-info">
                 <span class="stock-code">{{ stock.code }}</span>
                 <span class="stock-name">{{ stock.name }}</span>
               </div>
-              <div class="stock-price" :class="stock.change >= 0 ? 'price-up' : 'price-down'">
-                <span class="price">{{ stock.price.toFixed(2) }}</span>
-                <span class="change">{{ stock.change >= 0 ? '+' : '' }}{{ stock.change.toFixed(2) }}%</span>
-              </div>
             </router-link>
           </li>
+          <li v-if="!watchlist.length && !collapsed" class="nav-item nav-empty">暂无关注股票</li>
         </ul>
       </div>
 
@@ -52,19 +49,6 @@
       </div>
     </nav>
 
-    <div class="sidebar-footer">
-      <div v-if="!collapsed" class="market-summary">
-        <div class="summary-item">
-          <span class="summary-label">上证</span>
-          <span class="summary-value price-up">{{ marketData.shanghai.toFixed(2) }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">深证</span>
-          <span class="summary-value price-down">{{ marketData.shenzhen.toFixed(2) }}</span>
-        </div>
-      </div>
-    </div>
-
     <Teleport to="body">
       <div v-if="showAddStock" class="modal-overlay" @click.self="showAddStock = false">
         <div class="modal">
@@ -89,50 +73,72 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { inject, onMounted, ref } from 'vue'
+import { attentionApi } from '@/api'
 
 interface StockItem {
   code: string
   name: string
-  price: number
-  change: number
 }
 
 const collapsed = ref(false)
 const showAddStock = ref(false)
 const newStockCode = ref('')
-
-const watchlist = ref<StockItem[]>([
-  { code: '600519', name: '贵州茅台', price: 1680.50, change: 2.35 },
-  { code: '000001', name: '平安银行', price: 12.35, change: -0.45 },
-  { code: '300750', name: '宁德时代', price: 385.20, change: 1.85 },
-])
-
-const marketData = reactive({
-  shanghai: 3245.67,
-  shenzhen: 1123.45,
-})
+const watchlist = ref<StockItem[]>([])
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const toggleCollapse = () => {
   collapsed.value = !collapsed.value
 }
 
-const refreshAll = () => {
-  console.log('Refreshing all data...')
+const refreshAll = async () => {
+  await loadWatchlist()
+  showNotification?.('success', '关注列表已刷新')
 }
 
-const addStock = () => {
-  if (newStockCode.value) {
-    watchlist.value.push({
-      code: newStockCode.value,
-      name: 'New Stock',
-      price: 0,
-      change: 0,
-    })
-    newStockCode.value = ''
-    showAddStock.value = false
+const normalizeCode = (item: any): string => {
+  if (item?.code) return String(item.code)
+  if (item?.symbol) return String(item.symbol)
+  if (item?.ts_code) return String(item.ts_code).split('.')[0]
+  return ''
+}
+
+const normalizeName = (item: any): string => {
+  return item?.name || item?.stock_name || item?.symbol || '-'
+}
+
+const loadWatchlist = async () => {
+  try {
+    const list = await attentionApi.getList()
+    watchlist.value = (list || [])
+      .map((item: any) => ({
+        code: normalizeCode(item),
+        name: normalizeName(item),
+      }))
+      .filter((x: StockItem) => !!x.code)
+  } catch (e) {
+    watchlist.value = []
+    showNotification?.('error', '加载关注列表失败')
   }
 }
+
+const addStock = async () => {
+  const code = newStockCode.value.trim()
+  if (!code) return
+  try {
+    await attentionApi.add(code)
+    await loadWatchlist()
+    showNotification?.('success', `已添加 ${code} 到关注列表`)
+    newStockCode.value = ''
+    showAddStock.value = false
+  } catch (e: any) {
+    showNotification?.('error', e?.message || '添加关注失败')
+  }
+}
+
+onMounted(() => {
+  loadWatchlist()
+})
 </script>
 
 <style scoped lang="scss">
@@ -177,6 +183,7 @@ const addStock = () => {
 .sidebar-nav {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 0;
 }
 
@@ -203,6 +210,12 @@ const addStock = () => {
 
 .nav-item {
   margin-bottom: 2px;
+}
+
+.nav-empty {
+  padding: 10px 16px;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
 }
 
 .nav-link {
@@ -235,22 +248,6 @@ const addStock = () => {
   color: rgba(255, 255, 255, 0.5);
 }
 
-.stock-price {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-
-  .price {
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .change {
-    font-size: 11px;
-  }
-}
-
 .nav-btn {
   display: flex;
   align-items: center;
@@ -272,30 +269,32 @@ const addStock = () => {
   }
 }
 
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
+.app-sidebar.collapsed {
+  .nav-link {
+    justify-content: center;
+    padding: 10px 8px;
+  }
 
-.market-summary {
-  display: flex;
-  gap: 16px;
-}
+  .stock-info {
+    align-items: center;
+  }
 
-.summary-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+  .stock-name,
+  .stock-price {
+    display: none;
+  }
 
-.summary-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
-}
+  .stock-code {
+    font-size: 11px;
+  }
 
-.summary-value {
-  font-size: 14px;
-  font-weight: 600;
+  .nav-btn {
+    width: 44px;
+    margin: 0 auto;
+    justify-content: center;
+    padding: 10px 0;
+    gap: 0;
+  }
 }
 
 .modal-overlay {

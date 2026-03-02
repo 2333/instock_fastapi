@@ -140,7 +140,7 @@ class Pattern(Base):
     __table_args__ = (
         UniqueConstraint(
             "ts_code",
-            "trade_date",
+            "trade_date_dt",
             "pattern_name",
             name="uq_patterns_ts_code_date_name",
         ),
@@ -151,6 +151,7 @@ class Pattern(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[datetime] = mapped_column(Date, nullable=False)
     pattern_name: Mapped[str] = mapped_column(String(100), nullable=False)
     pattern_type: Mapped[str] = mapped_column(String(20), nullable=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=True)

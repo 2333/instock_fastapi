@@ -39,7 +39,7 @@
             v-for="pattern in recentPatterns" 
             :key="`${pattern.code}-${pattern.type}`"
             class="pattern-item"
-            @click="$router.push(`/stocks/${pattern.code}`)"
+            @click="$router.push(`/stock/${pattern.code}`)"
           >
             <div class="pattern-info">
               <span class="pattern-code">{{ pattern.code }}</span>
@@ -135,14 +135,6 @@ const selectionStats = reactive({
   avgReturn: 0,
 })
 
-const getLatestTradeDate = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}${month}${day}`
-}
-
 const getSignalClass = (signal: string) => {
   if (!signal) return 'neutral'
   const s = signal.toLowerCase()
@@ -158,16 +150,20 @@ const formatReturn = (value: number) => {
 
 const fetchPatterns = async () => {
   try {
-    const date = getLatestTradeDate()
-    const patterns = await patternApi.getTodayPatterns({ limit: 10 })
+    const patterns = await patternApi.getTodayPatterns({ 
+      limit: 10,
+      min_confidence: 0,
+    })
     if (patterns && patterns.length > 0) {
       recentPatterns.value = patterns.map((p: any) => ({
-        code: p.ts_code || p.code,
-        name: p.name || p.ts_code,
+        code: p.code || p.ts_code?.split('.')[0] || '',
+        name: p.stock_name || p.name || p.ts_code || '',
         type: p.pattern_name || '',
         signal: p.pattern_type || p.signal || 'neutral',
         confidence: parseFloat(p.confidence) || 0,
       }))
+    } else {
+      recentPatterns.value = []
     }
   } catch (e) {
     console.error('获取形态数据失败:', e)

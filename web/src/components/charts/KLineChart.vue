@@ -2,7 +2,7 @@
   <div class="kline-chart">
     <div class="chart-header">
       <div class="chart-title">
-        <h3>{{ title }}</h3>
+        <h3>{{ chartTitle }}</h3>
         <span v-if="currentPrice" class="current-price" :class="priceChange >= 0 ? 'price-up' : 'price-down'">
           {{ currentPrice.toFixed(2) }}
           <span class="price-change">{{ priceChange >= 0 ? '+' : '' }}{{ priceChange.toFixed(2) }}%</span>
@@ -45,6 +45,8 @@
       </div>
     </div>
     <div ref="chartRef" class="chart-container"></div>
+    <div v-if="hintText" class="chart-hint">{{ hintText }}</div>
+    <div v-if="noDataText" class="chart-empty">{{ noDataText }}</div>
     <div v-if="loading" class="chart-loading">
       <div class="loading-spinner"></div>
     </div>
@@ -54,6 +56,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import { useLocale } from '@/composables/useLocale'
 
 interface KlineData {
   date: string
@@ -71,20 +74,27 @@ interface Props {
   loading?: boolean
   showVolume?: boolean
   showPatternMarks?: boolean
+  adjust?: 'bfq' | 'qfq' | 'hfq'
+  externalHint?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: 'K-Line Chart',
+  title: '',
   loading: false,
   showVolume: true,
   showPatternMarks: true,
+  adjust: 'bfq',
+  externalHint: '',
 })
+const { t } = useLocale()
 
 const chartRef = ref<HTMLDivElement>()
 const chartInstance = shallowRef<any>(null)
 const selectedPeriod = ref('day')
-const selectedAdjust = ref('qfq')
+const selectedAdjust = ref('bfq')
 const activeIndicators = ref<string[]>([])
+const noDataText = ref('')
+const hintText = ref('')
 
 const periods = [
   { label: '1分', value: '1min' },
@@ -110,26 +120,30 @@ const availableIndicators = [
   { key: 'boll', label: 'BOLL' },
 ]
 
+const chartTitle = computed(() => props.title || t('kline_default_title'))
+
 const currentPrice = computed(() => {
-  if (!props.data || props.data.length === 0) return null
-  return props.data[props.data.length - 1].close
+  if (!displayData.value || displayData.value.length === 0) return null
+  return displayData.value[displayData.value.length - 1].close
 })
 
 const priceChange = computed(() => {
-  if (!props.data || props.data.length < 2) return 0
-  const current = props.data[props.data.length - 1].close
-  const previous = props.data[props.data.length - 2].close
+  if (!displayData.value || displayData.value.length < 2) return 0
+  const current = displayData.value[displayData.value.length - 1].close
+  const previous = displayData.value[displayData.value.length - 2].close
   return ((current - previous) / previous) * 100
 })
 
 const setPeriod = (period: string) => {
   selectedPeriod.value = period
   emit('periodChange', period)
+  updateChart()
 }
 
 const setAdjust = (adjust: string) => {
   selectedAdjust.value = adjust
   emit('adjustChange', adjust)
+  updateChart()
 }
 
 const toggleIndicator = (indicator: string) => {
@@ -155,6 +169,32 @@ const calculateMA = (data: KlineData[], period: number): (number | null)[] => {
       result.push(sum / period)
     }
   }
+  return result
+}
+
+const calculateEMA = (data: KlineData[], period: number): (number | null)[] => {
+  const result: (number | null)[] = []
+  if (data.length === 0) return result
+  const multiplier = 2 / (period + 1)
+  let prevEma: number | null = null
+
+  for (let i = 0; i < data.length; i++) {
+    const close = data[i].close
+    if (i < period - 1) {
+      result.push(null)
+      continue
+    }
+    if (prevEma === null) {
+      const base = data.slice(i - period + 1, i + 1).reduce((sum, item) => sum + item.close, 0) / period
+      prevEma = base
+      result.push(base)
+      continue
+    }
+    const ema = (close - prevEma) * multiplier + prevEma
+    prevEma = ema
+    result.push(ema)
+  }
+
   return result
 }
 
@@ -184,10 +224,107 @@ const calculateBOLL = (data: KlineData[], period = 20, stdMult = 2): { upper: (n
   return { upper, mid, lower }
 }
 
+const parseDate = (value: string) => {
+  if (!value) return new Date(NaN)
+  if (value.includes('-')) return new Date(value)
+  const y = Number(value.slice(0, 4))
+  const m = Number(value.slice(4, 6)) - 1
+  const d = Number(value.slice(6, 8))
+  return new Date(y, m, d)
+}
+
+const formatDate = (date: Date) => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+const getWeekKey = (date: Date) => {
+  const copy = new Date(date)
+  const day = copy.getDay() || 7
+  copy.setDate(copy.getDate() + 4 - day)
+  const yearStart = new Date(copy.getFullYear(), 0, 1)
+  const week = Math.ceil((((copy.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+  return `${copy.getFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+const aggregateBars = (data: KlineData[], mode: 'week' | 'month') => {
+  const groups = new Map<string, KlineData[]>()
+  for (const item of data) {
+    const dt = parseDate(item.date)
+    if (Number.isNaN(dt.getTime())) continue
+    const key = mode === 'week'
+      ? getWeekKey(dt)
+      : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+
+  const result: KlineData[] = []
+  for (const [, items] of groups) {
+    if (items.length === 0) continue
+    const sorted = [...items].sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime())
+    const first = sorted[0]
+    const last = sorted[sorted.length - 1]
+    result.push({
+      date: formatDate(parseDate(last.date)),
+      open: first.open,
+      high: Math.max(...sorted.map((x) => x.high)),
+      low: Math.min(...sorted.map((x) => x.low)),
+      close: last.close,
+      volume: sorted.reduce((sum, x) => sum + (x.volume || 0), 0),
+      amount: sorted.reduce((sum, x) => sum + (x.amount || 0), 0),
+    })
+  }
+  return result.sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime())
+}
+
+const displayData = computed(() => {
+  const raw = props.data || []
+  if (raw.length === 0) {
+    const adjustLabelMap: Record<string, string> = {
+      bfq: '不复权',
+      qfq: '前复权',
+      hfq: '后复权',
+    }
+    noDataText.value = `暂无${adjustLabelMap[selectedAdjust.value] || ''}K线数据`
+    return []
+  }
+
+  noDataText.value = ''
+
+  if (selectedPeriod.value === 'day') return raw
+  if (selectedPeriod.value === 'week') return aggregateBars(raw, 'week')
+  if (selectedPeriod.value === 'month') return aggregateBars(raw, 'month')
+
+  noDataText.value = `暂无${selectedPeriod.value}级别数据`
+  return []
+})
+
+const unsupportedIndicators = computed(() =>
+  activeIndicators.value.filter((key) => ['macd', 'kdj', 'rsi'].includes(key))
+)
+
+watch([unsupportedIndicators, () => props.externalHint], () => {
+  const hints: string[] = []
+  if (unsupportedIndicators.value.length > 0) {
+    hints.push(`${unsupportedIndicators.value.map((x) => x.toUpperCase()).join('/')} 暂未接入`)
+  }
+  if (props.externalHint) {
+    hints.push(props.externalHint)
+  }
+  hintText.value = hints.join('；')
+}, { immediate: true })
+
+const effectiveIndicatorSet = computed(() =>
+  activeIndicators.value.filter((key) => !unsupportedIndicators.value.includes(key))
+)
+
 const initChart = async () => {
   if (!chartRef.value) return
 
-  const echarts = (await import('echarts')).default
+  const echarts = await import('echarts')
   
   chartInstance.value = echarts.init(chartRef.value, 'dark', {
     renderer: 'canvas',
@@ -202,9 +339,13 @@ const initChart = async () => {
 }
 
 const updateChart = () => {
-  if (!chartInstance.value || !props.data || props.data.length === 0) return
+  if (!chartInstance.value) return
 
-  const data = props.data
+  const data = displayData.value
+  if (!data || data.length === 0) {
+    chartInstance.value.clear()
+    return
+  }
   const dates = data.map(d => d.date)
   const opens = data.map(d => d.open)
   const closes = data.map(d => d.close)
@@ -212,7 +353,7 @@ const updateChart = () => {
   const highs = data.map(d => d.high)
   const volumes = data.map(d => d.volume)
 
-  const isUp = closes.map((close, i) => i > 0 && close >= opens[i])
+  const isUp = closes.map((close, i) => close >= opens[i])
 
   const candlestickData = data.map((d) => [
     d.open,
@@ -224,7 +365,12 @@ const updateChart = () => {
   const series: any[] = [
     {
       type: 'candlestick',
+      name: 'K',
+      xAxisIndex: 0,
+      yAxisIndex: 0,
       data: candlestickData,
+      barMaxWidth: 16,
+      barMinWidth: 5,
       itemStyle: {
         color: '#00C853',
         color0: '#FF1744',
@@ -234,37 +380,48 @@ const updateChart = () => {
     },
   ]
 
-  if (activeIndicators.value.includes('ma')) {
+  if (effectiveIndicatorSet.value.includes('ma')) {
     const ma5 = calculateMA(data, 5)
     const ma10 = calculateMA(data, 10)
     const ma20 = calculateMA(data, 20)
     const ma60 = calculateMA(data, 60)
 
     series.push(
-      { type: 'line', name: 'MA5', data: ma5, lineStyle: { color: '#FF9800', width: 1 }, smooth: true },
-      { type: 'line', name: 'MA10', data: ma10, lineStyle: { color: '#2196F3', width: 1 }, smooth: true },
-      { type: 'line', name: 'MA20', data: ma20, lineStyle: { color: '#9C27B0', width: 1 }, smooth: true },
-      { type: 'line', name: 'MA60', data: ma60, lineStyle: { color: '#FF5722', width: 1 }, smooth: true },
+      { type: 'line', name: 'MA5', xAxisIndex: 0, yAxisIndex: 0, data: ma5, lineStyle: { color: '#FF9800', width: 1 }, smooth: true },
+      { type: 'line', name: 'MA10', xAxisIndex: 0, yAxisIndex: 0, data: ma10, lineStyle: { color: '#2196F3', width: 1 }, smooth: true },
+      { type: 'line', name: 'MA20', xAxisIndex: 0, yAxisIndex: 0, data: ma20, lineStyle: { color: '#9C27B0', width: 1 }, smooth: true },
+      { type: 'line', name: 'MA60', xAxisIndex: 0, yAxisIndex: 0, data: ma60, lineStyle: { color: '#FF5722', width: 1 }, smooth: true },
     )
   }
 
-  if (activeIndicators.value.includes('boll')) {
+  if (effectiveIndicatorSet.value.includes('ema')) {
+    const ema12 = calculateEMA(data, 12)
+    const ema26 = calculateEMA(data, 26)
+    series.push(
+      { type: 'line', name: 'EMA12', xAxisIndex: 0, yAxisIndex: 0, data: ema12, lineStyle: { color: '#26C6DA', width: 1 }, smooth: true },
+      { type: 'line', name: 'EMA26', xAxisIndex: 0, yAxisIndex: 0, data: ema26, lineStyle: { color: '#AB47BC', width: 1 }, smooth: true },
+    )
+  }
+
+  if (effectiveIndicatorSet.value.includes('boll')) {
     const boll = calculateBOLL(data)
     series.push(
-      { type: 'line', name: 'BOLL_UPPER', data: boll.upper, lineStyle: { color: 'rgba(255, 255, 255, 0.3)', width: 1, type: 'dashed' }, smooth: true },
-      { type: 'line', name: 'BOLL_MID', data: boll.mid, lineStyle: { color: '#E91E63', width: 1 }, smooth: true },
-      { type: 'line', name: 'BOLL_LOWER', data: boll.lower, lineStyle: { color: 'rgba(255, 255, 255, 0.3)', width: 1, type: 'dashed' }, smooth: true },
+      { type: 'line', name: 'BOLL_UPPER', xAxisIndex: 0, yAxisIndex: 0, data: boll.upper, lineStyle: { color: 'rgba(255, 255, 255, 0.3)', width: 1, type: 'dashed' }, smooth: true },
+      { type: 'line', name: 'BOLL_MID', xAxisIndex: 0, yAxisIndex: 0, data: boll.mid, lineStyle: { color: '#E91E63', width: 1 }, smooth: true },
+      { type: 'line', name: 'BOLL_LOWER', xAxisIndex: 0, yAxisIndex: 0, data: boll.lower, lineStyle: { color: 'rgba(255, 255, 255, 0.3)', width: 1, type: 'dashed' }, smooth: true },
     )
   }
 
   if (props.showVolume) {
-    const volumeData = volumes.map((v, i) => [i, v, isUp[i] ? 1 : -1])
+    const volumeData = volumes
     series.push({
       type: 'bar',
       name: 'Volume',
+      xAxisIndex: 1,
+      yAxisIndex: 1,
       data: volumeData,
       itemStyle: {
-        color: (params: any) => params.data[2] === 1 ? 'rgba(0, 200, 83, 0.6)' : 'rgba(255, 23, 68, 0.6)',
+        color: (params: any) => (isUp[params.dataIndex] ? 'rgba(0, 200, 83, 0.6)' : 'rgba(255, 23, 68, 0.6)'),
       },
     })
   }
@@ -291,11 +448,11 @@ const updateChart = () => {
         const dataIndex = params[0].dataIndex
         const kline = data[dataIndex]
         let html = `<div style="font-weight: 600; margin-bottom: 8px;">${kline.date}</div>`
-        html += `<div>Open: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${opens[dataIndex].toFixed(2)}</span></div>`
-        html += `<div>High: <span style="color: #FF9800">${highs[dataIndex].toFixed(2)}</span></div>`
-        html += `<div>Low: <span style="color: #2196F3">${lows[dataIndex].toFixed(2)}</span></div>`
-        html += `<div>Close: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${closes[dataIndex].toFixed(2)}</span></div>`
-        html += `<div>Volume: <span style="color: #E91E63">${(volumes[dataIndex] / 10000).toFixed(2)}万</span></div>`
+        html += `<div>${t('label_open')}: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${opens[dataIndex].toFixed(2)}</span></div>`
+        html += `<div>${t('label_high')}: <span style="color: #FF9800">${highs[dataIndex].toFixed(2)}</span></div>`
+        html += `<div>${t('label_low')}: <span style="color: #2196F3">${lows[dataIndex].toFixed(2)}</span></div>`
+        html += `<div>${t('label_close')}: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${closes[dataIndex].toFixed(2)}</span></div>`
+        html += `<div>${t('label_volume')}: <span style="color: #E91E63">${(volumes[dataIndex] / 10000).toFixed(2)}万</span></div>`
         return html
       },
     },
@@ -307,7 +464,7 @@ const updateChart = () => {
       {
         type: 'category',
         data: dates,
-        boundaryGap: false,
+        boundaryGap: true,
         axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
         axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 },
         splitLine: { show: false },
@@ -316,7 +473,7 @@ const updateChart = () => {
         type: 'category',
         gridIndex: 1,
         data: dates,
-        boundaryGap: false,
+        boundaryGap: true,
         axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
         axisLabel: { show: false },
         splitLine: { show: false },
@@ -358,11 +515,32 @@ watch(() => props.data, () => {
   updateChart()
 }, { deep: true })
 
+watch(() => t('label_open'), () => {
+  updateChart()
+})
+
 watch(() => props.loading, (loading) => {
   if (!loading) {
     setTimeout(updateChart, 100)
   }
 })
+
+watch(selectedPeriod, () => {
+  updateChart()
+})
+
+watch(selectedAdjust, () => {
+  updateChart()
+})
+
+watch(
+  () => props.adjust,
+  (adjust) => {
+    if (!adjust) return
+    selectedAdjust.value = adjust
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   initChart()
@@ -461,6 +639,28 @@ onUnmounted(() => {
 .chart-container {
   height: calc(100% - 52px);
   min-height: 348px;
+}
+
+.chart-hint {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 60px;
+  z-index: 3;
+  color: rgba(255, 196, 0, 0.92);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 52px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  pointer-events: none;
 }
 
 .chart-loading {

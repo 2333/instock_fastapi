@@ -4,13 +4,14 @@ from datetime import datetime
 from decimal import Decimal
 from typing import List
 
-from sqlalchemy import select, and_
+import numpy as np
+import talib as tl
+from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import async_session_factory
 from app.models.stock_model import DailyBar, Indicator
-from core.crawling.eastmoney import EastMoneyCrawler
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +25,19 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     )
     bars = result.scalars().all()
 
-    if len(bars) < 5:
+    if len(bars) < 30:
         return
 
-    closes = [float(bar.close) for bar in bars]
+    closes = np.array([float(bar.close) for bar in bars], dtype=np.float64)
+    highs = np.array([float(bar.high) for bar in bars], dtype=np.float64)
+    lows = np.array([float(bar.low) for bar in bars], dtype=np.float64)
+    volumes = np.array([float(bar.vol) for bar in bars], dtype=np.float64)
 
     indicators_data = []
 
     for i, bar in enumerate(bars):
-        close = float(bar.close)
-
         if i >= 4:
-            ma5 = sum(closes[i - 4 : i + 1]) / 5
+            ma5 = np.mean(closes[max(0, i - 4) : i + 1])
             indicators_data.append(
                 {
                     "ts_code": ts_code,
@@ -46,7 +48,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
             )
 
         if i >= 9:
-            ma10 = sum(closes[i - 9 : i + 1]) / 10
+            ma10 = np.mean(closes[max(0, i - 9) : i + 1])
             indicators_data.append(
                 {
                     "ts_code": ts_code,
@@ -57,7 +59,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
             )
 
         if i >= 19:
-            ma20 = sum(closes[i - 19 : i + 1]) / 20
+            ma20 = np.mean(closes[max(0, i - 19) : i + 1])
             indicators_data.append(
                 {
                     "ts_code": ts_code,
@@ -67,30 +69,125 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                 }
             )
 
-        if i >= 4 and closes[i - 4] != 0:
-            rsi = 100 - (
-                100
-                / (1 + (close - closes[i - 4]) / abs(closes[i - 4]) if closes[i - 4] != 0 else 0)
-            )
+        if i >= 29:
+            ma60 = np.mean(closes[max(0, i - 29) : i + 1])
             indicators_data.append(
                 {
                     "ts_code": ts_code,
                     "trade_date": bar.trade_date,
-                    "indicator_name": "RSI",
-                    "indicator_value": Decimal(str(round(rsi, 2))),
+                    "indicator_name": "MA60",
+                    "indicator_value": Decimal(str(round(ma60, 2))),
                 }
             )
 
-        if i >= 1:
-            diff = close - closes[i - 1]
-            indicators_data.append(
-                {
-                    "ts_code": ts_code,
-                    "trade_date": bar.trade_date,
-                    "indicator_name": "PRICE_CHANGE",
-                    "indicator_value": Decimal(str(round(diff, 2))),
-                }
-            )
+    if len(closes) >= 14:
+        try:
+            rsi = tl.RSI(closes, timeperiod=14)
+            for i, bar in enumerate(bars):
+                if not np.isnan(rsi[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "RSI14",
+                            "indicator_value": Decimal(str(round(rsi[i], 2))),
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"RSI计算失败 {ts_code}: {e}")
+
+    if len(closes) >= 26:
+        try:
+            macd, macd_signal, macd_hist = tl.MACD(closes)
+            for i, bar in enumerate(bars):
+                if not np.isnan(macd[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "MACD",
+                            "indicator_value": Decimal(str(round(macd[i], 4))),
+                        }
+                    )
+                if not np.isnan(macd_signal[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "MACD_SIGNAL",
+                            "indicator_value": Decimal(str(round(macd_signal[i], 4))),
+                        }
+                    )
+                if not np.isnan(macd_hist[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "MACD_HIST",
+                            "indicator_value": Decimal(str(round(macd_hist[i], 4))),
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"MACD计算失败 {ts_code}: {e}")
+
+    if len(closes) >= 20:
+        try:
+            upper, middle, lower = tl.BBANDS(closes, timeperiod=20)
+            for i, bar in enumerate(bars):
+                if not np.isnan(upper[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "BOLL_UPPER",
+                            "indicator_value": Decimal(str(round(upper[i], 2))),
+                        }
+                    )
+                if not np.isnan(middle[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "BOLL_MIDDLE",
+                            "indicator_value": Decimal(str(round(middle[i], 2))),
+                        }
+                    )
+                if not np.isnan(lower[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "BOLL_LOWER",
+                            "indicator_value": Decimal(str(round(lower[i], 2))),
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"布林带计算失败 {ts_code}: {e}")
+
+    if len(closes) >= 9:
+        try:
+            k, d = tl.STOCH(highs, lows, closes)
+            for i, bar in enumerate(bars):
+                if not np.isnan(k[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "K",
+                            "indicator_value": Decimal(str(round(k[i], 2))),
+                        }
+                    )
+                if not np.isnan(d[i]):
+                    indicators_data.append(
+                        {
+                            "ts_code": ts_code,
+                            "trade_date": bar.trade_date,
+                            "indicator_name": "D",
+                            "indicator_value": Decimal(str(round(d[i], 2))),
+                        }
+                    )
+        except Exception as e:
+            logger.debug(f"KDJ计算失败 {ts_code}: {e}")
 
     for ind in indicators_data:
         stmt = (
@@ -117,7 +214,7 @@ async def run():
                 select(DailyBar.trade_date)
                 .distinct()
                 .order_by(DailyBar.trade_date.desc())
-                .limit(30)
+                .limit(60)
             )
             trade_dates = [row[0] for row in result.fetchall()]
 
@@ -125,17 +222,29 @@ async def run():
                 logger.warning("没有找到K线数据")
                 return
 
-            result = await session.execute(select(DailyBar.ts_code).distinct().limit(100))
+            result = await session.execute(
+                text("""
+                    SELECT DISTINCT db.ts_code 
+                    FROM daily_bars db
+                    JOIN stocks s ON s.ts_code = db.ts_code
+                    WHERE s.is_etf = false AND s.list_status = 'L'
+                """)
+            )
             ts_codes = [row[0] for row in result.fetchall()]
+            logger.info(f"开始计算指标，共 {len(ts_codes)} 只股票")
 
-            for ts_code in ts_codes:
+            success_count = 0
+
+            for idx, ts_code in enumerate(ts_codes):
                 try:
                     await calculate_indicators(session, ts_code, trade_dates)
-                    logger.info(f"计算指标完成: {ts_code}")
+                    success_count += 1
+                    if (idx + 1) % 500 == 0:
+                        logger.info(f"进度: {idx + 1}/{len(ts_codes)}")
                 except Exception as e:
                     logger.error(f"计算指标失败 {ts_code}: {e}")
 
-        logger.info("指标计算任务完成")
+            logger.info(f"指标计算任务完成: 成功处理 {success_count}/{len(ts_codes)} 只股票")
     except Exception as e:
         logger.error(f"指标计算任务失败: {e}", exc_info=True)
 

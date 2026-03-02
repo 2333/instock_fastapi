@@ -6,6 +6,9 @@
         <p class="subtitle">根据条件筛选和选择股票</p>
       </div>
       <div class="header-right">
+        <button class="btn btn-secondary" @click="toggleCriteriaPanel">
+          {{ criteriaCollapsed ? '展开条件' : '收起条件' }}
+        </button>
         <button class="btn btn-secondary" @click="saveCriteria">保存条件</button>
         <button class="btn btn-primary" @click="runSelection" :disabled="loading">
           {{ loading ? '运行中...' : '开始筛选' }}
@@ -14,7 +17,12 @@
     </div>
 
     <div class="selection-layout">
-      <aside class="criteria-panel">
+      <aside
+        v-show="!criteriaCollapsed"
+        ref="criteriaPanelRef"
+        class="criteria-panel"
+        :style="{ width: `${criteriaPanelWidth}px` }"
+      >
         <div class="panel-section">
           <h3>价格条件</h3>
           <div class="criteria-group">
@@ -134,7 +142,7 @@
                 <tr 
                   v-for="stock in sortedResults" 
                   :key="stock.code"
-                  @click="$router.push(`/stocks/${stock.code}`)"
+                  @click="$router.push(`/stock/${stock.code}`)"
                 >
                   <td class="stock-code">{{ stock.code }}</td>
                   <td class="stock-name">{{ stock.name || '-' }}</td>
@@ -154,8 +162,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { strategyApi, attentionApi } from '@/api'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, inject } from 'vue'
+import { selectionApi } from '@/api'
 
 interface StockResult {
   ts_code: string
@@ -170,13 +178,33 @@ const loading = ref(false)
 const hasResults = ref(false)
 const results = ref<StockResult[]>([])
 const sortBy = ref('score')
+const criteriaPanelRef = ref<HTMLElement | null>(null)
+const criteriaPanelWidth = ref(360)
+const criteriaCollapsed = ref(false)
+const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
+const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const criteria = reactive({
   priceMin: null as number | null,
   priceMax: null as number | null,
+  market: '' as '' | 'sh' | 'sz',
+  changeMin: null as number | null,
+  changeMax: null as number | null,
+  marketCapMin: null as number | null,
+  marketCapMax: null as number | null,
+  weekChangeMin: null as number | null,
+  weekChangeMax: null as number | null,
   peMin: null as number | null,
   peMax: null as number | null,
+  rsiMin: null as number | null,
+  rsiMax: null as number | null,
+  macdBullish: false,
+  macdBearish: false,
+  volumeRatioMin: null as number | null,
+  volumeRatioMax: null as number | null,
 })
+const CRITERIA_STORAGE_KEY = 'instock_selection_criteria'
 
 const sortedResults = computed(() => {
   const sorted = [...results.value]
@@ -193,10 +221,11 @@ const sortedResults = computed(() => {
 const fetchResults = async () => {
   loading.value = true
   try {
-    const data = await strategyApi.getResults({ limit: 100 })
+    const data = await selectionApi.getHistory({ limit: 100 })
     results.value = (data || []).map((r: any) => ({
       ...r,
-      code: r.symbol || r.ts_code?.split('.')[0],
+      code: r.code || r.symbol || r.ts_code?.split('.')[0],
+      name: r.stock_name || r.name,
     }))
     hasResults.value = results.value.length > 0
   } catch (e) {
@@ -210,30 +239,63 @@ const fetchResults = async () => {
 const runSelection = async () => {
   loading.value = true
   try {
-    await strategyApi.runStrategy('default')
-    await fetchResults()
+    const data = await selectionApi.runSelection(criteria)
+    results.value = (data || []).map((r: any) => ({
+      ...r,
+      code: r.code || r.symbol || r.ts_code?.split('.')[0],
+      name: r.stock_name || r.name,
+    }))
+    hasResults.value = results.value.length > 0
+    showNotification?.('success', `筛选完成，共 ${results.value.length} 只`)
   } catch (e) {
     console.error('Failed to run selection:', e)
+    showNotification?.('error', '执行筛选失败')
   } finally {
     loading.value = false
   }
 }
 
 const saveCriteria = () => {
-  console.log('Saving criteria:', criteria)
+  window.localStorage.setItem(CRITERIA_STORAGE_KEY, JSON.stringify(criteria))
+  showNotification?.('success', '筛选条件已保存')
 }
 
-const addToWatchlist = async (stock: StockResult) => {
-  try {
-    await attentionApi.add(stock.code)
-    alert(`已添加 ${stock.stock_name || stock.code} 到关注列表`)
-  } catch (e) {
-    console.error('Failed to add to watchlist:', e)
+const persistCriteriaWidth = () => {
+  if (!criteriaPanelRef.value) return
+  const width = Math.round(criteriaPanelRef.value.getBoundingClientRect().width)
+  if (width >= 300 && width <= 520) {
+    criteriaPanelWidth.value = width
+    window.localStorage.setItem(CRITERIA_WIDTH_KEY, String(width))
   }
 }
 
+const toggleCriteriaPanel = () => {
+  criteriaCollapsed.value = !criteriaCollapsed.value
+  window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
+}
+
 onMounted(() => {
+  const savedCriteria = window.localStorage.getItem(CRITERIA_STORAGE_KEY)
+  if (savedCriteria) {
+    try {
+      Object.assign(criteria, JSON.parse(savedCriteria))
+    } catch {
+      // ignore broken local cache
+    }
+  }
+  const savedWidth = Number(window.localStorage.getItem(CRITERIA_WIDTH_KEY) || 0)
+  if (savedWidth >= 300 && savedWidth <= 520) {
+    criteriaPanelWidth.value = savedWidth
+  }
+  criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
+  window.addEventListener('mouseup', persistCriteriaWidth)
+  window.addEventListener('touchend', persistCriteriaWidth)
   fetchResults()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', persistCriteriaWidth)
+  window.removeEventListener('touchend', persistCriteriaWidth)
 })
 
 </script>
@@ -302,7 +364,9 @@ onMounted(() => {
 }
 
 .criteria-panel {
-  width: 280px;
+  width: clamp(300px, 24vw, 500px);
+  min-width: 300px;
+  max-width: 520px;
   flex-shrink: 0;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -310,6 +374,8 @@ onMounted(() => {
   padding: 20px;
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+  resize: horizontal;
+  overflow-x: hidden;
 }
 
 .panel-section {
@@ -388,6 +454,20 @@ onMounted(() => {
 .results-panel {
   flex: 1;
   min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .selection-layout {
+    flex-direction: column;
+  }
+
+  .criteria-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    resize: none;
+    max-height: none;
+  }
 }
 
 .empty-state {

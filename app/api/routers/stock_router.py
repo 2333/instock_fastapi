@@ -24,7 +24,8 @@ async def get_stock_detail(
     code: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    adjust: str = Query("bfq", description="复权类型: bfq/qfq/hfq"),
     db: AsyncSession = Depends(get_db),
 ):
     service = StockService(db)
-    return await service.get_stock_detail(code, start_date, end_date)
+    return await service.get_stock_detail(code, start_date, end_date, adjust)

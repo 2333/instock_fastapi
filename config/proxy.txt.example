@@ -1,0 +1,7 @@
+# 代理列表示例（每行一个）
+# 支持格式：
+# 1) ip:port
+# 2) username:password@ip:port
+# 3) http://username:password@ip:port
+
+# 127.0.0.1:7890

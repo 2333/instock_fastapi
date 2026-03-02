@@ -31,15 +31,12 @@ const loadingText = ref('')
 const notificationRef = ref<InstanceType<typeof NotificationContainer> | null>(null)
 
 const handleRefresh = () => {
-  console.log('Refreshing application data...')
   if (notificationRef.value) {
-    notificationRef.value.success('Data refreshed successfully', 'Success')
+    notificationRef.value.success('数据刷新成功', '完成')
   }
 }
 
-const openSettings = () => {
-  console.log('Opening settings...')
-}
+const openSettings = () => {}
 
 provide('showNotification', (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
   if (notificationRef.value) {
@@ -47,9 +44,7 @@ provide('showNotification', (type: 'success' | 'error' | 'warning' | 'info', mes
   }
 })
 
-onMounted(() => {
-  console.log('InStock application initialized')
-})
+onMounted(() => {})
 </script>
 
 <style scoped lang="scss">
