@@ -389,38 +389,50 @@ class EastMoneyCrawler(BaseCrawler):
 
     async def fetch_stock_top(self, date_str: str) -> List[Dict[str, Any]]:
         """获取龙虎榜数据"""
-        url = "http://push2.eastmoney.com/api/qt/stock/get"
+        url = "http://push2.eastmoney.com/api/qt/clist/get"
         params = {
-            "secid": "90.000001",  # 大盘指数
-            "fields": "f43,f44,f45,f46,f47,f48,f49,f50,f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63",
             "pn": 1,
-            "pz": 50,
+            "pz": 100,
+            "po": 1,
+            "np": 1,
+            "ut": "bd341d99f5cc44d2b04b3d5b82f3f85b",
+            "fid": "f62",
+            "fs": "m:90+t:2",
+            "fields": "f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18",
         }
 
         try:
             data = await self._request(url, params=params)
-            if data and "data" in data:
-                return self._parse_top_data(data["data"])
+            if data and "data" in data and data["data"]["diff"]:
+                return self._parse_top_data(data["data"]["diff"], date_str)
             return []
         except Exception as e:
             logger.error(f"获取龙虎榜失败: {e}")
             return []
 
-    def _parse_top_data(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _parse_top_data(self, data: List[Dict], date_str: str) -> List[Dict[str, Any]]:
         """解析龙虎榜数据"""
         result = []
-        for item in data.get("list", []):
+        for item in data:
+            code = item.get("f12", "")
+            name = item.get("f14", "")
+            if not code:
+                continue
+            market = "SZ" if code.startswith(("0", "3")) else "SH"
+            ts_code = f"{code}.SSE" if market == "SH" else f"{code}.SZSE"
             result.append(
                 {
-                    "code": item.get("f14"),
-                    "name": item.get("f12"),
+                    "ts_code": ts_code,
+                    "code": code,
+                    "name": name,
                     "close": item.get("f2"),
-                    "change_pct": item.get("f3"),
+                    "pct_chg": item.get("f3"),
                     "turnover_rate": item.get("f8"),
                     "amount": item.get("f6"),
                     "net_amount": item.get("f9"),
                     "buy_amount": item.get("f10"),
                     "sell_amount": item.get("f11"),
+                    "trade_date": date_str,
                 }
             )
         return result

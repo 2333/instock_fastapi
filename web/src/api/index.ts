@@ -1,24 +1,85 @@
 import axios from 'axios'
+import { ref } from 'vue'
+
+const TOKEN_KEY = 'auth_token'
+const REFRESH_TOKEN_KEY = 'refresh_token'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
 const api = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: API_BASE_URL,
+  timeout: 20000,
 })
+
+const isAuthenticated = ref(!!localStorage.getItem(TOKEN_KEY))
+
+export const authApi = {
+  login: (username: string, password: string) => 
+    api.post('/auth/login', { username, password }) as Promise<{ access_token: string; refresh_token: string }>,
+  
+  register: (username: string, email: string, password: string) =>
+    api.post('/auth/register', { username, email, password }) as Promise<any>,
+  
+  refreshToken: (refreshToken: string) =>
+    api.post('/auth/refresh', { refresh_token: refreshToken }) as Promise<any>,
+
+  getMe: () => api.get('/auth/me') as Promise<any>,
+  
+  getSettings: () => api.get('/auth/settings') as Promise<any>,
+  
+  updateSettings: (settings: any) => api.put('/auth/settings', settings) as Promise<any>,
+  
+  getToken: () => localStorage.getItem(TOKEN_KEY),
+  
+  setToken: (token: string, refreshToken?: string) => {
+    localStorage.setItem(TOKEN_KEY, token)
+    if (refreshToken) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken)
+    }
+    isAuthenticated.value = true
+  },
+  
+  removeToken: () => {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
+    isAuthenticated.value = false
+  },
+  
+  isAuthenticated: () => isAuthenticated.value,
+  
+  authState: isAuthenticated,
+}
 
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    const status = error.response?.status
+    
+    if (status === 401) {
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('refresh_token')
+      isAuthenticated.value = false
+      
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
+    
     console.error('API Error:', error)
     return Promise.reject(error)
   }
 )
 
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY)
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
 export const stockApi = {
   getStocks: (params?: { page?: number; page_size?: number; date?: string }) =>
-    api.get('/stocks', { params }) as Promise<any>,
+    api.get('/stocks', { params }) as Promise<{ items: any[]; total: number; page: number; page_size: number }>,
   
   getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq' }) =>
     api.get(`/stocks/${code}`, { params }) as Promise<any>,
@@ -101,6 +162,20 @@ export const fundFlowApi = {
   
   getConceptFundFlow: (date?: string, limit?: number) =>
     api.get('/fund-flow/sector/concept', { params: { date, limit } }) as Promise<any>,
+}
+
+export const marketApi = {
+  getFundFlowRank: (date?: string, limit?: number) =>
+    api.get('/market/fund-flow', { params: { date, limit } }) as Promise<any>,
+  
+  getBlockTrades: (date?: string, limit?: number) =>
+    api.get('/market/block-trades', { params: { date, limit } }) as Promise<any>,
+  
+  getLHB: (date?: string, limit?: number) =>
+    api.get('/market/lhb', { params: { date, limit } }) as Promise<any>,
+  
+  getNorthBoundFunds: (date?: string, limit?: number) =>
+    api.get('/market/north-bound', { params: { date, limit } }) as Promise<any>,
 }
 
 export const attentionApi = {
