@@ -12,10 +12,21 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import async_session_factory
 from app.models.stock_model import Stock, DailyBar
 from core.crawling.eastmoney import EastMoneyCrawler
-from core.crawling.base import AdjustType
+from core.crawling.base import AdjustType, ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
+
+
+def _build_proxy_pool() -> Optional[ProxyPool]:
+    proxy_file = os.getenv("CRAWLER_PROXY_FILE", "config/proxy.txt")
+    pool = ProxyPool.from_file(proxy_file)
+    if pool.proxies:
+        logger.info("任务代理池已加载: %s 个代理", len(pool.proxies))
+        return pool
+    logger.warning("任务代理池为空，将直连运行（file=%s）", proxy_file)
+    return None
 
 
 async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = False) -> int:
@@ -168,26 +179,41 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict])
 
 async def fetch_and_save_stocks():
     """抓取并保存股票列表"""
-    crawler = EastMoneyCrawler()
+    proxy_pool = _build_proxy_pool()
+    tushare_provider = TushareProvider()
+    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+    crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
 
-    logger.info("Fetching A-stock list...")
-    stocks = await crawler.fetch(data_type="stock_list")
-    logger.info(f"Fetched {len(stocks)} stocks")
+    try:
+        logger.info("Fetching A-stock list (tushare -> baostock -> eastmoney)...")
+        stocks = await tushare_provider.fetch_stock_list()
+        if not stocks:
+            stocks = await baostock_provider.fetch_stock_list()
+        if not stocks:
+            stocks = await crawler.fetch(data_type="stock_list")
+        logger.info(f"Fetched {len(stocks)} stocks")
 
-    async with async_session_factory() as session:
-        count = await save_stocks(session, stocks, is_etf=False)
-        logger.info(f"Saved {count} stocks to database")
+        async with async_session_factory() as session:
+            count = await save_stocks(session, stocks, is_etf=False)
+            logger.info(f"Saved {count} stocks to database")
 
-    logger.info("Fetching ETF list...")
-    etfs = await crawler.fetch(data_type="etf_list")
-    logger.info(f"Fetched {len(etfs)} ETFs")
+        logger.info("Fetching ETF list (tushare -> baostock -> eastmoney)...")
+        etfs = await tushare_provider.fetch_etf_list()
+        if not etfs:
+            etfs = await baostock_provider.fetch_etf_list()
+        if not etfs:
+            etfs = await crawler.fetch(data_type="etf_list")
+        logger.info(f"Fetched {len(etfs)} ETFs")
 
-    async with async_session_factory() as session:
-        count = await save_stocks(session, etfs, is_etf=True)
-        logger.info(f"Saved {count} ETFs to database")
+        async with async_session_factory() as session:
+            count = await save_stocks(session, etfs, is_etf=True)
+            logger.info(f"Saved {count} ETFs to database")
+    finally:
+        await crawler.close()
 
 
 async def _fetch_bars_with_fallback(
+    tushare_provider: TushareProvider,
     baostock_provider: BaoStockProvider,
     em_crawler: EastMoneyCrawler,
     symbol: str,
@@ -197,13 +223,13 @@ async def _fetch_bars_with_fallback(
     max_retries: int = 3,
 ) -> List[dict]:
     bars = []
-    source = "baostock"
+    source = "tushare"
     last_error = None
 
-    # 优先尝试 Baostock（更稳定）
+    # 1) 优先 Tushare（不走代理）
     for attempt in range(max_retries):
         try:
-            bars = await baostock_provider.fetch_kline(
+            bars = await tushare_provider.fetch_kline(
                 code=symbol,
                 start_date=start_date,
                 end_date=end_date,
@@ -211,14 +237,33 @@ async def _fetch_bars_with_fallback(
                 period="daily",
             )
             if bars:
-                source = "baostock"
+                source = "tushare"
                 break
         except Exception as exc:
             last_error = exc
             if attempt < max_retries - 1:
                 await asyncio.sleep(0.5)
 
-    # Baostock 失败或不返回数据时，尝试东方财富
+    # 2) Tushare 失败或无数据，降级 BaoStock（使用项目代理）
+    if not bars:
+        source = "baostock"
+        for attempt in range(max_retries):
+            try:
+                bars = await baostock_provider.fetch_kline(
+                    code=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust=adjust,
+                    period="daily",
+                )
+                if bars:
+                    break
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+
+    # 3) BaoStock 失败或无数据，降级东方财富（使用项目代理）
     if not bars:
         source = "eastmoney"
         for attempt in range(max_retries):
@@ -239,7 +284,7 @@ async def _fetch_bars_with_fallback(
                     await asyncio.sleep(1)
 
     if not bars and last_error:
-        logger.warning("%s 两数据源均失败: %s", symbol, last_error)
+        logger.warning("%s 三数据源均失败: %s", symbol, last_error)
 
     return bars or []
 
@@ -249,6 +294,7 @@ db_semaphore = asyncio.Semaphore(5)
 
 async def _fetch_single_stock(
     semaphore: asyncio.Semaphore,
+    tushare_provider: TushareProvider,
     baostock_provider: BaoStockProvider,
     em_crawler: EastMoneyCrawler,
     stock: Stock,
@@ -260,6 +306,7 @@ async def _fetch_single_stock(
     async with semaphore:
         try:
             bars = await _fetch_bars_with_fallback(
+                tushare_provider=tushare_provider,
                 baostock_provider=baostock_provider,
                 em_crawler=em_crawler,
                 symbol=stock.symbol,
@@ -281,8 +328,10 @@ async def _fetch_single_stock(
 
 async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
     """抓取并保存K线数据"""
-    em_crawler = EastMoneyCrawler()
-    baostock_provider = BaoStockProvider()
+    proxy_pool = _build_proxy_pool()
+    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
+    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+    tushare_provider = TushareProvider()
 
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -300,6 +349,7 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
         tasks = [
             _fetch_single_stock(
                 semaphore=semaphore,
+                tushare_provider=tushare_provider,
                 baostock_provider=baostock_provider,
                 em_crawler=em_crawler,
                 stock=stock,
@@ -426,14 +476,16 @@ async def _get_backfill_progress(session: AsyncSession, start: str, end: str) ->
 
 
 async def run_historical_backfill() -> bool:
-    """增量回补 2020-2025 日线（BaoStock 优先，EastMoney 兜底）"""
+    """增量回补 2020-2025 日线（Tushare 优先，BaoStock 次之，EastMoney 兜底）"""
     start = os.getenv("BACKFILL_START_DATE", "20200101")
     end = os.getenv("BACKFILL_END_DATE", "20251231")
     batch_size = int(os.getenv("BACKFILL_BATCH_SIZE", "150"))
     sleep_seconds = float(os.getenv("BACKFILL_ITEM_SLEEP", "0.05"))
 
-    em_crawler = EastMoneyCrawler()
-    baostock_provider = BaoStockProvider()
+    proxy_pool = _build_proxy_pool()
+    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
+    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+    tushare_provider = TushareProvider()
 
     async with async_session_factory() as session:
         total, covered = await _get_backfill_progress(session, start, end)
@@ -453,6 +505,7 @@ async def run_historical_backfill() -> bool:
         for idx, stock in enumerate(targets, 1):
             try:
                 bars = await _fetch_bars_with_fallback(
+                    tushare_provider=tushare_provider,
                     baostock_provider=baostock_provider,
                     em_crawler=em_crawler,
                     symbol=stock["symbol"],
