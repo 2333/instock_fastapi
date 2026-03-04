@@ -35,6 +35,8 @@ class TushareProvider:
     def __init__(self, config: Optional[TushareConfig] = None):
         self.config = config or TushareConfig()
         self.token = (self.config.token or os.getenv("TUSHARE_TOKEN") or "").strip()
+        self.http_url = os.getenv("TUSHARE_HTTP_URL", "http://lianghua.nanyangqiankun.top")
+        self._compat_enabled = False
 
     async def fetch_stock_list(self) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_stock_list_sync)
@@ -83,13 +85,43 @@ class TushareProvider:
             self._pro = ts.pro_api(self.token)
             return self._pro
 
+    def _enable_compat_mode(self, pro: Any) -> None:
+        """兼容部分渠道 token：注入私有 token 与自定义网关地址后重试。"""
+        try:
+            pro._DataApi__token = self.token
+            pro._DataApi__http_url = self.http_url
+            self._compat_enabled = True
+            logger.warning("已启用 Tushare 兼容模式，http_url=%s", self.http_url)
+        except Exception as exc:
+            logger.error("启用 Tushare 兼容模式失败: %s", exc)
+
+    def _call_pro(self, func_name: str, **kwargs: Any) -> Any:
+        pro = self._get_pro()
+        if not pro:
+            return None
+        fn = getattr(pro, func_name, None)
+        if not callable(fn):
+            logger.warning("Tushare API 不存在: %s", func_name)
+            return None
+
+        self._wait_rate_limit()
+        try:
+            return fn(**kwargs)
+        except Exception as exc:
+            if not self._compat_enabled:
+                logger.warning("Tushare %s 调用失败，尝试兼容模式: %s", func_name, exc)
+                self._enable_compat_mode(pro)
+                self._wait_rate_limit()
+                return fn(**kwargs)
+            raise
+
     def _fetch_stock_list_sync(self) -> List[Dict[str, Any]]:
         pro = self._get_pro()
         if not pro:
             return []
         try:
-            self._wait_rate_limit()
-            df = pro.stock_basic(
+            df = self._call_pro(
+                "stock_basic",
                 exchange="",
                 list_status="L",
                 fields="ts_code,symbol,name,area,industry,market",
@@ -117,8 +149,8 @@ class TushareProvider:
         if not pro:
             return []
         try:
-            self._wait_rate_limit()
-            df = pro.fund_basic(
+            df = self._call_pro(
+                "fund_basic",
                 market="E",
                 status="L",
                 fields="ts_code,symbol,name,market",
@@ -160,9 +192,13 @@ class TushareProvider:
         end = self._to_ymd(end_date, default="20991231")
 
         try:
-            self._wait_rate_limit()
             if adjust == AdjustType.NO_ADJUST:
-                df = pro.daily(ts_code=ts_code, start_date=start, end_date=end)
+                df = self._call_pro(
+                    "daily",
+                    ts_code=ts_code,
+                    start_date=start,
+                    end_date=end,
+                )
             else:
                 import tushare as ts  # type: ignore
 
@@ -213,8 +249,7 @@ class TushareProvider:
         trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
 
         try:
-            self._wait_rate_limit()
-            df = pro.moneyflow_mkt_dc(trade_date=trade_date)
+            df = self._call_pro("moneyflow_mkt_dc", trade_date=trade_date)
         except Exception as exc:
             logger.warning("Tushare moneyflow_mkt_dc 抓取失败: %s", exc)
             return []
@@ -265,7 +300,16 @@ class TushareProvider:
                 continue
             try:
                 self._wait_rate_limit()
-                df = api(trade_date=trade_date)
+                try:
+                    df = api(trade_date=trade_date)
+                except Exception as exc:
+                    if not self._compat_enabled:
+                        logger.warning("Tushare %s 调用失败，尝试兼容模式: %s", fn, exc)
+                        self._enable_compat_mode(pro)
+                        self._wait_rate_limit()
+                        df = api(trade_date=trade_date)
+                    else:
+                        raise
                 if df is not None and not df.empty:
                     break
             except Exception:
