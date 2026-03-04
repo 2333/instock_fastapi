@@ -28,8 +28,8 @@ class AttentionService:
         ts_code = row[0]
 
         query = text("""
-            INSERT INTO attention (ts_code, user_id)
-            VALUES (:ts_code, 'default')
+            INSERT INTO attention (ts_code, user_id, created_at)
+            VALUES (:ts_code, 'default', NOW())
             ON CONFLICT DO NOTHING
         """)
         await self.db.execute(query, {"ts_code": ts_code})

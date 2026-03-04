@@ -36,18 +36,36 @@
         </button>
       </div>
       <div class="filter-options">
+        <label class="date-filter">
+          <span>交易日</span>
+          <input v-model="selectedDate" type="date" class="filter-input date-input">
+        </label>
         <select v-model="marketFilter" class="filter-select">
           <option value="">全部市场</option>
           <option value="sh">上海</option>
           <option value="sz">深圳</option>
         </select>
-        <select v-model="sortBy" class="filter-select">
-          <option value="code">按代码排序</option>
-          <option value="name">按名称排序</option>
-          <option value="price">按价格排序</option>
-          <option value="change">按涨跌幅排序</option>
+        <select v-model="changeFilter" class="filter-select">
+          <option value="all">全部涨跌</option>
+          <option value="up">仅上涨</option>
+          <option value="down">仅下跌</option>
+          <option value="flat">仅平盘</option>
         </select>
+        <input
+          v-model.number="minAmount"
+          type="number"
+          min="0"
+          step="1000000"
+          class="filter-input"
+          placeholder="最小成交额"
+        >
       </div>
+    </div>
+    <div class="date-hint">
+      <span v-if="effectiveDate">当前展示交易日：{{ effectiveDate }}</span>
+      <span v-if="isDateFallback" class="date-fallback">
+        （{{ selectedDate }} 无数据，已回退到最近交易日）
+      </span>
     </div>
 
     <div v-if="loading" class="loading-state">
@@ -64,14 +82,14 @@
       <table class="stocks-table">
         <thead>
           <tr>
-            <th>代码</th>
-            <th>名称</th>
-            <th>价格</th>
-            <th>涨跌幅</th>
-            <th>成交量</th>
-            <th>成交额</th>
-            <th>最高</th>
-            <th>最低</th>
+            <th class="sortable" @click="updateSort('code')">代码 <span class="sort-indicator">{{ sortIndicator('code') }}</span></th>
+            <th class="sortable" @click="updateSort('name')">名称 <span class="sort-indicator">{{ sortIndicator('name') }}</span></th>
+            <th class="sortable" @click="updateSort('close')">价格 <span class="sort-indicator">{{ sortIndicator('close') }}</span></th>
+            <th class="sortable" @click="updateSort('change_rate')">涨跌幅 <span class="sort-indicator">{{ sortIndicator('change_rate') }}</span></th>
+            <th class="sortable" @click="updateSort('vol')">成交量 <span class="sort-indicator">{{ sortIndicator('vol') }}</span></th>
+            <th class="sortable" @click="updateSort('amount')">成交额 <span class="sort-indicator">{{ sortIndicator('amount') }}</span></th>
+            <th class="sortable" @click="updateSort('high')">最高 <span class="sort-indicator">{{ sortIndicator('high') }}</span></th>
+            <th class="sortable" @click="updateSort('low')">最低 <span class="sort-indicator">{{ sortIndicator('low') }}</span></th>
             <th>操作</th>
           </tr>
         </thead>
@@ -79,7 +97,7 @@
           <tr 
             v-for="stock in filteredStocks" 
             :key="stock.code"
-            @click="$router.push(`/stocks/${stock.code}`)"
+            @click="$router.push(`/stock/${stock.code}`)"
           >
             <td>
               <span class="stock-code">{{ stock.code }}</span>
@@ -99,7 +117,7 @@
             <td>{{ stock.low ? stock.low.toFixed(2) : '-' }}</td>
             <td>
               <div class="action-btns">
-                <button class="action-btn" title="查看图表" @click.stop="$router.push(`/stocks/${stock.code}`)">
+                <button class="action-btn" title="查看图表" @click.stop="$router.push(`/stock/${stock.code}`)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="18" y1="20" x2="18" y2="10" />
                     <line x1="12" y1="20" x2="12" y2="4" />
@@ -127,12 +145,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, inject } from 'vue'
 import { stockApi, attentionApi } from '@/api'
 
 interface Stock {
+  date: string | null
   code: string
   name: string | null
+  industry: string | null
   close: number | null
   change_rate: number | null
   vol: number | null
@@ -144,11 +164,16 @@ interface Stock {
 const searchQuery = ref('')
 const activeTab = ref('all')
 const marketFilter = ref('')
-const sortBy = ref('code')
+const changeFilter = ref('all')
+const minAmount = ref<number | null>(null)
+const selectedDate = ref(getTodayString())
+const sortKey = ref<keyof Stock>('change_rate')
+const sortDirection = ref<'asc' | 'desc'>('desc')
 const currentPage = ref(1)
 const pageSize = 50
 const loading = ref(false)
 const error = ref('')
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const stocks = ref<Stock[]>([])
 
@@ -158,6 +183,33 @@ const tabs = [
   { label: '跌幅榜', value: 'losers' },
   { label: '成交量', value: 'volume' },
 ]
+
+function getTodayString() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const normalizeApiDate = (value: string | null | undefined) => {
+  if (!value) return ''
+  if (value.includes('-')) return value
+  if (value.length === 8) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+  }
+  return value
+}
+
+const effectiveDate = computed(() => {
+  const firstWithDate = stocks.value.find((item) => item.date)
+  return normalizeApiDate(firstWithDate?.date)
+})
+
+const isDateFallback = computed(() => {
+  if (!effectiveDate.value || !selectedDate.value) return false
+  return effectiveDate.value !== selectedDate.value
+})
 
 const getChangeClass = (change: number | null) => {
   if (change === null) return ''
@@ -200,6 +252,8 @@ const filteredStocks = computed(() => {
     result = result.filter(s => (s.change_rate || 0) > 0)
   } else if (activeTab.value === 'losers') {
     result = result.filter(s => (s.change_rate || 0) < 0)
+  } else if (activeTab.value === 'volume') {
+    result = result.filter(s => (s.vol || 0) > 0)
   }
 
   if (marketFilter.value === 'sh') {
@@ -208,24 +262,56 @@ const filteredStocks = computed(() => {
     result = result.filter(s => s.code && (s.code.startsWith('0') || s.code.startsWith('3')))
   }
 
-  result.sort((a, b) => {
-    switch (sortBy.value) {
-      case 'name': return (a.name || '').localeCompare(b.name || '')
-      case 'price': return (b.close || 0) - (a.close || 0)
-      case 'change': return (b.change_rate || 0) - (a.change_rate || 0)
-      default: return (a.code || '').localeCompare(b.code || '')
-    }
-  })
+  if (changeFilter.value === 'up') {
+    result = result.filter((s) => (s.change_rate || 0) > 0)
+  } else if (changeFilter.value === 'down') {
+    result = result.filter((s) => (s.change_rate || 0) < 0)
+  } else if (changeFilter.value === 'flat') {
+    result = result.filter((s) => (s.change_rate || 0) === 0)
+  }
 
-  return result
+  if (minAmount.value !== null && !Number.isNaN(minAmount.value)) {
+    result = result.filter((s) => (s.amount || 0) >= minAmount.value!)
+  }
+
+  const sorted = [...result]
+  sorted.sort((a, b) => compareStock(a, b, sortKey.value, sortDirection.value))
+
+  return sorted
 })
 
-const getLatestTradeDate = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}${month}${day}`
+const compareStock = (
+  a: Stock,
+  b: Stock,
+  key: keyof Stock,
+  direction: 'asc' | 'desc'
+) => {
+  const mult = direction === 'asc' ? 1 : -1
+  const av = a[key]
+  const bv = b[key]
+
+  if (av === null || av === undefined) return 1
+  if (bv === null || bv === undefined) return -1
+
+  if (typeof av === 'number' && typeof bv === 'number') {
+    return (av - bv) * mult
+  }
+
+  return String(av).localeCompare(String(bv), 'zh-CN') * mult
+}
+
+const updateSort = (key: keyof Stock) => {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+  sortKey.value = key
+  sortDirection.value = key === 'code' || key === 'name' ? 'asc' : 'desc'
+}
+
+const sortIndicator = (key: keyof Stock) => {
+  if (sortKey.value !== key) return '↕'
+  return sortDirection.value === 'asc' ? '↑' : '↓'
 }
 
 const fetchStocks = async () => {
@@ -235,7 +321,7 @@ const fetchStocks = async () => {
     const data = await stockApi.getStocks({ 
       page: currentPage.value, 
       page_size: pageSize,
-      date: getLatestTradeDate()
+      date: selectedDate.value.replaceAll('-', '')
     })
     stocks.value = data || []
   } catch (e: any) {
@@ -253,9 +339,9 @@ const refreshData = () => {
 const addToWatchlist = async (stock: Stock) => {
   try {
     await attentionApi.add(stock.code)
-    alert(`已添加 ${stock.name || stock.code} 到关注列表`)
+    showNotification?.('success', `已添加 ${stock.name || stock.code} 到关注列表`)
   } catch (e: any) {
-    alert(e.message || '添加失败')
+    showNotification?.('error', e.message || '添加失败')
   }
 }
 
@@ -264,6 +350,14 @@ onMounted(() => {
 })
 
 watch(currentPage, () => {
+  fetchStocks()
+})
+
+watch(selectedDate, () => {
+  if (currentPage.value !== 1) {
+    currentPage.value = 1
+    return
+  }
   fetchStocks()
 })
 </script>
@@ -391,6 +485,7 @@ watch(currentPage, () => {
 
 .filter-options {
   display: flex;
+  align-items: center;
   gap: 12px;
 }
 
@@ -407,6 +502,46 @@ watch(currentPage, () => {
     outline: none;
     border-color: #2962FF;
   }
+}
+
+.filter-input {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(26, 26, 26, 0.5);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+
+  &:focus {
+    outline: none;
+    border-color: #2962FF;
+  }
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.35);
+  }
+}
+
+.date-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+}
+
+.date-input {
+  min-width: 155px;
+}
+
+.date-hint {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.date-fallback {
+  color: #fbc02d;
 }
 
 .loading-state,
@@ -462,6 +597,18 @@ watch(currentPage, () => {
     font-weight: 600;
     color: rgba(255, 255, 255, 0.5);
     text-transform: uppercase;
+  }
+
+  th.sortable {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .sort-indicator {
+    display: inline-block;
+    margin-left: 4px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
   }
 
   td {

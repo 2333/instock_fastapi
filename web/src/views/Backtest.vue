@@ -6,6 +6,9 @@
         <p class="subtitle">测试和优化您的交易策略</p>
       </div>
       <div class="header-right">
+        <button class="btn btn-secondary" @click="toggleConfigPanel">
+          {{ configCollapsed ? '展开条件' : '收起条件' }}
+        </button>
         <button class="btn btn-secondary" @click="loadTemplate">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -27,7 +30,12 @@
     </div>
 
     <div class="backtest-layout">
-      <aside class="config-panel">
+      <aside
+        v-show="!configCollapsed"
+        ref="configPanelRef"
+        class="config-panel"
+        :style="{ width: `${configPanelWidth}px` }"
+      >
         <div class="config-section">
           <h4>股票选择</h4>
           <div class="config-item">
@@ -274,8 +282,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, shallowRef } from 'vue'
+import { ref, reactive, onMounted, shallowRef, onBeforeUnmount, inject } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import { backtestApi } from '@/api'
 
 interface Trade {
   id: number
@@ -292,6 +301,13 @@ const loading = ref(false)
 const hasResults = ref(false)
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
+const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
+const configPanelRef = ref<HTMLElement | null>(null)
+const configPanelWidth = ref(380)
+const configCollapsed = ref(false)
+const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
+const PANEL_COLLAPSED_KEY = 'instock_backtest_panel_collapsed'
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const config = reactive({
   stockCode: '600519',
@@ -314,74 +330,131 @@ const config = reactive({
 
 const metrics = reactive({
   initialCapital: 100000,
-  finalCapital: 128500,
-  totalReturn: 28.5,
-  annualizedReturn: 12.3,
-  maxDrawdown: -8.5,
-  sharpeRatio: 1.45,
-  winRate: 62.5,
-  totalTrades: 48,
-  winningTrades: 30,
-  profitFactor: 1.85,
-  avgWin: 3200,
-  avgLoss: -1800,
+  finalCapital: 100000,
+  totalReturn: 0,
+  annualizedReturn: 0,
+  maxDrawdown: 0,
+  sharpeRatio: 0,
+  winRate: 0,
+  totalTrades: 0,
+  winningTrades: 0,
+  profitFactor: 0,
+  avgWin: 0,
+  avgLoss: 0,
 })
 
-const trades = ref<Trade[]>([
-  { id: 1, date: '2024-02-10', type: 'BUY', price: 1620.50, quantity: 61, profit: 0, returnPct: 0, holdDays: 0 },
-  { id: 2, date: '2024-02-15', type: 'SELL', price: 1650.00, quantity: 61, profit: 1800, returnPct: 1.82, holdDays: 5 },
-  { id: 3, date: '2024-02-22', type: 'BUY', price: 1635.20, quantity: 61, profit: 0, returnPct: 0, holdDays: 0 },
-  { id: 4, date: '2024-03-05', type: 'SELL', price: 1590.00, quantity: 61, profit: -2760, returnPct: -2.76, holdDays: 12 },
-  { id: 5, date: '2024-03-12', type: 'BUY', price: 1575.80, quantity: 62, profit: 0, returnPct: 0, holdDays: 0 },
-  { id: 6, date: '2024-03-25', type: 'SELL', price: 1680.00, quantity: 62, profit: 6450, returnPct: 6.61, holdDays: 13 },
-])
+const trades = ref<Trade[]>([])
 
-const formatCurrency = (value: number) => {
-  return new Intl.NumberFormat('zh-CN', {
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value)
+
+const formatDate = (d: Date) => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}
+
+const resolveDateRange = () => {
+  const end = new Date()
+  const start = new Date(end)
+  if (config.period === '1y') start.setFullYear(start.getFullYear() - 1)
+  if (config.period === '2y') start.setFullYear(start.getFullYear() - 2)
+  if (config.period === '5y') start.setFullYear(start.getFullYear() - 5)
+  if (config.period === '10y') start.setFullYear(start.getFullYear() - 10)
+  return { start: formatDate(start), end: formatDate(end) }
+}
+
+const persistPanelWidth = () => {
+  if (!configPanelRef.value) return
+  const width = Math.round(configPanelRef.value.getBoundingClientRect().width)
+  if (width >= 320 && width <= 560) {
+    configPanelWidth.value = width
+    window.localStorage.setItem(PANEL_WIDTH_KEY, String(width))
+  }
+}
+
+const toggleConfigPanel = () => {
+  configCollapsed.value = !configCollapsed.value
+  window.localStorage.setItem(PANEL_COLLAPSED_KEY, configCollapsed.value ? '1' : '0')
 }
 
 const loadTemplate = () => {
-  console.log('Loading template...')
+  configCollapsed.value = false
+  window.localStorage.setItem(PANEL_COLLAPSED_KEY, '0')
 }
 
 const runBacktest = async () => {
   loading.value = true
-  await new Promise(resolve => setTimeout(resolve, 3000))
-  hasResults.value = true
-  loading.value = false
-  initEquityChart()
+  try {
+    const range = resolveDateRange()
+    const result = await backtestApi.runBacktest({
+      strategy: config.strategyType,
+      start_date: range.start,
+      end_date: range.end,
+      initial_capital: config.initialCapital,
+      stock_code: config.stockCode,
+    } as any)
+
+    const summary = result?.summary || {}
+    metrics.initialCapital = Number(summary.initial_capital ?? config.initialCapital)
+    metrics.finalCapital = Number(summary.final_capital ?? config.initialCapital)
+    metrics.totalReturn = Number(summary.total_return ?? 0)
+    metrics.annualizedReturn = Number(summary.annual_return ?? 0)
+    metrics.maxDrawdown = Number(summary.max_drawdown ?? 0)
+    metrics.sharpeRatio = Number(summary.sharpe_ratio ?? 0)
+    metrics.winRate = Number(summary.win_rate ?? 0)
+    metrics.totalTrades = Number(summary.total_trades ?? 0)
+    metrics.winningTrades = Number(summary.winning_trades ?? 0)
+    metrics.profitFactor = Number(summary.profit_factor ?? 0)
+    metrics.avgWin = Number(summary.avg_win ?? 0)
+    metrics.avgLoss = Number(summary.avg_loss ?? 0)
+
+    trades.value = (result?.trades || []).map((item: any) => ({
+      id: Number(item.id || 0),
+      date: String(item.date || ''),
+      type: String(item.type || ''),
+      price: Number(item.price || 0),
+      quantity: Number(item.quantity || 0),
+      profit: Number(item.profit || 0),
+      returnPct: Number(item.return_pct || 0),
+      holdDays: Number(item.hold_days || 0),
+    }))
+    equityCurve.value = (result?.equity_curve || []).map((item: any) => ({
+      date: String(item.date || ''),
+      equity: Number(item.equity || 0),
+      benchmark: Number(item.benchmark || 0),
+    }))
+
+    hasResults.value = true
+    await initEquityChart()
+    showNotification?.('success', '回测完成')
+  } catch (e) {
+    showNotification?.('error', '回测执行失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 const initEquityChart = async () => {
   if (!equityChartRef.value) return
-
-  const echarts = (await import('echarts')).default
-  equityChartInstance.value = echarts.init(equityChartRef.value, 'dark', {
-    renderer: 'canvas',
-  })
-
-  const dates = Array.from({ length: 252 }, (_, i) => {
-    const date = new Date()
-    date.setDate(date.getDate() - (251 - i))
-    return date.toISOString().split('T')[0]
-  })
-
-  const equityData = [100000]
-  for (let i = 1; i < 252; i++) {
-    const change = (Math.random() - 0.48) * 2
-    equityData.push(equityData[i - 1] * (1 + change / 100))
+  const points = equityCurve.value
+  if (!points.length) {
+    equityChartInstance.value?.clear()
+    return
   }
 
-  const benchmarkData = [100000]
-  for (let i = 1; i < 252; i++) {
-    const change = (Math.random() - 0.49) * 1.5
-    benchmarkData.push(benchmarkData[i - 1] * (1 + change / 100))
-  }
+  const echarts = await import('echarts')
+  equityChartInstance.value = echarts.init(equityChartRef.value, 'dark', { renderer: 'canvas' })
+
+  const dates = points.map((p) => p.date)
+  const equityData = points.map((p) => p.equity)
+  const benchmarkData = points.map((p) => p.benchmark)
 
   const option = {
     backgroundColor: 'transparent',
@@ -393,64 +466,42 @@ const initEquityChart = async () => {
       formatter: (params: any) => {
         let html = `<div style="font-weight: 600; margin-bottom: 8px;">${params[0].axisValue}</div>`
         params.forEach((p: any) => {
-          html += `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-            <span style="width: 10px; height: 10px; border-radius: 2px; background: ${p.color};"></span>
-            <span>${p.seriesName}: ${formatCurrency(p.value)}</span>
-          </div>`
+          html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="width:10px;height:10px;border-radius:2px;background:${p.color};"></span><span>${p.seriesName}: ${formatCurrency(p.value)}</span></div>`
         })
         return html
       },
     },
     legend: { show: false },
     grid: { left: 60, right: 20, top: 20, bottom: 30 },
-    xAxis: {
-      type: 'category',
-      data: dates,
-      axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-      axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 },
-      splitLine: { show: false },
-    },
+    xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } }, axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 }, splitLine: { show: false } },
     yAxis: {
       scale: true,
       axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-      axisLabel: {
-        color: 'rgba(255, 255, 255, 0.5)',
-        fontSize: 10,
-        formatter: (value: number) => (value / 10000).toFixed(0) + '万',
-      },
+      axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10, formatter: (value: number) => (value / 10000).toFixed(0) + '万' },
       splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } },
     },
     series: [
-      {
-        name: 'Portfolio',
-        type: 'line',
-        data: equityData,
-        smooth: true,
-        lineStyle: { width: 2, color: '#2962FF' },
-        itemStyle: { color: '#2962FF' },
-      },
-      {
-        name: 'Benchmark',
-        type: 'line',
-        data: benchmarkData,
-        smooth: true,
-        lineStyle: { width: 1.5, color: 'rgba(255, 255, 255, 0.4)' },
-        itemStyle: { color: 'rgba(255, 255, 255, 0.4)' },
-      },
+      { name: '组合净值', type: 'line', data: equityData, smooth: true, lineStyle: { width: 2, color: '#2962FF' }, itemStyle: { color: '#2962FF' } },
+      { name: '买入持有', type: 'line', data: benchmarkData, smooth: true, lineStyle: { width: 1.5, color: 'rgba(255, 255, 255, 0.4)' }, itemStyle: { color: 'rgba(255, 255, 255, 0.4)' } },
     ],
   }
 
   equityChartInstance.value.setOption(option)
-
-  useResizeObserver(equityChartRef, () => {
-    equityChartInstance.value?.resize()
-  })
+  useResizeObserver(equityChartRef, () => equityChartInstance.value?.resize())
 }
 
 onMounted(() => {
-  if (hasResults.value) {
-    initEquityChart()
-  }
+  const savedWidth = Number(window.localStorage.getItem(PANEL_WIDTH_KEY) || 0)
+  if (savedWidth >= 320 && savedWidth <= 560) configPanelWidth.value = savedWidth
+  configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
+  window.addEventListener('mouseup', persistPanelWidth)
+  window.addEventListener('touchend', persistPanelWidth)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('mouseup', persistPanelWidth)
+  window.removeEventListener('touchend', persistPanelWidth)
+  equityChartInstance.value?.dispose()
 })
 </script>
 
@@ -539,7 +590,9 @@ onMounted(() => {
 }
 
 .config-panel {
-  width: 320px;
+  width: clamp(320px, 28vw, 520px);
+  min-width: 320px;
+  max-width: 560px;
   flex-shrink: 0;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -547,6 +600,8 @@ onMounted(() => {
   padding: 20px;
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+  resize: horizontal;
+  overflow-x: hidden;
 }
 
 .config-section {
@@ -616,6 +671,20 @@ onMounted(() => {
 .results-panel {
   flex: 1;
   min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .backtest-layout {
+    flex-direction: column;
+  }
+
+  .config-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    resize: none;
+    max-height: none;
+  }
 }
 
 .empty-state {

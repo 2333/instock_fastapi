@@ -1,0 +1,15 @@
+{
+    "proxy_api": {
+        "url_base": "http://api2.uuhttp.com:39003/index/api/return_data",
+        "params": {
+            "mode": "http",
+            "connect_type": "account",
+            "show_up": "1",
+            "b_time": "450",
+            "return_type": "1",
+            "line_break": "1",
+            "balance": "0",
+            "secert": "MTM4MTEyNzU3Mzc6Mzg2YWQ0ZjY3MzZkNjQxZDE0M2E2MGM1ZmU2Zjk5ZDQ%3D"
+        }
+    }
+}

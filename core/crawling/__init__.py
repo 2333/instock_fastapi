@@ -21,6 +21,7 @@ from .base import (
 from .eastmoney import (
     EastMoneyCrawler,
 )
+from .baostock_provider import BaoStockProvider, BaoStockConfig
 
 __all__ = [
     "BaseCrawler",
@@ -33,4 +34,6 @@ __all__ = [
     "DataProvider",
     "create_crawler",
     "EastMoneyCrawler",
+    "BaoStockProvider",
+    "BaoStockConfig",
 ]

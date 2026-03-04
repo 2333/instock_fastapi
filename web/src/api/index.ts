@@ -20,7 +20,7 @@ export const stockApi = {
   getStocks: (params?: { page?: number; page_size?: number; date?: string }) =>
     api.get('/stocks', { params }) as Promise<any>,
   
-  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string }) =>
+  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq' }) =>
     api.get(`/stocks/${code}`, { params }) as Promise<any>,
 }
 
@@ -43,7 +43,21 @@ export const patternApi = {
   getPatterns: (code: string, params?: { start_date?: string; end_date?: string; limit?: number }) =>
     api.get('/patterns', { params: { code, ...params } }) as Promise<any>,
   
-  getTodayPatterns: (params?: { signal?: string; limit?: number }) =>
+  getTodayPatterns: (params?: {
+    signal?: string
+    start_date?: string
+    end_date?: string
+    min_confidence?: number
+    pattern_names?: string
+    ema_fast?: number
+    ema_slow?: number
+    boll_period?: number
+    boll_std?: number
+    ema_signal?: string
+    boll_signal?: string
+    indicator_mode?: 'all' | 'any'
+    limit?: number
+  }) =>
     api.get('/patterns/today', { params }) as Promise<any>,
 }
 
@@ -63,6 +77,7 @@ export const backtestApi = {
     start_date: string
     end_date: string
     initial_capital: number
+    stock_code?: string
   }) => api.post('/backtest', params) as Promise<any>,
   
   getBacktest: (id: string) => api.get(`/backtest/${id}`) as Promise<any>,
