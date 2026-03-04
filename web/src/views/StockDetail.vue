@@ -27,7 +27,14 @@
 
       <div class="content-grid">
         <div class="main-chart">
-          <KLineChart :title="stockInfo.name" :data="klineData" :loading="loading" />
+          <KLineChart
+            :title="stockInfo.name"
+            :data="klineData"
+            :loading="loading"
+            :adjust="currentAdjust"
+            :external-hint="chartHint"
+            @adjustChange="handleAdjustChange"
+          />
         </div>
 
         <aside class="side-panel">
@@ -68,7 +75,7 @@
           <div class="panel-section">
             <h3>快速操作</h3>
             <div class="action-buttons">
-              <button class="action-btn primary" @click="showBacktest = true">
+              <button class="action-btn primary" @click="goBacktest">
                 <span class="btn-icon">⚡</span>
                 <span>回测策略</span>
               </button>
@@ -115,9 +122,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted, computed, watch, inject } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { stockApi, patternApi, attentionApi } from '@/api'
+import KLineChart from '@/components/charts/KLineChart.vue'
 
 interface KlineData {
   date: string
@@ -126,6 +134,7 @@ interface KlineData {
   low: number
   close: number
   volume: number
+  amount?: number
 }
 
 interface BarData {
@@ -139,13 +148,16 @@ interface BarData {
 }
 
 const route = useRoute()
+const router = useRouter()
 const loading = ref(false)
-const showBacktest = ref(false)
 const inWatchlist = ref(false)
 
 const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
 const patterns = ref<any[]>([])
+const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
+const chartHint = ref('')
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
 
@@ -158,6 +170,7 @@ const latestBar = computed<BarData | null>(() => {
       low: last.low,
       close: last.close,
       vol: last.volume,
+      amount: last.amount,
     }
   }
   return null
@@ -204,19 +217,35 @@ const getPatternLabel = (name: string) => {
   return labels[name] || name
 }
 
-const fetchStockDetail = async () => {
+const fetchStockDetail = async (
+  adjust: 'bfq' | 'qfq' | 'hfq' = currentAdjust.value,
+  refreshPatterns = false
+) => {
   loading.value = true
   try {
     const endDate = getLatestTradeDate()
     const startDate = getStartDate(180)
     
-    const [stockData, patternsData] = await Promise.all([
-      stockApi.getStockDetail(code.value, { start_date: startDate, end_date: endDate }),
-      patternApi.getPatterns(code.value, { limit: 10 }).catch(() => []),
-    ])
+    const stockPromise = stockApi.getStockDetail(code.value, { start_date: startDate, end_date: endDate, adjust })
+    const patternPromise = refreshPatterns
+      ? patternApi.getPatterns(code.value, { limit: 10 }).catch((e: any) => {
+          console.error('获取形态数据失败:', e)
+          return []
+        })
+      : Promise.resolve(patterns.value)
+    const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
     
     stockInfo.value = stockData
-    patterns.value = patternsData || []
+    chartHint.value =
+      stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
+        ? '当前复权数据暂不可用，已自动回退为不复权数据'
+        : ''
+    
+    patterns.value = (patternsData || []).map((p: any) => ({
+      ...p,
+      trade_date: p.trade_date || '',
+      confidence: p.confidence ? Math.round(p.confidence) : 0,
+    }))
     
     if (stockData?.bars) {
       klineData.value = stockData.bars.map((bar: any) => ({
@@ -226,8 +255,10 @@ const fetchStockDetail = async () => {
         low: Number(bar.low),
         close: Number(bar.close),
         volume: Number(bar.vol),
+        amount: Number(bar.amount),
       }))
     }
+    await syncWatchlistStatus()
   } catch (e) {
     console.error('Failed to fetch stock detail:', e)
   } finally {
@@ -252,6 +283,13 @@ const getStartDate = (daysBack: number) => {
   return `${year}${month}${day}`
 }
 
+const handleAdjustChange = (adjust: string) => {
+  const nextAdjust = (adjust || 'bfq') as 'bfq' | 'qfq' | 'hfq'
+  if (nextAdjust === currentAdjust.value) return
+  currentAdjust.value = nextAdjust
+  fetchStockDetail(nextAdjust)
+}
+
 const addToWatchlist = async () => {
   try {
     if (inWatchlist.value) {
@@ -260,22 +298,41 @@ const addToWatchlist = async () => {
       await attentionApi.add(code.value)
     }
     inWatchlist.value = !inWatchlist.value
+    showNotification?.('success', inWatchlist.value ? '已添加到关注列表' : '已取消关注')
   } catch (e) {
     console.error('Failed to update watchlist:', e)
+    showNotification?.('error', '更新关注状态失败')
   }
 }
 
 const analyzePatterns = () => {
-  console.log('Analyzing patterns for', code.value)
+  router.push({ path: '/patterns', query: { code: code.value } })
+}
+
+const goBacktest = () => {
+  router.push({ path: '/backtest', query: { code: code.value } })
+}
+
+const syncWatchlistStatus = async () => {
+  try {
+    const list = await attentionApi.getList()
+    const target = code.value
+    inWatchlist.value = (list || []).some((item: any) => {
+      const raw = item.code || item.symbol || item.ts_code?.split('.')?.[0]
+      return raw === target
+    })
+  } catch {
+    inWatchlist.value = false
+  }
 }
 
 // 监听路由参数变化，切换股票时重新加载
 watch(code, () => {
-  fetchStockDetail()
+  fetchStockDetail(currentAdjust.value, true)
 })
 
 onMounted(() => {
-  fetchStockDetail()
+  fetchStockDetail(currentAdjust.value, true)
 })
 </script>
 

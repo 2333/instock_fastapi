@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
+from datetime import datetime
 
 
 class StockSpotResponse(BaseModel):
@@ -29,6 +30,9 @@ class StockSpotResponse(BaseModel):
     list_date: Optional[str] = None
     is_etf: Optional[bool] = None
     bars: Optional[list] = None
+    adjust_requested: Optional[str] = None
+    adjust_applied: Optional[str] = None
+    adjust_note: Optional[str] = None
 
 
 class StockDetailResponse(StockSpotResponse):
@@ -65,6 +69,6 @@ class AttentionResponse(BaseModel):
     id: int
     code: Optional[str] = None
     name: Optional[str] = None
-    created_at: Optional[str] = None
+    created_at: Optional[datetime] = None
     ts_code: Optional[str] = None
     stock_name: Optional[str] = None

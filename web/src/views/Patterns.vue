@@ -102,6 +102,35 @@
         </div>
 
         <div class="filter-section">
+          <h4>技术指标筛选</h4>
+          <div class="input-group">
+            <label>EMA状态</label>
+            <select v-model="emaSignalFilter" class="select-full">
+              <option value="">全部</option>
+              <option value="bullish">多头</option>
+              <option value="bearish">空头</option>
+              <option value="neutral">中性</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>BOLL状态</label>
+            <select v-model="bollSignalFilter" class="select-full">
+              <option value="">全部</option>
+              <option value="breakout">上轨突破</option>
+              <option value="breakdown">下轨跌破</option>
+              <option value="inside">轨道内</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>组合逻辑</label>
+            <select v-model="indicatorMode" class="select-full">
+              <option value="all">AND（都满足）</option>
+              <option value="any">OR（任一满足）</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="filter-section">
           <h4>置信度</h4>
           <div class="range-slider">
             <input 
@@ -153,6 +182,7 @@
                 <th @click="sortBy = 'signal'" class="sortable">信号</th>
                 <th @click="sortBy = 'confidence'" class="sortable">置信度</th>
                 <th @click="sortBy = 'date'" class="sortable">日期</th>
+                <th>技术信号</th>
                 <th>目标/止损</th>
                 <th>操作</th>
               </tr>
@@ -162,6 +192,13 @@
                 v-for="result in paginatedResults" 
                 :key="`${result.code}-${result.pattern_name}`"
               >
+                <td class="checkbox-col">
+                  <input
+                    type="checkbox"
+                    :value="`${result.code}-${result.pattern_name}-${result.trade_date}`"
+                    v-model="selectedResults"
+                  >
+                </td>
                 <td>
                   <div class="stock-cell">
                     <span class="stock-code">{{ result.code }}</span>
@@ -189,6 +226,15 @@
                   </div>
                 </td>
                 <td>{{ result.trade_date }}</td>
+                <td>
+                  <div class="tech-tags">
+                    <span class="tech-tag">{{ getEmaLabel(result.ema_signal) }}</span>
+                    <span class="tech-tag">{{ getBollLabel(result.boll_signal) }}</span>
+                  </div>
+                </td>
+                <td>
+                  <span class="target-stop">- / -</span>
+                </td>
                 <td>
                   <div class="action-buttons">
                     <button class="action-btn" title="查看图表" @click="viewChart(result)">
@@ -303,6 +349,28 @@
                 </div>
               </div>
             </div>
+
+            <div class="config-section">
+              <h4>技术指标参数</h4>
+              <div class="config-grid">
+                <div class="config-item">
+                  <label>EMA 快线</label>
+                  <input type="number" v-model.number="config.emaFast" class="input-number" min="2" max="120">
+                </div>
+                <div class="config-item">
+                  <label>EMA 慢线</label>
+                  <input type="number" v-model.number="config.emaSlow" class="input-number" min="3" max="250">
+                </div>
+                <div class="config-item">
+                  <label>BOLL 周期</label>
+                  <input type="number" v-model.number="config.bollPeriod" class="input-number" min="5" max="120">
+                </div>
+                <div class="config-item">
+                  <label>BOLL 标准差</label>
+                  <input type="number" v-model.number="config.bollStd" class="input-number" step="0.1" min="0.5" max="5">
+                </div>
+              </div>
+            </div>
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" @click="resetConfig">重置默认</button>
@@ -315,8 +383,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { patternApi, attentionApi } from '@/api'
 
 interface PatternResult {
@@ -328,36 +396,132 @@ interface PatternResult {
   pattern_type: string
   confidence: number
   trade_date: string
+  ema_signal?: string
+  boll_signal?: string
 }
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const showConfig = ref(false)
+const selectedPatterns = ref<string[]>([])
 const selectedSignals = ref<string[]>([])
+const selectedResults = ref<string[]>([])
 const currentPage = ref(1)
 const pageSize = 20
+const sortBy = ref<'date' | 'confidence' | 'code' | 'type' | 'signal'>('date')
+const minConfidence = ref(60)
+const dateFrom = ref('')
+const dateTo = ref('')
+const emaSignalFilter = ref('')
+const bollSignalFilter = ref('')
+const indicatorMode = ref<'all' | 'any'>('all')
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+
+const reversalPatterns = [
+  { label: '晨星', value: 'MORNING_STAR' },
+  { label: '夜星', value: 'EVENING_STAR' },
+  { label: '看涨吞没', value: 'BULLISH_ENGULFING' },
+  { label: '看跌吞没', value: 'BEARISH_ENGULFING' },
+  { label: '看涨孕线', value: 'BULLISH_HARAMI' },
+  { label: '看跌孕线', value: 'BEARISH_HARAMI' },
+  { label: '穿刺', value: 'PIERCING' },
+  { label: '乌云盖顶', value: 'DARK_CLOUD_COVER' },
+]
+
+const continuationPatterns = [
+  { label: '连续上涨', value: 'CONTINUOUS_RISE' },
+  { label: '连续下跌', value: 'CONTINUOUS_FALL' },
+  { label: 'MA金叉', value: 'MA_GOLDEN_CROSS' },
+  { label: 'MA死叉', value: 'MA_DEATH_CROSS' },
+]
+
+const candlestickPatterns = [
+  { label: '突破高点', value: 'BREAKTHROUGH_HIGH' },
+  { label: '跌破低点', value: 'BREAKDOWN_LOW' },
+  { label: '锤子线', value: 'HAMMER' },
+  { label: '倒锤子', value: 'INVERTED_HAMMER' },
+  { label: '十字星', value: 'DOJI' },
+  { label: '射击之星', value: 'SHOOTING_STAR' },
+  { label: '吊人', value: 'HANGING_MAN' },
+  { label: '光头光脚', value: 'MARUBOZU' },
+  { label: '纺锤线', value: 'SPINNING_TOP' },
+  { label: '龙爪', value: 'DRAGONFLY_DOJI' },
+  { label: '墓碑', value: 'GRAVESTONE_DOJI' },
+  { label: '红三兵', value: 'THREE_WHITE_SOLDIERS' },
+  { label: '黑三鸦', value: 'THREE_BLACK_CROWS' },
+  { label: '三星', value: 'TRISTAR' },
+  { label: '探水杆', value: 'TAKURI' },
+]
 
 const config = reactive({
   minBars: 20,
   tolerance: 3,
   minConfidence: 60,
+  shoulderTolerance: 5,
+  necklineTolerance: 3,
+  doubleTopBottomTolerance: 3,
+  triangleMinPoints: 5,
+  triangleTolerance: 2,
+  breakoutVolumeFactor: 1.5,
+  breakoutPriceRange: 3,
+  emaFast: 12,
+  emaSlow: 26,
+  bollPeriod: 20,
+  bollStd: 2.0,
 })
 
 const patternResults = ref<PatternResult[]>([])
 
+const normalizeSignal = (patternType?: string | null): string => {
+  const t = (patternType || '').toLowerCase()
+  if (t === 'reversal' || t === 'breakout') return 'BULLISH'
+  if (t === 'breakdown') return 'BEARISH'
+  return 'NEUTRAL'
+}
+
 const filteredResults = computed(() => {
-  return patternResults.value.filter(r => {
-    if (selectedSignals.value.length > 0 && r.pattern_type && !selectedSignals.value.includes(r.pattern_type)) {
+  const filtered = patternResults.value.filter(r => {
+    if (selectedPatterns.value.length > 0 && !selectedPatterns.value.includes(r.pattern_name)) {
       return false
     }
-    if (r.confidence < config.minConfidence) {
+    if (selectedSignals.value.length > 0 && !selectedSignals.value.includes(normalizeSignal(r.pattern_type))) {
+      return false
+    }
+    if (r.confidence < minConfidence.value) {
+      return false
+    }
+    if (dateFrom.value && r.trade_date < dateFrom.value.replaceAll('-', '')) {
+      return false
+    }
+    if (dateTo.value && r.trade_date > dateTo.value.replaceAll('-', '')) {
+      return false
+    }
+    if (emaSignalFilter.value && r.ema_signal !== emaSignalFilter.value) {
+      return false
+    }
+    if (bollSignalFilter.value && r.boll_signal !== bollSignalFilter.value) {
       return false
     }
     return true
   })
+
+  filtered.sort((a, b) => {
+    if (sortBy.value === 'confidence') return b.confidence - a.confidence
+    if (sortBy.value === 'code') return (a.code || '').localeCompare(b.code || '')
+    if (sortBy.value === 'type') return (a.pattern_name || '').localeCompare(b.pattern_name || '')
+    if (sortBy.value === 'signal') return normalizeSignal(a.pattern_type).localeCompare(normalizeSignal(b.pattern_type))
+    return (b.trade_date || '').localeCompare(a.trade_date || '')
+  })
+
+  return filtered
 })
 
 const totalPages = computed(() => Math.ceil(filteredResults.value.length / pageSize))
+const allSelected = computed(() => {
+  const current = paginatedResults.value
+  return current.length > 0 && current.every(item => selectedResults.value.includes(`${item.code}-${item.pattern_name}-${item.trade_date}`))
+})
 
 const paginatedResults = computed(() => {
   const start = (currentPage.value - 1) * pageSize
@@ -371,9 +535,9 @@ const getConfidenceClass = (confidence: number) => {
 }
 
 const getSignalText = (type: string | null) => {
-  if (!type) return '中性'
-  if (type === 'reversal' || type === 'breakout') return '看涨'
-  if (type === 'breakdown') return '看跌'
+  const normalized = normalizeSignal(type)
+  if (normalized === 'BULLISH') return '看涨'
+  if (normalized === 'BEARISH') return '看跌'
   return '中性'
 }
 
@@ -385,18 +549,68 @@ const getPatternLabel = (name: string) => {
     'BREAKDOWN_LOW': '跌破低点',
     'CONTINUOUS_RISE': '连续上涨',
     'CONTINUOUS_FALL': '连续下跌',
+    'BULLISH_ENGULFING': '看涨吞没',
+    'BEARISH_ENGULFING': '看跌吞没',
+    'BULLISH_HARAMI': '看涨孕线',
+    'BEARISH_HARAMI': '看跌孕线',
+    'HAMMER': '锤子线',
+    'INVERTED_HAMMER': '倒锤子',
+    'DOJI': '十字星',
+    'SPINNING_TOP': '纺锤线',
+    'MARUBOZU': '光头光脚',
+    'SHOOTING_STAR': '射击之星',
+    'PIERCING': '穿刺',
+    'DARK_CLOUD_COVER': '乌云盖顶',
+    'HANGING_MAN': '吊人',
+    'DRAGONFLY_DOJI': '龙爪',
+    'GRAVESTONE_DOJI': '墓碑',
+    'TRISTAR': '三星',
+    'TAKURI': '探水杆',
+    'THREE_WHITE_SOLDIERS': '红三兵',
+    'THREE_BLACK_CROWS': '黑三鸦',
+    'MA_GOLDEN_CROSS': 'MA金叉',
+    'MA_DEATH_CROSS': 'MA死叉',
   }
   return labels[name] || name
+}
+
+const getEmaLabel = (signal?: string) => {
+  if (signal === 'bullish') return 'EMA: 多头'
+  if (signal === 'bearish') return 'EMA: 空头'
+  if (signal === 'neutral') return 'EMA: 中性'
+  return 'EMA: NoData'
+}
+
+const getBollLabel = (signal?: string) => {
+  if (signal === 'breakout') return 'BOLL: 上破'
+  if (signal === 'breakdown') return 'BOLL: 下破'
+  if (signal === 'inside') return 'BOLL: 轨内'
+  return 'BOLL: NoData'
 }
 
 const fetchPatterns = async () => {
   loading.value = true
   try {
-    const data = await patternApi.getTodayPatterns({ limit: 200 })
+    const data = await patternApi.getTodayPatterns({
+      limit: 300,
+      min_confidence: minConfidence.value,
+      start_date: dateFrom.value ? dateFrom.value.replaceAll('-', '') : undefined,
+      end_date: dateTo.value ? dateTo.value.replaceAll('-', '') : undefined,
+      pattern_names: selectedPatterns.value.length > 0 ? selectedPatterns.value.join(',') : undefined,
+      ema_fast: config.emaFast,
+      ema_slow: config.emaSlow,
+      boll_period: config.bollPeriod,
+      boll_std: config.bollStd,
+      ema_signal: emaSignalFilter.value || undefined,
+      boll_signal: bollSignalFilter.value || undefined,
+      indicator_mode: indicatorMode.value,
+    })
     patternResults.value = (data || []).map((p: any) => ({
       ...p,
-      code: p.symbol || p.ts_code?.split('.')[0],
+      code: p.code || p.symbol || p.ts_code?.split('.')[0],
     }))
+    selectedResults.value = []
+    currentPage.value = 1
   } catch (e) {
     console.error('Failed to fetch patterns:', e)
     patternResults.value = []
@@ -406,36 +620,77 @@ const fetchPatterns = async () => {
 }
 
 const runRecognition = async () => {
-  loading.value = true
-  await new Promise(resolve => setTimeout(resolve, 1000))
   await fetchPatterns()
-  loading.value = false
+}
+
+const toggleSelectAll = () => {
+  const currentIds = paginatedResults.value.map((item) => `${item.code}-${item.pattern_name}-${item.trade_date}`)
+  if (allSelected.value) {
+    selectedResults.value = selectedResults.value.filter((id) => !currentIds.includes(id))
+  } else {
+    selectedResults.value = Array.from(new Set([...selectedResults.value, ...currentIds]))
+  }
+}
+
+const exportResults = () => {
+  const selected = filteredResults.value.filter((item) =>
+    selectedResults.value.includes(`${item.code}-${item.pattern_name}-${item.trade_date}`)
+  )
+  if (selected.length === 0) return
+  const blob = new Blob([JSON.stringify(selected, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `patterns_${new Date().toISOString().slice(0, 10)}.json`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 const resetConfig = () => {
   config.minBars = 20
   config.tolerance = 3
   config.minConfidence = 60
+  config.shoulderTolerance = 5
+  config.necklineTolerance = 3
+  config.doubleTopBottomTolerance = 3
+  config.triangleMinPoints = 5
+  config.triangleTolerance = 2
+  config.breakoutVolumeFactor = 1.5
+  config.breakoutPriceRange = 3
+  config.emaFast = 12
+  config.emaSlow = 26
+  config.bollPeriod = 20
+  config.bollStd = 2
+  minConfidence.value = 60
+  emaSignalFilter.value = ''
+  bollSignalFilter.value = ''
+  indicatorMode.value = 'all'
 }
 
 const applyConfig = () => {
   showConfig.value = false
+  fetchPatterns()
 }
 
 const viewChart = (result: PatternResult) => {
-  router.push(`/stocks/${result.code}`)
+  router.push(`/stock/${result.code}`)
 }
 
 const addToWatchlist = async (result: PatternResult) => {
   try {
     await attentionApi.add(result.code)
-    alert(`已添加 ${result.stock_name || result.code} 到关注列表`)
+    showNotification?.('success', `已添加 ${result.stock_name || result.code} 到关注列表`)
   } catch (e) {
     console.error('Failed to add to watchlist:', e)
+    showNotification?.('error', '添加关注失败')
   }
 }
 
 onMounted(() => {
+  const queryCode = String(route.query.code || '').trim()
+  if (queryCode) {
+    selectedPatterns.value = []
+  }
   fetchPatterns()
 })
 </script>
@@ -788,10 +1043,25 @@ onMounted(() => {
     color: rgba(255, 255, 255, 0.9);
   }
 
-  .stock-name {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.5);
-  }
+.stock-name {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.tech-tags {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tech-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.08);
+}
 }
 
 .pattern-type {
