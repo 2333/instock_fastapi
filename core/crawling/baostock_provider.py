@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from .base import AdjustType
+from .base import AdjustType, ProxyPool
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +29,17 @@ class BaoStockConfig:
 
 class BaoStockProvider:
     _lock = threading.Lock()
+    _proxy_env_lock = threading.Lock()
     _logged_in = False
     _last_request_ts = 0.0
 
-    def __init__(self, config: Optional[BaoStockConfig] = None):
+    def __init__(
+        self,
+        config: Optional[BaoStockConfig] = None,
+        proxy_pool: Optional[ProxyPool] = None,
+    ):
         self.config = config or BaoStockConfig()
+        self.proxy_pool = proxy_pool
 
     async def fetch_kline(
         self,
@@ -61,8 +69,6 @@ class BaoStockProvider:
             logger.warning("baostock 未安装，跳过 BaoStock 数据源")
             return []
 
-        self._ensure_login(bs)
-
         bs_code = self._to_baostock_code(code)
         if not bs_code:
             return []
@@ -70,19 +76,29 @@ class BaoStockProvider:
         start = (start_date or "1990-01-01").replace("/", "-")
         end = (end_date or "2099-12-31").replace("/", "-")
         adjust_flag = self._to_adjust_flag(adjust)
-        self._wait_rate_limit()
+        proxy = self.proxy_pool.get_proxy() if self.proxy_pool else None
 
-        rs = bs.query_history_k_data_plus(
-            bs_code,
-            "date,open,high,low,close,preclose,volume,amount,pctChg",
-            start_date=start,
-            end_date=end,
-            frequency="d",
-            adjustflag=adjust_flag,
-        )
-        if rs.error_code != "0":
-            logger.warning("BaoStock 查询失败 %s %s", bs_code, rs.error_msg)
-            return []
+        try:
+            with self._proxy_env(proxy):
+                self._ensure_login(bs)
+                self._wait_rate_limit()
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    "date,open,high,low,close,preclose,volume,amount,pctChg",
+                    start_date=start,
+                    end_date=end,
+                    frequency="d",
+                    adjustflag=adjust_flag,
+                )
+                if rs.error_code != "0":
+                    logger.warning("BaoStock 查询失败 %s %s", bs_code, rs.error_msg)
+                    if self.proxy_pool and proxy:
+                        self.proxy_pool.mark_failed(proxy)
+                    return []
+        except Exception:
+            if self.proxy_pool and proxy:
+                self.proxy_pool.mark_failed(proxy)
+            raise
 
         rows: List[Dict[str, Any]] = []
         while rs.next():
@@ -116,6 +132,22 @@ class BaoStockProvider:
                 }
             )
         return rows
+
+    async def fetch_stock_list(self) -> List[Dict[str, Any]]:
+        logger.info("BaoStock 不提供 stock_list，返回空结果供下游降级")
+        return []
+
+    async def fetch_etf_list(self) -> List[Dict[str, Any]]:
+        logger.info("BaoStock 不提供 etf_list，返回空结果供下游降级")
+        return []
+
+    async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
+        logger.info("BaoStock 不提供 fund_flow_rank，返回空结果供下游降级")
+        return []
+
+    async def fetch_sector_fund_flow(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
+        logger.info("BaoStock 不提供 sector_fund_flow，返回空结果供下游降级")
+        return []
 
     def _ensure_login(self, bs: Any) -> None:
         with self._lock:
@@ -160,3 +192,32 @@ class BaoStockProvider:
             if elapsed < self.config.min_delay:
                 time.sleep(self.config.min_delay - elapsed)
             self._last_request_ts = time.monotonic()
+
+    @contextmanager
+    def _proxy_env(self, proxy: Optional[str]):
+        if not proxy:
+            yield
+            return
+
+        with self._proxy_env_lock:
+            old_http = os.environ.get("http_proxy")
+            old_https = os.environ.get("https_proxy")
+            old_all = os.environ.get("all_proxy")
+            try:
+                os.environ["http_proxy"] = proxy
+                os.environ["https_proxy"] = proxy
+                os.environ["all_proxy"] = proxy
+                yield
+            finally:
+                if old_http is None:
+                    os.environ.pop("http_proxy", None)
+                else:
+                    os.environ["http_proxy"] = old_http
+                if old_https is None:
+                    os.environ.pop("https_proxy", None)
+                else:
+                    os.environ["https_proxy"] = old_https
+                if old_all is None:
+                    os.environ.pop("all_proxy", None)
+                else:
+                    os.environ["all_proxy"] = old_all
