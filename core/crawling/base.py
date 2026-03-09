@@ -290,7 +290,7 @@ class BaseCrawler(ABC):
             logger.error(f"HTTP错误: {e.response.status_code} - {url}")
             if e.response.status_code == 429:  # Rate Limited
                 await asyncio.sleep(5)
-            if self.proxy_pool and proxy and e.response.status_code in {403, 429, 502, 503, 504}:
+            if self.proxy_pool and proxy and e.response.status_code in {403, 429}:
                 self.proxy_pool.mark_failed(proxy)
             raise
         except httpx.RequestError as e:

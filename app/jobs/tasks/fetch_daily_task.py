@@ -1,9 +1,8 @@
 import asyncio
 import logging
 import os
-import re
 from datetime import datetime, timedelta, date
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,62 +15,18 @@ from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.base import AdjustType, ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.tushare_provider import TushareProvider
-from core.proxy_manager import get_proxy_manager
 
 logger = logging.getLogger(__name__)
 
-MAINLAND_STOCK_SYMBOL_RE = re.compile(r"^(6|0|3)\d{5}$")
-ETF_NAME_HINTS = ("ETF", "LOF")
-
 
 def _build_proxy_pool() -> Optional[ProxyPool]:
-    if os.getenv("CRAWLER_PROXY_ENABLED", "false").lower() not in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
-        logger.info("日线任务代理未启用，将直连运行")
-        return None
-
-    proxy_manager = get_proxy_manager()
-    pool = ProxyPool(proxies=[f"http://{proxy}" for proxy in proxy_manager.data])
+    proxy_file = os.getenv("CRAWLER_PROXY_FILE", "config/proxy.txt")
+    pool = ProxyPool.from_file(proxy_file)
     if pool.proxies:
         logger.info("任务代理池已加载: %s 个代理", len(pool.proxies))
         return pool
-    logger.warning("任务代理池为空，将直连运行")
+    logger.warning("任务代理池为空，将直连运行（file=%s）", proxy_file)
     return None
-
-
-def _include_etf_in_daily_sync() -> bool:
-    return os.getenv("DAILY_SYNC_INCLUDE_ETF", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _should_sync_daily_bar(
-    stock: Stock,
-    include_etf: bool,
-    known_etf_codes: set[str],
-) -> bool:
-    symbol = str(stock.symbol or "").strip()
-    if not symbol:
-        return False
-
-    if not stock.is_etf:
-        return bool(MAINLAND_STOCK_SYMBOL_RE.match(symbol))
-
-    if not include_etf:
-        return False
-
-    name = str(stock.name or "").upper()
-    if any(token in name for token in ETF_NAME_HINTS):
-        return True
-
-    return stock.ts_code in known_etf_codes
 
 
 async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = False) -> int:
@@ -371,132 +326,23 @@ async def _fetch_single_stock(
             return stock.symbol, 0, False
 
 
-async def _fetch_batch_daily_bars(tushare_provider: TushareProvider, trade_date: str):
-    """批量抓取单日所有股票数据"""
-    logger.info(f"开始批量抓取 {trade_date} 数据...")
-
-    # 设置批量模式标志
-    tushare_provider._batch_trade_date = trade_date
-    all_bars = await tushare_provider.fetch_kline()
-    tushare_provider._batch_trade_date = None  # 重置
-
-    if not all_bars:
-        logger.warning(f"未获取到 {trade_date} 的数据")
-        return
-
-    logger.info(f"批量获取到 {len(all_bars)} 条数据")
-
-    # 按股票代码分组
-    bars_by_code: Dict[str, List[dict]] = {}
-    for bar in all_bars:
-        code = bar.get("code")
-        if code:
-            if code not in bars_by_code:
-                bars_by_code[code] = []
-            bars_by_code[code].append(bar)
-
-    # 保存到数据库
-    async with async_session_factory() as session:
-        # 获取所有活跃股票
-        result = await session.execute(
-            select(Stock.ts_code, Stock.symbol).where(Stock.list_status == "L")
-        )
-        stock_map = {row.symbol: row.ts_code for row in result.fetchall()}
-
-        saved = 0
-        for symbol, ts_code in stock_map.items():
-            bars = bars_by_code.get(symbol, [])
-            if bars:
-                count = await save_daily_bars(session, ts_code, bars)
-                saved += count
-
-        logger.info(f"批量保存完成: {saved} 条K线数据")
-
-
-async def fetch_and_save_daily_bars(
-    days: int = 30, concurrency: int = 50, skip_existing: bool = True
-):
-    """抓取并保存K线数据
-
-    Args:
-        days: 抓取天数
-        concurrency: 并发数，默认50
-        skip_existing: 是否跳过已有数据的股票，默认True
-    """
+async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
+    """抓取并保存K线数据"""
     proxy_pool = _build_proxy_pool()
     em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
     baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
     tushare_provider = TushareProvider()
 
-    today = datetime.now()
-    end_date = today.strftime("%Y-%m-%d")
-    start_date = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
     async with async_session_factory() as session:
-        result = await session.execute(text("SELECT MAX(trade_date) as max_date FROM daily_bars"))
-        max_date = result.scalar()
-        today_trade_date = today.strftime("%Y%m%d")
-
-        query = select(Stock).where(Stock.list_status == "L")
-
-        # 仅当库里最新日期就是今天时，才跳过今天已存在数据的股票；
-        # 若库里停留在历史日期，必须全量补抓，避免任务“看起来成功但不更新”。
-        if skip_existing and max_date == today_trade_date:
-            query = query.where(
-                ~Stock.ts_code.in_(
-                    select(DailyBar.ts_code).where(DailyBar.trade_date == today_trade_date)
-                )
-            )
-        elif skip_existing and max_date:
-            logger.info(
-                "检测到日线最新日期为 %s，落后于今天 %s，本轮执行全量补抓",
-                max_date,
-                today_trade_date,
-            )
-
-        include_etf = _include_etf_in_daily_sync()
-        known_etf_result = await session.execute(
-            select(DailyBar.ts_code)
-            .distinct()
-            .join(Stock, Stock.ts_code == DailyBar.ts_code)
-            .where(Stock.is_etf == True)
+        result = await session.execute(
+            select(Stock).where(Stock.list_status == "L").order_by(Stock.ts_code)
         )
-        known_etf_codes = {row[0] for row in known_etf_result.fetchall()}
-
-        result = await session.execute(query.order_by(Stock.ts_code))
-        candidate_stocks = result.scalars().all()
-        stocks = [
-            stock
-            for stock in candidate_stocks
-            if _should_sync_daily_bar(
-                stock=stock,
-                include_etf=include_etf,
-                known_etf_codes=known_etf_codes,
-            )
-        ]
+        stocks = result.scalars().all()
         total = len(stocks)
-
-        skipped = len(candidate_stocks) - total
-        if skipped > 0:
-            logger.info(
-                "日线任务已过滤 %s 个不受支持或非目标标的，实际抓取 %s 个（include_etf=%s）",
-                skipped,
-                total,
-                include_etf,
-            )
-
-        # 批量模式：只抓取1天数据时，使用Tushare批量API一次获取所有股票
-        if days == 1 and today_trade_date:
-            logger.info(f"使用批量模式抓取 {today_trade_date} 数据...")
-            await _fetch_batch_daily_bars(tushare_provider, today_trade_date)
-            await em_crawler.close()
-            return
-
-        if total == 0:
-            logger.info("所有目标标的已有今日数据，无需抓取")
-            return
-
-        logger.info(f"开始抓取 {total} 只标的的K线数据，并发数: {concurrency}")
+        logger.info(f"开始抓取 {total} 只股票的K线数据，并发数: {concurrency}")
 
         semaphore = asyncio.Semaphore(concurrency)
 

@@ -2,10 +2,10 @@
   <div class="app-container">
     <template v-if="isAuthenticated && !isLoginPage">
       <AppHeader @refresh="handleRefresh" @settings="openSettings" />
-      
+
       <div class="app-content">
         <AppSidebar />
-        
+
         <main class="main-viewport">
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
@@ -18,7 +18,7 @@
     <template v-else>
       <router-view />
     </template>
-    
+
     <LoadingOverlay :loading="isLoading" :text="loadingText" />
     <NotificationContainer ref="notificationRef" />
   </div>

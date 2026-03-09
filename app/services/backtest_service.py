@@ -44,7 +44,7 @@ class BacktestService:
             SELECT trade_date, close
             FROM daily_bars
             WHERE ts_code = :ts_code
-              AND trade_date BETWEEN :start_date AND :end_date
+            AND trade_date BETWEEN :start_date AND :end_date
             ORDER BY trade_date ASC
             """
         )
@@ -241,12 +241,12 @@ class BacktestService:
     async def get_result(self, backtest_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
         if user_id:
             query = text("""
-                SELECT * FROM backtest_results 
+                SELECT * FROM backtest_results
                 WHERE user_id = :user_id
-                  AND (
+                AND (
                     CAST(id AS TEXT) = :backtest_id
                     OR result_data->>'external_backtest_id' = :backtest_id
-                  )
+                )
                 LIMIT 1
             """)
             result = await self.db.execute(
@@ -256,5 +256,4 @@ class BacktestService:
             row = result.fetchone()
             if row:
                 return {"backtest_id": str(row[0]), "status": "completed", "data": row._mapping}
-            return {"backtest_id": backtest_id, "status": "not_found"}
-        return {"backtest_id": backtest_id, "status": "unauthorized"}
+        return {"backtest_id": backtest_id, "status": "not_found"}

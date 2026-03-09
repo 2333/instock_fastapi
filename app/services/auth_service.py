@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
-
-from jose import JWTError, jwt
+from typing import Optional
+from jose import jwt, JWTError
 from passlib.context import CryptContext
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-from app.config import settings
 from app.models.stock_model import User
+from app.config import settings
 
 pwd_context = CryptContext(
     schemes=["bcrypt"],
@@ -34,7 +34,7 @@ class AuthService:
         return user
 
     @staticmethod
-    async def authenticate(db: AsyncSession, username: str, password: str) -> User | None:
+    async def authenticate(db: AsyncSession, username: str, password: str) -> Optional[User]:
         stmt = select(User).where(User.username == username)
         result = await db.execute(stmt)
         user = result.scalar_one_or_none()

@@ -52,7 +52,6 @@ def start_scheduler() -> bool:
         max_instances=1,
         coalesce=True,
         misfire_grace_time=1800,
-        replace_existing=True,
     )
     scheduler.add_job(
         id="fetch_fund_flow",
@@ -60,7 +59,6 @@ def start_scheduler() -> bool:
         trigger=CronTrigger(hour=16, minute=0),
         name="资金流向抓取",
         max_instances=1,
-        replace_existing=True,
     )
     scheduler.add_job(
         id="calculate_indicators",
@@ -68,7 +66,6 @@ def start_scheduler() -> bool:
         trigger=CronTrigger(hour=17, minute=0),
         name="指标计算",
         max_instances=1,
-        replace_existing=True,
     )
     scheduler.add_job(
         id="run_pattern_recognition",
@@ -76,7 +73,6 @@ def start_scheduler() -> bool:
         trigger=CronTrigger(hour=17, minute=30),
         name="形态识别",
         max_instances=1,
-        replace_existing=True,
     )
     scheduler.add_job(
         id="run_strategy_selection",
@@ -84,7 +80,6 @@ def start_scheduler() -> bool:
         trigger=CronTrigger(hour=18, minute=0),
         name="策略选股",
         max_instances=1,
-        replace_existing=True,
     )
     scheduler.add_job(
         id="cleanup_old_data",
@@ -92,7 +87,6 @@ def start_scheduler() -> bool:
         trigger=CronTrigger(hour=3, minute=0, day_of_week="sun"),
         name="数据清理",
         max_instances=1,
-        replace_existing=True,
     )
     scheduler.start()
     logger.info("定时任务调度器已启动")

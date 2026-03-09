@@ -38,11 +38,11 @@ class AttentionService:
 
         ts_code = row[0]
 
-        query = text("""
-            INSERT INTO attention (ts_code, user_id, created_at)
-            VALUES (:ts_code, :user_id, NOW())
-            ON CONFLICT (user_id, ts_code) DO NOTHING
-        """)
+    query = text("""
+    INSERT INTO attention (ts_code, user_id, created_at)
+    VALUES (:ts_code, :user_id, NOW())
+    ON CONFLICT (user_id, ts_code) DO NOTHING
+    """)
         await self.db.execute(query, {"ts_code": ts_code, "user_id": user_id})
         await self.db.commit()
         return {"status": "success", "code": code}

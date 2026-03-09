@@ -131,8 +131,8 @@ class ProxyManager:
                     valid.append(result)
 
         if not valid and proxies:
-            logger.warning("代理测试全部失败，丢弃当前代理并回退直连")
-            return []
+            logger.warning("代理测试全部失败，保留原始代理")
+            return proxies
 
         return valid
 
@@ -154,7 +154,7 @@ class ProxyManager:
         self.save_proxies(self.data)
         logger.info(f"刷新后可用代理: {len(self.data)}")
 
-    def get_proxy(self) -> Optional[str]:
+    def get_proxy(self) -> Optional[Dict[str, str]]:
         self.ensure_pool()
         if not self.data:
             return None
@@ -163,21 +163,27 @@ class ProxyManager:
             user_pass, host_port = proxy_str.split("@")
             user, password = user_pass.split(":")
             ip, port = host_port.split(":")
-            return f"http://{user}:{password}@{ip}:{port}"
+            return {
+                "http": f"http://{user}:{password}@{ip}:{port}",
+                "https": f"http://{user}:{password}@{ip}:{port}",
+            }
         except Exception as e:
             logger.error(f"解析代理失败: {e}")
             return None
 
     def report_bad_proxy(self, proxy: str):
-        if not proxy:
-            return
+        if isinstance(proxy, dict):
+            try:
+                proxy_str = proxy["http"].replace("http://", "")
+            except Exception:
+                logger.warning(f"report_bad_proxy参数异常: {proxy}")
+                return
+        else:
+            proxy_str = proxy
 
-        if proxy.startswith("http://"):
-            proxy = proxy.replace("http://", "")
-
-        if proxy in self.data:
-            self.data.remove(proxy)
-            logger.info(f"移除异常代理: {proxy}")
+        if proxy_str in self.data:
+            self.data.remove(proxy_str)
+            logger.info(f"移除异常代理: {proxy_str}")
             self.save_proxies(self.data)
             if len(self.data) < self.min_size:
                 self.ensure_pool()

@@ -24,7 +24,7 @@ def _resolve_trade_date_dt(bar: DailyBar):
 
 
 async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates: List[str]):
-    """计算技术指标"""
+    """Calculate technical indicators for given ts_code and trade_dates."""
     result = await session.execute(
         select(DailyBar)
         .where(and_(DailyBar.ts_code == ts_code, DailyBar.trade_date.in_(trade_dates)))
@@ -32,6 +32,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     )
     bars = result.scalars().all()
 
+    # Require enough data points to compute indicators
     if len(bars) < 30:
         return
 
@@ -40,10 +41,11 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     lows = np.array([float(bar.low) for bar in bars], dtype=np.float64)
     volumes = np.array([float(bar.vol) for bar in bars], dtype=np.float64)
 
-    indicators_data = []
+    indicators_data: List[dict] = []
 
     for i, bar in enumerate(bars):
         trade_date_dt = _resolve_trade_date_dt(bar)
+        # Moving Averages
         if i >= 4:
             ma5 = np.mean(closes[max(0, i - 4) : i + 1])
             indicators_data.append(
@@ -55,7 +57,6 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                     "indicator_value": Decimal(str(round(ma5, 2))),
                 }
             )
-
         if i >= 9:
             ma10 = np.mean(closes[max(0, i - 9) : i + 1])
             indicators_data.append(
@@ -67,7 +68,6 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                     "indicator_value": Decimal(str(round(ma10, 2))),
                 }
             )
-
         if i >= 19:
             ma20 = np.mean(closes[max(0, i - 19) : i + 1])
             indicators_data.append(
@@ -79,7 +79,6 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                     "indicator_value": Decimal(str(round(ma20, 2))),
                 }
             )
-
         if i >= 29:
             ma60 = np.mean(closes[max(0, i - 29) : i + 1])
             indicators_data.append(
@@ -92,6 +91,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                 }
             )
 
+    # RSI (14)
     if len(closes) >= 14:
         try:
             rsi = tl.RSI(closes, timeperiod=14)
@@ -109,6 +109,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
         except Exception as e:
             logger.debug(f"RSI计算失败 {ts_code}: {e}")
 
+    # MACD
     if len(closes) >= 26:
         try:
             macd, macd_signal, macd_hist = tl.MACD(closes)
@@ -146,6 +147,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
         except Exception as e:
             logger.debug(f"MACD计算失败 {ts_code}: {e}")
 
+    # Boll Bands
     if len(closes) >= 20:
         try:
             upper, middle, lower = tl.BBANDS(closes, timeperiod=20)
@@ -183,6 +185,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
         except Exception as e:
             logger.debug(f"布林带计算失败 {ts_code}: {e}")
 
+    # KDJ (Stochastic) -- K and D values
     if len(closes) >= 9:
         try:
             k, d = tl.STOCH(highs, lows, closes)
@@ -210,6 +213,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
         except Exception as e:
             logger.debug(f"KDJ计算失败 {ts_code}: {e}")
 
+    # Upsert all indicators
     try:
         for ind in indicators_data:
             stmt = (

@@ -1,31 +1,32 @@
-from typing import Any
-
+from typing import Dict, Any, Optional, List
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class SelectionService:
-    def __init__(self, db: AsyncSession | None = None):
+    def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
 
     @staticmethod
-    def get_conditions() -> dict[str, Any]:
+    def get_conditions() -> Dict[str, Any]:
         return {
             "markets": ["沪市", "深市", "创业板", "科创板"],
             "indicators": ["macd", "kdj", "boll", "rsi"],
             "strategies": ["放量上涨", "均线多头", "停机坪"],
         }
 
-    async def _resolve_trade_date(self, date: str | None) -> str | None:
+    async def _resolve_trade_date(self, date: Optional[str]) -> Optional[str]:
         if not self.db:
             return None
         if date:
             result = await self.db.execute(
-                text("""
+                text(
+                    """
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
                     WHERE trade_date <= :target_date
-                    """),
+                    """
+                ),
                 {"target_date": date},
             )
         else:
@@ -35,7 +36,7 @@ class SelectionService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def run_selection(self, conditions: dict[str, Any], date: str | None) -> list[dict]:
+    async def run_selection(self, conditions: Dict[str, Any], date: Optional[str]) -> List[dict]:
         if not self.db:
             return []
 
@@ -54,7 +55,7 @@ class SelectionService:
             "s.is_etf = false",
             "db.trade_date = :trade_date",
         ]
-        params: dict[str, Any] = {"trade_date": trade_date}
+        params: Dict[str, Any] = {"trade_date": trade_date}
 
         if price_min is not None:
             where_sql.append("db.close >= :price_min")
@@ -73,29 +74,31 @@ class SelectionService:
         elif market == "sz":
             where_sql.append("(s.symbol LIKE '0%' OR s.symbol LIKE '3%')")
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
-              s.ts_code,
-              s.symbol AS code,
-              s.name AS stock_name,
-              db.trade_date,
-              db.close,
-              db.pct_chg,
-              db.vol,
-              db.amount
+                s.ts_code,
+                s.symbol AS code,
+                s.name AS stock_name,
+                db.trade_date,
+                db.close,
+                db.pct_chg,
+                db.vol,
+                db.amount
             FROM stocks s
             JOIN daily_bars db ON s.ts_code = db.ts_code
-            WHERE {' AND '.join(where_sql)}
+            WHERE {" AND ".join(where_sql)}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT 300
-            """)
+            """
+        )
         rows = (await self.db.execute(sql, params)).mappings().all()
 
-        results: list[dict] = []
+        results: List[dict] = []
         for row in rows:
             pct = float(row["pct_chg"] or 0)
             amt = float(row["amount"] or 0)
-            score = pct * 5 + min(amt / 1e8, 20)  # 简单综合评分
+            score = pct * 5 + min(amt / 1e8, 20)
             signal = "hold"
             if pct >= 2:
                 signal = "buy"
@@ -117,30 +120,32 @@ class SelectionService:
             )
         return results
 
-    async def get_history(self, date: str | None, limit: int) -> list[dict]:
+    async def get_history(self, date: Optional[str], limit: int) -> List[dict]:
         if not self.db:
             return []
         where = []
-        params: dict[str, Any] = {"limit": limit}
+        params: Dict[str, Any] = {"limit": limit}
         if date:
             where.append("sr.trade_date = :trade_date")
             params["trade_date"] = date
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-        sql = text(f"""
+        sql = text(
+            f"""
             SELECT
-              sr.selection_id,
-              sr.ts_code,
-              split_part(sr.ts_code, '.', 1) AS code,
-              s.name AS stock_name,
-              sr.trade_date,
-              sr.score
+                sr.selection_id,
+                sr.ts_code,
+                split_part(sr.ts_code, '.', 1) AS code,
+                s.name AS stock_name,
+                sr.trade_date,
+                sr.score
             FROM selection_results sr
             LEFT JOIN stocks s ON s.ts_code = sr.ts_code
             {where_sql}
             ORDER BY sr.trade_date DESC
             LIMIT :limit
-            """)
+            """
+        )
         rows = (await self.db.execute(sql, params)).mappings().all()
         return [
             {
