@@ -22,6 +22,42 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    __table_args__ = (
+        Index("ix_users_username", "username"),
+        Index("ix_users_email", "email"),
+    )
+
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), unique=True, nullable=False
+    )
+    language: Mapped[str] = mapped_column(String(10), default="zh-CN")
+    theme: Mapped[str] = mapped_column(String(20), default="dark")
+    timezone: Mapped[str] = mapped_column(String(50), default="Asia/Shanghai")
+    extra: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class Stock(Base):
     __tablename__ = "stocks"
 
@@ -109,7 +145,7 @@ class Attention(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -160,9 +196,14 @@ class Pattern(Base):
 
 class Strategy(Base):
     __tablename__ = "strategies"
+    __table_args__ = (
+        Index("ix_strategies_user_id", "user_id"),
+        UniqueConstraint("user_id", "name", name="uq_strategies_user_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -194,8 +235,10 @@ class StrategyResult(Base):
 
 class BacktestResult(Base):
     __tablename__ = "backtest_results"
+    __table_args__ = (Index("ix_backtest_results_user_id", "user_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     strategy_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("strategies.id"), nullable=True
@@ -216,9 +259,11 @@ class BacktestResult(Base):
 
 class SelectionCondition(Base):
     __tablename__ = "selection_conditions"
+    __table_args__ = (Index("ix_selection_conditions_user_id", "user_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
@@ -360,4 +405,23 @@ class SectorFundFlow(Base):
     net_amount_hf: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 2), nullable=True)
     net_rate_hf: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 4), nullable=True)
     top_stock: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NorthBoundFund(Base):
+    __tablename__ = "north_bound_funds"
+    __table_args__ = (
+        Index("ix_north_bound_funds_ts_code", "ts_code"),
+        Index("ix_north_bound_funds_trade_date", "trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    close: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 4), nullable=True)
+    pct_chg: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 4), nullable=True)
+    sh_net_inflow: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 2), nullable=True)
+    sz_net_inflow: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 2), nullable=True)
+    total_net_inflow: Mapped[Optional[Decimal]] = mapped_column(Numeric(30, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
