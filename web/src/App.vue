@@ -1,18 +1,23 @@
 <template>
   <div class="app-container">
-    <AppHeader @refresh="handleRefresh" @settings="openSettings" />
-    
-    <div class="app-content">
-      <AppSidebar />
+    <template v-if="isAuthenticated && !isLoginPage">
+      <AppHeader @refresh="handleRefresh" @settings="openSettings" />
       
-      <main class="main-viewport">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </main>
-    </div>
+      <div class="app-content">
+        <AppSidebar />
+        
+        <main class="main-viewport">
+          <router-view v-slot="{ Component }">
+            <transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
+        </main>
+      </div>
+    </template>
+    <template v-else>
+      <router-view />
+    </template>
     
     <LoadingOverlay :loading="isLoading" :text="loadingText" />
     <NotificationContainer ref="notificationRef" />
@@ -20,15 +25,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onMounted } from 'vue'
+import { ref, provide, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 import NotificationContainer from '@/components/common/NotificationContainer.vue'
+import { authApi } from '@/api'
 
+const router = useRouter()
+const route = useRoute()
 const isLoading = ref(false)
 const loadingText = ref('')
 const notificationRef = ref<InstanceType<typeof NotificationContainer> | null>(null)
+
+const isAuthenticated = computed(() => authApi.isAuthenticated())
+const isLoginPage = computed(() => route.path === '/login')
 
 const handleRefresh = () => {
   if (notificationRef.value) {
@@ -38,13 +50,29 @@ const handleRefresh = () => {
 
 const openSettings = () => {}
 
+const handleLogout = () => {
+  authApi.removeToken()
+  router.push('/login')
+}
+
 provide('showNotification', (type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => {
   if (notificationRef.value) {
     notificationRef.value[type](message, title)
   }
 })
 
-onMounted(() => {})
+provide('handleLogout', handleLogout)
+provide('isAuthenticated', isAuthenticated)
+
+onMounted(async () => {
+  if (authApi.isAuthenticated()) {
+    try {
+      await authApi.getMe()
+    } catch (e) {
+      authApi.removeToken()
+    }
+  }
+})
 </script>
 
 <style scoped lang="scss">

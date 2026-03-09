@@ -53,9 +53,9 @@ export interface NormalizedIndex {
   changeRate: number     // 涨跌幅 (%)
   volume: number         // 成交量
   amount: number         // 成交额
-  high?: number          // 最高
-  low?: number           // 最低
-  open?: number          // 开盘
+  high?: number | null   // 最高
+  low?: number | null    // 最低
+  open?: number | null   // 开盘
 }
 
 // 字段映射配置

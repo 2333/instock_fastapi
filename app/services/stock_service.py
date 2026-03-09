@@ -1,10 +1,11 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, select, and_
-from typing import List, Optional, Any
 import logging
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
-from core.crawling.base import AdjustType
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.base import AdjustType
 from core.crawling.eastmoney import EastMoneyCrawler
 
 settings = get_settings()
@@ -15,16 +16,14 @@ class StockService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _resolve_trade_date(self, target_date: Optional[str]) -> Optional[str]:
+    async def _resolve_trade_date(self, target_date: str | None) -> str | None:
         if target_date:
             result = await self.db.execute(
-                text(
-                    """
+                text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
                     WHERE trade_date <= :target_date
-                    """
-                ),
+                    """),
                 {"target_date": target_date},
             )
         else:
@@ -34,15 +33,13 @@ class StockService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def get_stocks(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_stocks(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
-
-        # 指定日期若无数据则自动回退到最近一个交易日
         date = await self._resolve_trade_date(date)
 
         if date:
             query = text("""
-                SELECT 
+                SELECT
                     s.ts_code as code,
                     s.name,
                     s.industry,
@@ -62,9 +59,8 @@ class StockService:
                 LIMIT :limit OFFSET :offset
             """)
         else:
-            # 如果没有找到任何交易日的数据，返回股票基本信息
             query = text("""
-                SELECT 
+                SELECT
                     s.ts_code as code,
                     s.name,
                     s.industry,
@@ -85,8 +81,37 @@ class StockService:
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
         return [row._mapping for row in result.fetchall()]
 
+    async def get_stocks_with_total(
+        self, date: str | None, page: int, page_size: int
+    ) -> tuple[list[dict], int]:
+        """获取股票列表和总数"""
+        date = await self._resolve_trade_date(date)
+
+        # 获取总数
+        if date:
+            count_query = text("""
+                SELECT COUNT(*) as total
+                FROM stocks s
+                INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = :date
+                WHERE s.is_etf = false AND s.list_status = 'L'
+            """)
+        else:
+            count_query = text("""
+                SELECT COUNT(*) as total
+                FROM stocks s
+                WHERE s.is_etf = false AND s.list_status = 'L'
+            """)
+
+        count_result = await self.db.execute(count_query, {"date": date})
+        count_row = count_result.fetchone()
+        total = count_row[0] if count_row else 0
+
+        # 获取分页数据
+        data = await self.get_stocks(date, page, page_size)
+        return data, total
+
     @staticmethod
-    def _normalize_date(value: Optional[str]) -> Optional[str]:
+    def _normalize_date(value: str | None) -> str | None:
         if not value:
             return None
         v = value.strip()
@@ -95,7 +120,7 @@ class StockService:
         return v.replace("/", "-")
 
     @staticmethod
-    def _parse_adjust(value: Optional[str]) -> AdjustType:
+    def _parse_adjust(value: str | None) -> AdjustType:
         mapping = {
             "bfq": AdjustType.NO_ADJUST,
             "qfq": AdjustType.FORWARD,
@@ -106,13 +131,13 @@ class StockService:
     async def _fetch_adjusted_bars(
         self,
         symbol: str,
-        start_date: Optional[str],
-        end_date: Optional[str],
+        start_date: str | None,
+        end_date: str | None,
         adjust: AdjustType,
-    ) -> List[dict]:
+    ) -> list[dict]:
         baostock_provider = BaoStockProvider()
         eastmoney_crawler = EastMoneyCrawler()
-        bars: List[dict] = []
+        bars: list[dict] = []
 
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
@@ -139,7 +164,7 @@ class StockService:
             )
         await eastmoney_crawler.close()
 
-        normalized: List[dict] = []
+        normalized: list[dict] = []
         for row in bars or []:
             date_raw = str(row.get("date", "")).strip()
             trade_date = date_raw.replace("-", "")
@@ -160,12 +185,12 @@ class StockService:
         return normalized
 
     async def _query_bars_from_db(
-        self, ts_code: str, start_date: Optional[str], end_date: Optional[str]
-    ) -> List[dict]:
+        self, ts_code: str, start_date: str | None, end_date: str | None
+    ) -> list[dict]:
         if not (start_date and end_date):
             return []
         bars_query = text("""
-            SELECT * FROM daily_bars 
+            SELECT * FROM daily_bars
             WHERE ts_code = :ts_code AND trade_date BETWEEN :start_date AND :end_date
             ORDER BY trade_date ASC
         """)
@@ -176,8 +201,8 @@ class StockService:
         return [dict(row._mapping) for row in bars_result.fetchall()]
 
     async def get_stock_detail(
-        self, code: str, start_date: Optional[str], end_date: Optional[str], adjust: str = "bfq"
-    ) -> Optional[dict]:
+        self, code: str, start_date: str | None, end_date: str | None, adjust: str = "bfq"
+    ) -> dict | None:
         stock_query = text("""
             SELECT * FROM stocks WHERE symbol = :code OR ts_code = :code LIMIT 1
         """)
@@ -221,12 +246,12 @@ class StockService:
 
         return stock
 
-    async def get_etf_list(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_etf_list(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
 
         if date:
             query = text("""
-                SELECT 
+                SELECT
                     s.ts_code as code,
                     s.name,
                     db.trade_date as date,
@@ -246,7 +271,7 @@ class StockService:
             """)
         else:
             query = text("""
-                SELECT 
+                SELECT
                     s.ts_code as code,
                     s.name,
                     db.trade_date as date,
@@ -268,7 +293,7 @@ class StockService:
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
         return [row._mapping for row in result.fetchall()]
 
-    async def get_etf_detail(self, code: str) -> Optional[dict]:
+    async def get_etf_detail(self, code: str) -> dict | None:
         query = text("""
             SELECT * FROM stocks WHERE (ts_code = :code OR symbol = :code) AND is_etf = true
         """)

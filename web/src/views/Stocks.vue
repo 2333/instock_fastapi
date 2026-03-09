@@ -258,7 +258,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, inject } from 'vue'
-import { stockApi, attentionApi, fundFlowApi } from '@/api'
+import { stockApi, attentionApi, marketApi } from '@/api'
 
 interface Stock {
   date: string | null

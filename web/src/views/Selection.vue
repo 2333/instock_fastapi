@@ -109,6 +109,16 @@
         </div>
       </aside>
 
+      <div
+        v-show="!criteriaCollapsed"
+        class="panel-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整筛选条件宽度"
+        @mousedown="startCriteriaResize"
+        @touchstart.prevent="startCriteriaResize"
+      ></div>
+
       <main class="results-panel">
         <div v-if="!hasResults" class="empty-state">
           <div class="empty-icon">🎯</div>
@@ -162,16 +172,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onBeforeUnmount, inject } from 'vue'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { selectionApi } from '@/api'
+import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface StockResult {
   ts_code: string
   code: string
   stock_name: string
+  name?: string
   score: number
   signal: string
   trade_date: string
+  date?: string
 }
 
 const loading = ref(false)
@@ -179,11 +192,17 @@ const hasResults = ref(false)
 const results = ref<StockResult[]>([])
 const sortBy = ref('score')
 const criteriaPanelRef = ref<HTMLElement | null>(null)
-const criteriaPanelWidth = ref(360)
 const criteriaCollapsed = ref(false)
 const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
 const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+const { panelWidth: criteriaPanelWidth, hydrateWidth: hydrateCriteriaWidth, startResize: startCriteriaResize } = useResizablePanel({
+  panelRef: criteriaPanelRef,
+  storageKey: CRITERIA_WIDTH_KEY,
+  defaultWidth: 360,
+  minWidth: 300,
+  maxWidth: 520,
+})
 
 const criteria = reactive({
   priceMin: null as number | null,
@@ -260,15 +279,6 @@ const saveCriteria = () => {
   showNotification?.('success', '筛选条件已保存')
 }
 
-const persistCriteriaWidth = () => {
-  if (!criteriaPanelRef.value) return
-  const width = Math.round(criteriaPanelRef.value.getBoundingClientRect().width)
-  if (width >= 300 && width <= 520) {
-    criteriaPanelWidth.value = width
-    window.localStorage.setItem(CRITERIA_WIDTH_KEY, String(width))
-  }
-}
-
 const toggleCriteriaPanel = () => {
   criteriaCollapsed.value = !criteriaCollapsed.value
   window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
@@ -283,19 +293,9 @@ onMounted(() => {
       // ignore broken local cache
     }
   }
-  const savedWidth = Number(window.localStorage.getItem(CRITERIA_WIDTH_KEY) || 0)
-  if (savedWidth >= 300 && savedWidth <= 520) {
-    criteriaPanelWidth.value = savedWidth
-  }
+  hydrateCriteriaWidth()
   criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
-  window.addEventListener('mouseup', persistCriteriaWidth)
-  window.addEventListener('touchend', persistCriteriaWidth)
   fetchResults()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('mouseup', persistCriteriaWidth)
-  window.removeEventListener('touchend', persistCriteriaWidth)
 })
 
 </script>
@@ -360,22 +360,52 @@ onBeforeUnmount(() => {
 
 .selection-layout {
   display: flex;
-  gap: 24px;
+  gap: 12px;
 }
 
 .criteria-panel {
-  width: clamp(300px, 24vw, 500px);
-  min-width: 300px;
-  max-width: 520px;
+  min-width: 280px;
+  max-width: 600px;
   flex-shrink: 0;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 20px;
-  max-height: calc(100vh - 180px);
+  max-height: calc(100vh - 140px);
   overflow-y: auto;
-  resize: horizontal;
   overflow-x: hidden;
+  position: relative;
+}
+
+.panel-resizer {
+  position: relative;
+  flex: 0 0 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 16px;
+    bottom: 16px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    transition: background 0.2s ease;
+  }
+
+  &:hover::after {
+    background: rgba(41, 98, 255, 0.75);
+  }
 }
 
 .panel-section {
@@ -409,13 +439,15 @@ onBeforeUnmount(() => {
 }
 
 .range-inputs {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
 }
 
 .input-small {
-  flex: 1;
+  min-width: 0;
+  width: 100%;
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
@@ -440,6 +472,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  min-width: 0;
 
   input {
     accent-color: #2962FF;
@@ -448,6 +481,7 @@ onBeforeUnmount(() => {
   span {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
+    overflow-wrap: anywhere;
   }
 }
 
@@ -459,14 +493,18 @@ onBeforeUnmount(() => {
 @media (max-width: 1200px) {
   .selection-layout {
     flex-direction: column;
+    gap: 24px;
   }
 
   .criteria-panel {
     width: 100%;
     min-width: 0;
     max-width: none;
-    resize: none;
-    max-height: none;
+    max-height: 50vh;
+  }
+
+  .panel-resizer {
+    display: none;
   }
 }
 

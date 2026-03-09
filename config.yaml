@@ -15,7 +15,7 @@ postgresql:
 
 # Tushare API Configuration
 tushare:
-  token: "your_tushare_token"
+  token: "a417d287cdb8a1693af8d9d2aef6c1c915f060a72f3a7ffbf1b2b59eb8e0"
 
 # Redis Configuration (optional, for caching)
 redis:

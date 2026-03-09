@@ -14,11 +14,16 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import yaml
 
 from .base import AdjustType
 
 logger = logging.getLogger(__name__)
+
+CONFIG_YAML_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
 
 
 @dataclass
@@ -34,9 +39,38 @@ class TushareProvider:
 
     def __init__(self, config: Optional[TushareConfig] = None):
         self.config = config or TushareConfig()
-        self.token = (self.config.token or os.getenv("TUSHARE_TOKEN") or "").strip()
-        self.http_url = os.getenv("TUSHARE_HTTP_URL", "http://lianghua.nanyangqiankun.top")
+        config_defaults = self._load_config_defaults()
+        self.token = (
+            self.config.token or os.getenv("TUSHARE_TOKEN") or config_defaults.get("token") or ""
+        ).strip()
+        self.http_url = (
+            os.getenv("TUSHARE_HTTP_URL")
+            or config_defaults.get("http_url")
+            or "http://lianghua.nanyangqiankun.top"
+        )
         self._compat_enabled = False
+        self._batch_trade_date: Optional[str] = None  # 批量模式标志
+
+    def _load_config_defaults(self) -> Dict[str, str]:
+        if not CONFIG_YAML_PATH.exists():
+            return {}
+
+        try:
+            with open(CONFIG_YAML_PATH, "r", encoding="utf-8") as fp:
+                data = yaml.safe_load(fp) or {}
+        except Exception as exc:
+            logger.warning("读取 config.yaml 失败，忽略 Tushare YAML 配置: %s", exc)
+            return {}
+
+        tushare_cfg = data.get("tushare") or {}
+        defaults: Dict[str, str] = {}
+        token = tushare_cfg.get("token")
+        if token:
+            defaults["token"] = str(token).strip()
+        http_url = tushare_cfg.get("http_url")
+        if http_url:
+            defaults["http_url"] = str(http_url).strip()
+        return defaults
 
     async def fetch_stock_list(self) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_stock_list_sync)
@@ -46,7 +80,7 @@ class TushareProvider:
 
     async def fetch_kline(
         self,
-        code: str,
+        code: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         adjust: AdjustType = AdjustType.NO_ADJUST,
@@ -55,6 +89,15 @@ class TushareProvider:
         if period != "daily":
             logger.warning("Tushare 当前仅接入日线，收到 period=%s，跳过", period)
             return []
+
+        # 批量模式：传入 trade_date 且不指定 code 时，获取所有股票数据
+        trade_date = getattr(self, "_batch_trade_date", None)
+        if trade_date and not code:
+            return await asyncio.to_thread(
+                self._fetch_kline_batch_sync,
+                trade_date,
+            )
+
         return await asyncio.to_thread(
             self._fetch_kline_sync,
             code,
@@ -63,10 +106,57 @@ class TushareProvider:
             adjust,
         )
 
+    def _fetch_kline_batch_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        """批量获取单日所有股票数据"""
+        pro = self._get_pro()
+        if not pro:
+            return []
+
+        try:
+            # 使用 start_date/end_date 方式
+            df = self._call_pro("daily", start_date=trade_date, end_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare daily 批量抓取失败 %s: %s", trade_date, exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_code = str(row.get("ts_code") or "")
+            symbol = str(row.get("symbol") or "")
+            code = symbol or ts_code.split(".")[0]
+            trade_date_str = str(row.get("trade_date") or "")
+
+            close = row.get("close") or 0
+            pre_close = row.get("pre_close") or close
+            change = row.get("change") or 0
+            pct_chg = row.get("pct_chg") or 0
+
+            rows.append(
+                {
+                    "date": trade_date_str,
+                    "code": code,
+                    "open": row.get("open") or 0,
+                    "high": row.get("high") or 0,
+                    "low": row.get("low") or 0,
+                    "close": close,
+                    "pre_close": pre_close,
+                    "change": change,
+                    "change_pct": pct_chg,
+                    "volume": row.get("vol") or 0,
+                    "amount": row.get("amount") or 0,
+                }
+            )
+        return rows
+
     async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_fund_flow_rank_sync, trade_date)
 
-    async def fetch_sector_fund_flow(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
+    async def fetch_sector_fund_flow(
+        self, sector_type: str, trade_date: str
+    ) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_sector_fund_flow_sync, sector_type, trade_date)
 
     def _get_pro(self) -> Optional[Any]:
@@ -283,7 +373,9 @@ class TushareProvider:
             )
         return [r for r in rows if r["code"]]
 
-    def _fetch_sector_fund_flow_sync(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
+    def _fetch_sector_fund_flow_sync(
+        self, sector_type: str, trade_date: str
+    ) -> List[Dict[str, Any]]:
         pro = self._get_pro()
         if not pro:
             return []
@@ -330,9 +422,7 @@ class TushareProvider:
                     "main_net_inflow_rate": self._pick_float(
                         row, "net_rate_main", "main_net_inflow_rate"
                     ),
-                    "super_net_inflow": self._pick_float(
-                        row, "net_amount_hf", "super_net_inflow"
-                    ),
+                    "super_net_inflow": self._pick_float(row, "net_amount_hf", "super_net_inflow"),
                     "super_net_inflow_rate": self._pick_float(
                         row, "net_rate_hf", "super_net_inflow_rate"
                     ),

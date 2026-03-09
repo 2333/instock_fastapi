@@ -9,11 +9,18 @@ import talib as tl
 from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
 from app.models.stock_model import DailyBar, Indicator
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_trade_date_dt(bar: DailyBar):
+    if bar.trade_date_dt is not None:
+        return bar.trade_date_dt
+    return datetime.strptime(bar.trade_date, "%Y%m%d").date()
 
 
 async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates: List[str]):
@@ -36,12 +43,14 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     indicators_data = []
 
     for i, bar in enumerate(bars):
+        trade_date_dt = _resolve_trade_date_dt(bar)
         if i >= 4:
             ma5 = np.mean(closes[max(0, i - 4) : i + 1])
             indicators_data.append(
                 {
                     "ts_code": ts_code,
                     "trade_date": bar.trade_date,
+                    "trade_date_dt": trade_date_dt,
                     "indicator_name": "MA5",
                     "indicator_value": Decimal(str(round(ma5, 2))),
                 }
@@ -53,6 +62,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                 {
                     "ts_code": ts_code,
                     "trade_date": bar.trade_date,
+                    "trade_date_dt": trade_date_dt,
                     "indicator_name": "MA10",
                     "indicator_value": Decimal(str(round(ma10, 2))),
                 }
@@ -64,6 +74,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                 {
                     "ts_code": ts_code,
                     "trade_date": bar.trade_date,
+                    "trade_date_dt": trade_date_dt,
                     "indicator_name": "MA20",
                     "indicator_value": Decimal(str(round(ma20, 2))),
                 }
@@ -75,6 +86,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                 {
                     "ts_code": ts_code,
                     "trade_date": bar.trade_date,
+                    "trade_date_dt": trade_date_dt,
                     "indicator_name": "MA60",
                     "indicator_value": Decimal(str(round(ma60, 2))),
                 }
@@ -89,6 +101,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "RSI14",
                             "indicator_value": Decimal(str(round(rsi[i], 2))),
                         }
@@ -105,6 +118,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "MACD",
                             "indicator_value": Decimal(str(round(macd[i], 4))),
                         }
@@ -114,6 +128,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "MACD_SIGNAL",
                             "indicator_value": Decimal(str(round(macd_signal[i], 4))),
                         }
@@ -123,6 +138,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "MACD_HIST",
                             "indicator_value": Decimal(str(round(macd_hist[i], 4))),
                         }
@@ -139,6 +155,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "BOLL_UPPER",
                             "indicator_value": Decimal(str(round(upper[i], 2))),
                         }
@@ -148,6 +165,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "BOLL_MIDDLE",
                             "indicator_value": Decimal(str(round(middle[i], 2))),
                         }
@@ -157,6 +175,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "BOLL_LOWER",
                             "indicator_value": Decimal(str(round(lower[i], 2))),
                         }
@@ -173,6 +192,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "K",
                             "indicator_value": Decimal(str(round(k[i], 2))),
                         }
@@ -182,6 +202,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
                         {
                             "ts_code": ts_code,
                             "trade_date": bar.trade_date,
+                            "trade_date_dt": _resolve_trade_date_dt(bar),
                             "indicator_name": "D",
                             "indicator_value": Decimal(str(round(d[i], 2))),
                         }
@@ -189,18 +210,37 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
         except Exception as e:
             logger.debug(f"KDJ计算失败 {ts_code}: {e}")
 
-    for ind in indicators_data:
-        stmt = (
-            insert(Indicator)
-            .values(**ind)
-            .on_conflict_do_update(
-                index_elements=["ts_code", "trade_date", "indicator_name"],
-                set_={
-                    "indicator_value": ind["indicator_value"],
-                },
+    try:
+        for ind in indicators_data:
+            stmt = (
+                insert(Indicator)
+                .values(**ind)
+                .on_conflict_do_update(
+                    index_elements=["ts_code", "trade_date", "indicator_name"],
+                    set_={
+                        "trade_date_dt": ind["trade_date_dt"],
+                        "indicator_value": ind["indicator_value"],
+                    },
+                )
             )
-        )
-        await session.execute(stmt)
+            await session.execute(stmt)
+    except SQLAlchemyError as exc:
+        logger.warning("指标 upsert 失败，降级逐条保存 %s: %s", ts_code, exc)
+        await session.rollback()
+
+        for ind in indicators_data:
+            existing = await session.scalar(
+                select(Indicator).where(
+                    Indicator.ts_code == ind["ts_code"],
+                    Indicator.trade_date == ind["trade_date"],
+                    Indicator.indicator_name == ind["indicator_name"],
+                )
+            )
+            if existing:
+                existing.trade_date_dt = ind["trade_date_dt"]
+                existing.indicator_value = ind["indicator_value"]
+            else:
+                session.add(Indicator(**ind))
 
     await session.commit()
 

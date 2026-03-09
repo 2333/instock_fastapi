@@ -35,10 +35,14 @@ def _acquire_scheduler_lock() -> bool:
         return True
 
 
-def start_scheduler():
+def start_scheduler() -> bool:
+    if scheduler.running:
+        logger.info("Scheduler already running in current process; skipping start.")
+        return True
+
     if not _acquire_scheduler_lock():
         logger.info("Scheduler already running in another process; skipping start.")
-        return
+        return False
 
     scheduler.add_job(
         id="fetch_daily_data",
@@ -48,6 +52,7 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=1800,
+        replace_existing=True,
     )
     scheduler.add_job(
         id="fetch_fund_flow",
@@ -55,6 +60,7 @@ def start_scheduler():
         trigger=CronTrigger(hour=16, minute=0),
         name="资金流向抓取",
         max_instances=1,
+        replace_existing=True,
     )
     scheduler.add_job(
         id="calculate_indicators",
@@ -62,6 +68,7 @@ def start_scheduler():
         trigger=CronTrigger(hour=17, minute=0),
         name="指标计算",
         max_instances=1,
+        replace_existing=True,
     )
     scheduler.add_job(
         id="run_pattern_recognition",
@@ -69,6 +76,7 @@ def start_scheduler():
         trigger=CronTrigger(hour=17, minute=30),
         name="形态识别",
         max_instances=1,
+        replace_existing=True,
     )
     scheduler.add_job(
         id="run_strategy_selection",
@@ -76,6 +84,7 @@ def start_scheduler():
         trigger=CronTrigger(hour=18, minute=0),
         name="策略选股",
         max_instances=1,
+        replace_existing=True,
     )
     scheduler.add_job(
         id="cleanup_old_data",
@@ -83,13 +92,16 @@ def start_scheduler():
         trigger=CronTrigger(hour=3, minute=0, day_of_week="sun"),
         name="数据清理",
         max_instances=1,
+        replace_existing=True,
     )
     scheduler.start()
     logger.info("定时任务调度器已启动")
+    return True
 
 
 def stop_scheduler():
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown()
     global _scheduler_lock_handle
     if _scheduler_lock_handle is not None:
         try:

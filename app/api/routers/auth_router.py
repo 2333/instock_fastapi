@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from typing import Optional
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.auth_service import AuthService
 from app.core.dependencies import get_current_user, get_db
 from app.models.stock_model import User, UserSettings
+from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -27,14 +26,13 @@ class RefreshTokenRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: str
     is_active: bool
     is_superuser: bool
-
-    class Config:
-        from_attributes = True
 
 
 class TokenResponse(BaseModel):
@@ -116,6 +114,8 @@ async def get_current_user_info(
 
 
 class UserSettingsResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     user_id: int
     language: str
@@ -123,15 +123,12 @@ class UserSettingsResponse(BaseModel):
     timezone: str
     extra: dict
 
-    class Config:
-        from_attributes = True
-
 
 class UserSettingsUpdate(BaseModel):
-    language: Optional[str] = None
-    theme: Optional[str] = None
-    timezone: Optional[str] = None
-    extra: Optional[dict] = None
+    language: str | None = None
+    theme: str | None = None
+    timezone: str | None = None
+    extra: dict | None = None
 
 
 @router.get("/settings", response_model=UserSettingsResponse)

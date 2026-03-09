@@ -11,6 +11,7 @@ const api = axios.create({
 })
 
 const isAuthenticated = ref(!!localStorage.getItem(TOKEN_KEY))
+let refreshPromise: Promise<{ access_token: string; refresh_token: string }> | null = null
 
 export const authApi = {
   login: (username: string, password: string) => 
@@ -51,16 +52,52 @@ export const authApi = {
 
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
     const status = error.response?.status
+    const originalRequest = error.config as any
     
     if (status === 401) {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('refresh_token')
-      isAuthenticated.value = false
+      // refresh 请求本身失败时，不再重试，直接登出
+      if (originalRequest?.url?.includes('/auth/refresh') || originalRequest?._retry) {
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
+        isAuthenticated.value = false
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
+      }
+
+      const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
       
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+      if (refreshToken) {
+        try {
+          originalRequest._retry = true
+          if (!refreshPromise) {
+            refreshPromise = authApi.refreshToken(refreshToken).finally(() => {
+              refreshPromise = null
+            })
+          }
+          const res = await refreshPromise
+          const newAccessToken = res.access_token
+          const newRefreshToken = res.refresh_token
+          
+          authApi.setToken(newAccessToken, newRefreshToken)
+          
+          originalRequest.headers = originalRequest.headers || {}
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`
+          return api(originalRequest)
+        } catch (e) {
+          authApi.removeToken()
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
+        }
+      } else {
+        authApi.removeToken()
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
       }
     }
     
