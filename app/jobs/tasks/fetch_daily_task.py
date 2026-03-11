@@ -67,6 +67,22 @@ def _inline_fallback_enabled() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+async def _ensure_backfill_state_table(session: AsyncSession) -> None:
+    await session.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS backfill_daily_state (
+              ts_code VARCHAR(20) PRIMARY KEY,
+              status VARCHAR(20) NOT NULL,
+              note TEXT NULL,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+    await session.commit()
+
+
 async def _migrate_legacy_stock_code(
     session: AsyncSession,
     legacy_stock: Stock,
@@ -603,19 +619,7 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
 async def _get_backfill_targets(
     session: AsyncSession, start: str, end: str, batch_size: int
 ) -> List[dict]:
-    await session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS backfill_daily_state (
-              ts_code VARCHAR(20) PRIMARY KEY,
-              status VARCHAR(20) NOT NULL,
-              note TEXT NULL,
-              updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-            )
-            """
-        )
-    )
-    await session.commit()
+    await _ensure_backfill_state_table(session)
 
     query = text(
         """
@@ -650,19 +654,7 @@ async def _get_backfill_targets(
 
 
 async def _get_backfill_progress(session: AsyncSession, start: str, end: str) -> tuple[int, int]:
-    await session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS backfill_daily_state (
-              ts_code VARCHAR(20) PRIMARY KEY,
-              status VARCHAR(20) NOT NULL,
-              note TEXT NULL,
-              updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-            )
-            """
-        )
-    )
-    await session.commit()
+    await _ensure_backfill_state_table(session)
 
     total_q = text(
         """
@@ -916,6 +908,7 @@ async def run_historical_fallback_backfill() -> bool:
     baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
 
     async with async_session_factory() as session:
+        await _ensure_backfill_state_table(session)
         pending_q = text("SELECT COUNT(*) FROM backfill_daily_state WHERE status = 'needs_fallback'")
         pending = (await session.execute(pending_q)).scalar() or 0
         logger.info("降级补偿待处理: %s", pending)

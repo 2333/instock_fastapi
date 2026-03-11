@@ -212,7 +212,7 @@ def save_to_database(stocks_data: list):
                 ts_code, trade_date, open, high, low, close, 
                 pre_close, change, pct_chg, vol, amount, adj_factor, trade_date_dt, created_at
             ) VALUES %s
-            ON CONFLICT (ts_code, trade_date_dt) DO UPDATE SET
+            ON CONFLICT (ts_code, trade_date) DO UPDATE SET
                 open = EXCLUDED.open,
                 high = EXCLUDED.high,
                 low = EXCLUDED.low,
@@ -221,7 +221,8 @@ def save_to_database(stocks_data: list):
                 change = EXCLUDED.change,
                 pct_chg = EXCLUDED.pct_chg,
                 vol = EXCLUDED.vol,
-                amount = EXCLUDED.amount
+                amount = EXCLUDED.amount,
+                trade_date_dt = EXCLUDED.trade_date_dt
         """
 
         values = []

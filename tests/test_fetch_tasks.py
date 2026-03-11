@@ -2,10 +2,11 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy import select
 
 from app.jobs.tasks import fetch_fund_flow_task
-from app.jobs.tasks.fetch_daily_task import save_stocks
+from app.jobs.tasks.fetch_daily_task import _ensure_backfill_state_table, save_stocks
 from app.models.stock_model import Base, DailyBar, Stock
 from tests.conftest import async_engine_test, async_session_factory_test
 
@@ -93,6 +94,30 @@ async def test_save_stocks_migrates_legacy_ts_code_without_duplicates():
     assert stocks[0].ts_code == "000001.SZ"
     assert stocks[0].exchange == "SZ"
     assert bars == ["000001.SZ"]
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_ensure_backfill_state_table_creates_table():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        await _ensure_backfill_state_table(session)
+        await session.execute(
+            text(
+                """
+            INSERT INTO backfill_daily_state (ts_code, status)
+            VALUES ('000001.SZ', 'needs_fallback')
+            """
+            )
+        )
+        await session.commit()
+
+        result = await session.execute(text("SELECT COUNT(*) FROM backfill_daily_state"))
+        assert result.scalar_one() == 1
 
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
