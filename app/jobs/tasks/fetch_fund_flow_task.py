@@ -176,6 +176,40 @@ async def _fetch_sector_by_source(
     return [], (trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")), source
 
 
+async def _fetch_sector_data(
+    tushare_provider: Any,
+    baostock_provider: Any,
+    crawler: EastMoneyCrawler,
+    sector_type: str,
+    trade_dates: List[str],
+    source: str,
+    primary_only: bool,
+) -> tuple[List[dict], str, str]:
+    if source == "fallback":
+        if primary_only:
+            return (
+                [],
+                trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                source,
+            )
+        data, trade_date = await _fetch_sector_with_fallback(
+            tushare_provider=tushare_provider,
+            baostock_provider=baostock_provider,
+            crawler=crawler,
+            sector_type=sector_type,
+            trade_dates=trade_dates,
+        )
+        return data, trade_date, "fallback"
+
+    return await _fetch_sector_by_source(
+        tushare_provider=tushare_provider,
+        crawler=crawler,
+        sector_type=sector_type,
+        trade_dates=trade_dates,
+        source=source,
+    )
+
+
 async def save_fund_flows(session: AsyncSession, data: List[dict], trade_date: str) -> int:
     """保存资金流向数据"""
     count = 0
@@ -353,31 +387,15 @@ async def run():
 
             try:
                 logger.info("抓取行业资金流向 (source=%s)...", sector_source)
-                if sector_source == "fallback" and not primary_only:
-                    industry_data, industry_trade_date, used_source = await _fetch_sector_by_source(
-                        tushare_provider=tushare_provider,
-                        crawler=crawler,
-                        sector_type="industry",
-                        trade_dates=trade_dates,
-                        source=sector_source,
-                    )
-                    if not industry_data and sector_source == "fallback":
-                        industry_data, industry_trade_date = await _fetch_sector_with_fallback(
-                            tushare_provider=tushare_provider,
-                            baostock_provider=baostock_provider,
-                            crawler=crawler,
-                            sector_type="industry",
-                            trade_dates=trade_dates,
-                        )
-                        used_source = "fallback"
-                else:
-                    industry_data, industry_trade_date, used_source = await _fetch_sector_by_source(
-                        tushare_provider=tushare_provider,
-                        crawler=crawler,
-                        sector_type="industry",
-                        trade_dates=trade_dates,
-                        source=sector_source,
-                    )
+                industry_data, industry_trade_date, used_source = await _fetch_sector_data(
+                    tushare_provider=tushare_provider,
+                    baostock_provider=baostock_provider,
+                    crawler=crawler,
+                    sector_type="industry",
+                    trade_dates=trade_dates,
+                    source=sector_source,
+                    primary_only=primary_only,
+                )
                 if industry_data:
                     count = await save_sector_fund_flows(
                         session, industry_data, industry_trade_date, "industry"
@@ -429,31 +447,15 @@ async def run():
 
             try:
                 logger.info("抓取概念资金流向 (source=%s)...", sector_source)
-                if sector_source == "fallback" and not primary_only:
-                    concept_data, concept_trade_date, used_source = await _fetch_sector_by_source(
-                        tushare_provider=tushare_provider,
-                        crawler=crawler,
-                        sector_type="concept",
-                        trade_dates=trade_dates,
-                        source=sector_source,
-                    )
-                    if not concept_data and sector_source == "fallback":
-                        concept_data, concept_trade_date = await _fetch_sector_with_fallback(
-                            tushare_provider=tushare_provider,
-                            baostock_provider=baostock_provider,
-                            crawler=crawler,
-                            sector_type="concept",
-                            trade_dates=trade_dates,
-                        )
-                        used_source = "fallback"
-                else:
-                    concept_data, concept_trade_date, used_source = await _fetch_sector_by_source(
-                        tushare_provider=tushare_provider,
-                        crawler=crawler,
-                        sector_type="concept",
-                        trade_dates=trade_dates,
-                        source=sector_source,
-                    )
+                concept_data, concept_trade_date, used_source = await _fetch_sector_data(
+                    tushare_provider=tushare_provider,
+                    baostock_provider=baostock_provider,
+                    crawler=crawler,
+                    sector_type="concept",
+                    trade_dates=trade_dates,
+                    source=sector_source,
+                    primary_only=primary_only,
+                )
                 if concept_data:
                     count = await save_sector_fund_flows(
                         session, concept_data, concept_trade_date, "concept"

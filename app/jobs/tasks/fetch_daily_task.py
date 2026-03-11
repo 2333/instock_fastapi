@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta, date
 from typing import List, Optional
 
-from sqlalchemy import select, and_, text
+from sqlalchemy import inspect, select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,6 +21,22 @@ from core.crawling.tushare_provider import TushareProvider
 logger = logging.getLogger(__name__)
 _supports_daily_bar_upsert = True
 BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
+TS_CODE_CHILD_TABLES = (
+    "daily_bars",
+    "fund_flows",
+    "attention",
+    "indicators",
+    "patterns",
+    "strategy_results",
+    "selection_results",
+    "stock_tops",
+    "stock_block_trades",
+    "stock_bonus",
+    "stock_limitup_reasons",
+    "stock_chip_races",
+    "north_bound_funds",
+    "backfill_daily_state",
+)
 
 
 def _build_proxy_pool() -> Optional[ProxyPool]:
@@ -51,6 +67,71 @@ def _inline_fallback_enabled() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+async def _migrate_legacy_stock_code(
+    session: AsyncSession,
+    legacy_stock: Stock,
+    *,
+    ts_code: str,
+    symbol: str,
+    name: str,
+    area: str | None,
+    industry: str | None,
+    market: str | None,
+    exchange: str,
+    is_etf: bool,
+) -> None:
+    connection = await session.connection()
+    existing_tables = set(await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names()))
+
+    current = await session.scalar(select(Stock).where(Stock.ts_code == ts_code))
+    if current is None:
+        current = Stock(
+            ts_code=ts_code,
+            symbol=symbol,
+            name=name,
+            area=area,
+            industry=industry,
+            market=market,
+            exchange=exchange,
+            list_status="L",
+            is_etf=is_etf,
+        )
+        session.add(current)
+        await session.flush()
+    else:
+        current.symbol = symbol
+        current.name = name
+        current.area = area
+        current.industry = industry
+        current.market = market
+        current.exchange = exchange
+        current.list_status = "L"
+        current.is_etf = is_etf
+
+    old_ts_code = legacy_stock.ts_code
+    for table in TS_CODE_CHILD_TABLES:
+        if table not in existing_tables:
+            continue
+        await session.execute(
+            text(f"UPDATE {table} SET ts_code = :new_ts_code WHERE ts_code = :old_ts_code"),
+            {"new_ts_code": ts_code, "old_ts_code": old_ts_code},
+        )
+
+    if "data_fetch_audit" in existing_tables:
+        await session.execute(
+            text(
+                """
+                UPDATE data_fetch_audit
+                SET entity_key = :new_ts_code
+                WHERE entity_key = :old_ts_code
+                """
+            ),
+            {"new_ts_code": ts_code, "old_ts_code": old_ts_code},
+        )
+
+    await session.delete(legacy_stock)
+
+
 async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = False) -> int:
     """保存股票/ETF列表"""
     count = 0
@@ -66,13 +147,39 @@ async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = 
         area = str(stock.get("f15")) if stock.get("f15") else None
         industry = str(stock.get("f16")) if stock.get("f16") else None
         market = str(stock.get("f17")) if stock.get("f17") else None
+        name = stock.get("f14") or stock.get("name", "")
+
+        normalized_stock = await session.scalar(select(Stock).where(Stock.ts_code == ts_code))
+        if normalized_stock is None:
+            legacy_stock = await session.scalar(
+                select(Stock).where(
+                    Stock.symbol == symbol,
+                    Stock.is_etf == is_etf,
+                    Stock.ts_code != ts_code,
+                )
+            )
+            if legacy_stock is not None:
+                await _migrate_legacy_stock_code(
+                    session,
+                    legacy_stock,
+                    ts_code=ts_code,
+                    symbol=symbol,
+                    name=name,
+                    area=area,
+                    industry=industry,
+                    market=market,
+                    exchange=exchange,
+                    is_etf=is_etf,
+                )
+                count += 1
+                continue
 
         stmt = (
             insert(Stock)
             .values(
                 ts_code=ts_code,
                 symbol=code,
-                name=stock.get("f14") or stock.get("name", ""),
+                name=name,
                 area=area,
                 industry=industry,
                 market=market,
@@ -83,10 +190,14 @@ async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = 
             .on_conflict_do_update(
                 index_elements=["ts_code"],
                 set_={
-                    "name": stock.get("f14") or stock.get("name", ""),
+                    "symbol": symbol,
+                    "name": name,
                     "area": area,
                     "industry": industry,
                     "market": market,
+                    "exchange": exchange,
+                    "list_status": "L",
+                    "is_etf": is_etf,
                     "updated_at": datetime.utcnow(),
                 },
             )
