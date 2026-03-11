@@ -44,6 +44,11 @@ def test_settings_parse_cors_fields():
     assert settings.get_cors_headers() == ["authorization", "content-type"]
 
 
+def test_settings_parse_debug_aliases():
+    assert Settings(SECRET_KEY="x" * 32, DEBUG="release").DEBUG is False
+    assert Settings(SECRET_KEY="x" * 32, DEBUG="development").DEBUG is True
+
+
 def test_get_settings_rejects_default_secret(monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setenv("SECRET_KEY", "your-secret-key-change-in-production")

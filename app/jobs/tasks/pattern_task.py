@@ -190,7 +190,15 @@ async def run():
                     SELECT DISTINCT db.ts_code 
                     FROM daily_bars db
                     JOIN stocks s ON s.ts_code = db.ts_code
-                    WHERE db.trade_date >= '20260220'
+                    WHERE db.trade_date >= (
+                        SELECT MIN(recent_dates.trade_date)
+                        FROM (
+                            SELECT DISTINCT trade_date
+                            FROM daily_bars
+                            ORDER BY trade_date DESC
+                            LIMIT 20
+                        ) AS recent_dates
+                    )
                     AND s.is_etf = false
                     AND s.list_status = 'L'
                     """

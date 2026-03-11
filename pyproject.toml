@@ -50,6 +50,9 @@ dev = [
 [tool.uv]
 package = false
 
+[tool.setuptools]
+packages = ["app", "core"]
+
 [tool.black]
 line-length = 100
 target-version = ['py311']

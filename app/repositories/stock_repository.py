@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import Stock as StockModel
 from app.schemas.stock_schema import StockResponse, StockListResponse
+from app.utils.stock_codes import normalize_exchange_name
 
 
 class StockRepository:
@@ -22,7 +23,7 @@ class StockRepository:
         query = select(StockModel)
 
         if exchange:
-            query = query.where(StockModel.exchange == exchange)
+            query = query.where(StockModel.exchange == normalize_exchange_name(exchange))
         if market:
             query = query.where(StockModel.market == market)
         if industry:

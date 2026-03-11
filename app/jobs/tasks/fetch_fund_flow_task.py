@@ -10,7 +10,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
+from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
 from app.models.stock_model import FundFlow, SectorFundFlow
+from app.utils.stock_codes import normalize_ts_code
 from core.crawling.base import ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.eastmoney import EastMoneyCrawler
@@ -19,7 +21,33 @@ from core.crawling.tushare_provider import TushareProvider
 logger = logging.getLogger(__name__)
 
 
+def _normalize_source(value: str, default: str) -> str:
+    normalized = (value or default).strip().lower()
+    return normalized or default
+
+
+def _get_stock_fund_flow_source() -> str:
+    return _normalize_source(os.getenv("FUND_FLOW_STOCK_SOURCE", "eastmoney"), "eastmoney")
+
+
+def _get_sector_fund_flow_source() -> str:
+    return _normalize_source(os.getenv("FUND_FLOW_SECTOR_SOURCE", "tushare"), "tushare")
+
+
+def _inline_fallback_enabled() -> bool:
+    value = os.getenv("INLINE_FALLBACK_ENABLED", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _build_proxy_pool() -> ProxyPool | None:
+    if os.getenv("CRAWLER_PROXY_ENABLED", "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        logger.info("资金流任务代理已关闭，使用直连模式")
+        return None
     proxy_file = os.getenv("CRAWLER_PROXY_FILE", "config/proxy.txt")
     pool = ProxyPool.from_file(proxy_file)
     if pool.proxies:
@@ -77,6 +105,25 @@ async def _fetch_rank_with_fallback(
     return fallback_data, fallback_date
 
 
+async def _fetch_rank_by_source(
+    tushare_provider: Any,
+    crawler: EastMoneyCrawler,
+    trade_dates: List[str],
+    source: str,
+) -> tuple[List[dict], str, str]:
+    for trade_date in trade_dates:
+        if source == "tushare":
+            data = await tushare_provider.fetch_fund_flow_rank(trade_date=trade_date)
+        elif source == "eastmoney":
+            result = await crawler.fetch_fund_flow_rank(indicator=0)
+            data = result if isinstance(result, list) else []
+        else:
+            raise ValueError(f"不支持的个股资金流来源: {source}")
+        if data:
+            return data, trade_date, source
+    return [], (trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")), source
+
+
 async def _fetch_sector_with_fallback(
     tushare_provider: Any,
     baostock_provider: Any,
@@ -107,6 +154,28 @@ async def _fetch_sector_with_fallback(
     return fallback_sector, fallback_date
 
 
+async def _fetch_sector_by_source(
+    tushare_provider: Any,
+    crawler: EastMoneyCrawler,
+    sector_type: str,
+    trade_dates: List[str],
+    source: str,
+) -> tuple[List[dict], str, str]:
+    for trade_date in trade_dates:
+        if source == "tushare":
+            data = await tushare_provider.fetch_sector_fund_flow(
+                sector_type=sector_type, trade_date=trade_date
+            )
+        elif source == "eastmoney":
+            result = await crawler.fetch_sector_fund_flow(sector_type=sector_type)
+            data = result if isinstance(result, list) else []
+        else:
+            raise ValueError(f"不支持的板块资金流来源: {source}")
+        if data:
+            return data, trade_date, source
+    return [], (trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")), source
+
+
 async def save_fund_flows(session: AsyncSession, data: List[dict], trade_date: str) -> int:
     """保存资金流向数据"""
     count = 0
@@ -115,7 +184,7 @@ async def save_fund_flows(session: AsyncSession, data: List[dict], trade_date: s
         if not code:
             continue
 
-        ts_code = f"{code}.SSE" if code.startswith("6") else f"{code}.SZSE"
+        ts_code = normalize_ts_code(code)
 
         values = {
             "ts_code": ts_code,
@@ -218,52 +287,232 @@ async def run():
             trade_dates = await _resolve_candidate_trade_dates(session)
             logger.info("资金流任务候选交易日: %s", trade_dates)
 
-            logger.info("抓取个股资金流向 (tushare -> baostock -> eastmoney)...")
-            fund_flow_data, fund_flow_trade_date = await _fetch_rank_with_fallback(
-                tushare_provider=tushare_provider,
-                baostock_provider=baostock_provider,
-                crawler=crawler,
-                trade_dates=trade_dates,
-            )
-            if fund_flow_data:
-                count = await save_fund_flows(session, fund_flow_data, fund_flow_trade_date)
-                logger.info(
-                    "保存 %s 条个股资金流向数据，trade_date=%s", count, fund_flow_trade_date
+            stock_source = _get_stock_fund_flow_source()
+            sector_source = _get_sector_fund_flow_source()
+            primary_only = not _inline_fallback_enabled()
+
+            try:
+                logger.info("抓取个股资金流向 (source=%s)...", stock_source)
+                if stock_source == "fallback" and not primary_only:
+                    fund_flow_data, fund_flow_trade_date = await _fetch_rank_with_fallback(
+                        tushare_provider=tushare_provider,
+                        baostock_provider=baostock_provider,
+                        crawler=crawler,
+                        trade_dates=trade_dates,
+                    )
+                else:
+                    fund_flow_data, fund_flow_trade_date, _ = await _fetch_rank_by_source(
+                        tushare_provider=tushare_provider,
+                        crawler=crawler,
+                        trade_dates=trade_dates,
+                        source=stock_source,
+                    )
+                if fund_flow_data:
+                    count = await save_fund_flows(session, fund_flow_data, fund_flow_trade_date)
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="stock_fund_flow",
+                        entity_key="ALL",
+                        trade_date=fund_flow_trade_date,
+                        status="done",
+                        source=stock_source,
+                        note=f"rows={count}",
+                    )
+                    await session.commit()
+                    logger.info(
+                        "保存 %s 条个股资金流向数据，trade_date=%s", count, fund_flow_trade_date
+                    )
+                else:
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="stock_fund_flow",
+                        entity_key="ALL",
+                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        status="needs_fallback",
+                        source=stock_source,
+                        note="primary source returned empty",
+                    )
+                    await session.commit()
+                    logger.warning("个股资金流未产出数据，已记录待降级，source=%s", stock_source)
+            except Exception as exc:
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_fund_flow",
+                    entity_type="stock_fund_flow",
+                    entity_key="ALL",
+                    trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                    status="needs_fallback",
+                    source=stock_source,
+                    note=f"source error: {exc}",
                 )
+                await session.commit()
+                logger.warning("个股资金流抓取异常，已记录待降级: %s", exc)
             await asyncio.sleep(0.5)
 
-            logger.info("抓取行业资金流向 (tushare -> baostock -> eastmoney)...")
-            industry_data, industry_trade_date = await _fetch_sector_with_fallback(
-                tushare_provider=tushare_provider,
-                baostock_provider=baostock_provider,
-                crawler=crawler,
-                sector_type="industry",
-                trade_dates=trade_dates,
-            )
-            if industry_data:
-                count = await save_sector_fund_flows(
-                    session, industry_data, industry_trade_date, "industry"
+            try:
+                logger.info("抓取行业资金流向 (source=%s)...", sector_source)
+                if sector_source == "fallback" and not primary_only:
+                    industry_data, industry_trade_date, used_source = await _fetch_sector_by_source(
+                        tushare_provider=tushare_provider,
+                        crawler=crawler,
+                        sector_type="industry",
+                        trade_dates=trade_dates,
+                        source=sector_source,
+                    )
+                    if not industry_data and sector_source == "fallback":
+                        industry_data, industry_trade_date = await _fetch_sector_with_fallback(
+                            tushare_provider=tushare_provider,
+                            baostock_provider=baostock_provider,
+                            crawler=crawler,
+                            sector_type="industry",
+                            trade_dates=trade_dates,
+                        )
+                        used_source = "fallback"
+                else:
+                    industry_data, industry_trade_date, used_source = await _fetch_sector_by_source(
+                        tushare_provider=tushare_provider,
+                        crawler=crawler,
+                        sector_type="industry",
+                        trade_dates=trade_dates,
+                        source=sector_source,
+                    )
+                if industry_data:
+                    count = await save_sector_fund_flows(
+                        session, industry_data, industry_trade_date, "industry"
+                    )
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="sector_fund_flow",
+                        entity_key="industry",
+                        trade_date=industry_trade_date,
+                        status="done",
+                        source=used_source,
+                        note=f"rows={count}",
+                    )
+                    await session.commit()
+                    logger.info(
+                        "保存 %s 条行业资金流向数据，trade_date=%s, source=%s",
+                        count,
+                        industry_trade_date,
+                        used_source,
+                    )
+                else:
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="sector_fund_flow",
+                        entity_key="industry",
+                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        status="needs_fallback",
+                        source=sector_source,
+                        note="primary source returned empty",
+                    )
+                    await session.commit()
+                    logger.warning("行业资金流未产出数据，已记录待降级，source=%s", sector_source)
+            except Exception as exc:
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_fund_flow",
+                    entity_type="sector_fund_flow",
+                    entity_key="industry",
+                    trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                    status="needs_fallback",
+                    source=sector_source,
+                    note=f"source error: {exc}",
                 )
-                logger.info("保存 %s 条行业资金流向数据，trade_date=%s", count, industry_trade_date)
+                await session.commit()
+                logger.warning("行业资金流抓取异常，已记录待降级: %s", exc)
             await asyncio.sleep(0.5)
 
-            logger.info("抓取概念资金流向 (tushare -> baostock -> eastmoney)...")
-            concept_data, concept_trade_date = await _fetch_sector_with_fallback(
-                tushare_provider=tushare_provider,
-                baostock_provider=baostock_provider,
-                crawler=crawler,
-                sector_type="concept",
-                trade_dates=trade_dates,
-            )
-            if concept_data:
-                count = await save_sector_fund_flows(
-                    session, concept_data, concept_trade_date, "concept"
+            try:
+                logger.info("抓取概念资金流向 (source=%s)...", sector_source)
+                if sector_source == "fallback" and not primary_only:
+                    concept_data, concept_trade_date, used_source = await _fetch_sector_by_source(
+                        tushare_provider=tushare_provider,
+                        crawler=crawler,
+                        sector_type="concept",
+                        trade_dates=trade_dates,
+                        source=sector_source,
+                    )
+                    if not concept_data and sector_source == "fallback":
+                        concept_data, concept_trade_date = await _fetch_sector_with_fallback(
+                            tushare_provider=tushare_provider,
+                            baostock_provider=baostock_provider,
+                            crawler=crawler,
+                            sector_type="concept",
+                            trade_dates=trade_dates,
+                        )
+                        used_source = "fallback"
+                else:
+                    concept_data, concept_trade_date, used_source = await _fetch_sector_by_source(
+                        tushare_provider=tushare_provider,
+                        crawler=crawler,
+                        sector_type="concept",
+                        trade_dates=trade_dates,
+                        source=sector_source,
+                    )
+                if concept_data:
+                    count = await save_sector_fund_flows(
+                        session, concept_data, concept_trade_date, "concept"
+                    )
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="sector_fund_flow",
+                        entity_key="concept",
+                        trade_date=concept_trade_date,
+                        status="done",
+                        source=used_source,
+                        note=f"rows={count}",
+                    )
+                    await session.commit()
+                    logger.info(
+                        "保存 %s 条概念资金流向数据，trade_date=%s, source=%s",
+                        count,
+                        concept_trade_date,
+                        used_source,
+                    )
+                else:
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="fetch_fund_flow",
+                        entity_type="sector_fund_flow",
+                        entity_key="concept",
+                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        status="needs_fallback",
+                        source=sector_source,
+                        note="primary source returned empty",
+                    )
+                    await session.commit()
+                    logger.warning("概念资金流未产出数据，已记录待降级，source=%s", sector_source)
+            except Exception as exc:
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_fund_flow",
+                    entity_type="sector_fund_flow",
+                    entity_key="concept",
+                    trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                    status="needs_fallback",
+                    source=sector_source,
+                    note=f"source error: {exc}",
                 )
-                logger.info("保存 %s 条概念资金流向数据，trade_date=%s", count, concept_trade_date)
+                await session.commit()
+                logger.warning("概念资金流抓取异常，已记录待降级: %s", exc)
 
         logger.info("资金流向抓取任务完成")
     except Exception as e:
         logger.error(f"资金流向抓取任务失败: {e}", exc_info=True)
+        await record_fetch_audit(
+            task_name="fetch_fund_flow",
+            entity_type="task",
+            entity_key="run",
+            status="needs_fallback",
+            source="mixed",
+            note=f"task error: {e}",
+        )
     finally:
         await crawler.close()
 

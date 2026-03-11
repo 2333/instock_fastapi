@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 from core.crawling import create_crawler, DataSource
 from app.config import get_settings
+from app.utils.stock_codes import normalize_exchange_name, normalize_ts_code
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -91,12 +92,8 @@ def transform_stock_data(stocks):
         code = stock.get("f12", "")
         name = stock.get("f14", "")
 
-        if code.startswith(("6", "5")):
-            ts_code = f"{code}.SSE"
-            exchange = "SSE"
-        else:
-            ts_code = f"{code}.SZSE"
-            exchange = "SZSE"
+        exchange = normalize_exchange_name(None, code)
+        ts_code = normalize_ts_code(None, symbol=code, exchange=exchange)
 
         try:
             price = float(stock.get("f2", 0)) if stock.get("f2") else 0

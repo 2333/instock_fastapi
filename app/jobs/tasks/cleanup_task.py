@@ -1,19 +1,29 @@
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session_factory
+from app.database import async_session_factory, sync_engine
 from app.models.stock_model import DailyBar, Indicator, Pattern, FundFlow
 
 logger = logging.getLogger(__name__)
 
-DAILY_BAR_RETENTION_DAYS = 730
-INDICATOR_RETENTION_DAYS = 365
-PATTERN_RETENTION_DAYS = 180
-FUND_FLOW_RETENTION_DAYS = 365
+
+def _get_retention_days(env_name: str, default: int) -> int:
+    raw = os.getenv(env_name, str(default)).strip()
+    try:
+        return max(int(raw), 0)
+    except ValueError:
+        logger.warning("%s=%s 非法，回退默认值 %s", env_name, raw, default)
+        return default
+
+
+DAILY_BAR_RETENTION_DAYS = _get_retention_days("DAILY_BAR_RETENTION_DAYS", 3650)
+INDICATOR_RETENTION_DAYS = _get_retention_days("INDICATOR_RETENTION_DAYS", 1095)
+PATTERN_RETENTION_DAYS = _get_retention_days("PATTERN_RETENTION_DAYS", 365)
+FUND_FLOW_RETENTION_DAYS = _get_retention_days("FUND_FLOW_RETENTION_DAYS", 1095)
 
 
 async def cleanup_old_data():
@@ -71,17 +81,22 @@ async def vacuum_database():
     """清理数据库空间"""
     logger.info("开始清理数据库空间...")
 
-    async with async_session_factory() as session:
-        try:
-            await session.execute(text("VACUUM ANALYZE daily_bars"))
-            await session.execute(text("VACUUM ANALYZE indicators"))
-            await session.execute(text("VACUUM ANALYZE patterns"))
-            await session.execute(text("VACUUM ANALYZE fund_flows"))
-            await session.commit()
-            logger.info("数据库空间清理完成")
-        except Exception as e:
-            logger.error(f"数据库空间清理失败: {e}", exc_info=True)
-            await session.rollback()
+    def _vacuum_sync() -> None:
+        statements = [
+            "VACUUM ANALYZE daily_bars",
+            "VACUUM ANALYZE indicators",
+            "VACUUM ANALYZE patterns",
+            "VACUUM ANALYZE fund_flows",
+        ]
+        with sync_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            for stmt in statements:
+                conn.execute(text(stmt))
+
+    try:
+        await asyncio.to_thread(_vacuum_sync)
+        logger.info("数据库空间清理完成")
+    except Exception as e:
+        logger.error(f"数据库空间清理失败: {e}", exc_info=True)
 
 
 async def run():

@@ -45,6 +45,8 @@ services:
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock}@postgres:5432/${POSTGRES_DB:-instock}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - APP_PORT=8000
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-1}
       - PYTHONPATH=/app
       - TUSHARE_TOKEN=${TUSHARE_TOKEN}
       - TUSHARE_HTTP_URL=${TUSHARE_HTTP_URL:-http://lianghua.nanyangqiankun.top}

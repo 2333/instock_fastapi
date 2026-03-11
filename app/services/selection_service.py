@@ -20,13 +20,11 @@ class SelectionService:
             return None
         if date:
             result = await self.db.execute(
-                text(
-                    """
+                text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
                     WHERE trade_date <= :target_date
-                    """
-                ),
+                    """),
                 {"target_date": date},
             )
         else:
@@ -74,8 +72,7 @@ class SelectionService:
         elif market == "sz":
             where_sql.append("(s.symbol LIKE '0%' OR s.symbol LIKE '3%')")
 
-        sql = text(
-            f"""
+        sql = text(f"""
             SELECT
                 s.ts_code,
                 s.symbol AS code,
@@ -90,8 +87,7 @@ class SelectionService:
             WHERE {" AND ".join(where_sql)}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT 300
-            """
-        )
+            """)
         rows = (await self.db.execute(sql, params)).mappings().all()
 
         results: List[dict] = []
@@ -130,8 +126,7 @@ class SelectionService:
             params["trade_date"] = date
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-        sql = text(
-            f"""
+        sql = text(f"""
             SELECT
                 sr.selection_id,
                 sr.ts_code,
@@ -144,8 +139,7 @@ class SelectionService:
             {where_sql}
             ORDER BY sr.trade_date DESC
             LIMIT :limit
-            """
-        )
+            """)
         rows = (await self.db.execute(sql, params)).mappings().all()
         return [
             {
