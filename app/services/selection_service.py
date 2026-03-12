@@ -20,13 +20,11 @@ class SelectionService:
             return None
         if date:
             result = await self.db.execute(
-                text(
-                    """
+                text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
                     WHERE trade_date <= :target_date
-                    """
-                ),
+                    """),
                 {"target_date": date},
             )
         else:
@@ -74,31 +72,29 @@ class SelectionService:
         elif market == "sz":
             where_sql.append("(s.symbol LIKE '0%' OR s.symbol LIKE '3%')")
 
-        sql = text(
-            f"""
+        sql = text(f"""
             SELECT
-              s.ts_code,
-              s.symbol AS code,
-              s.name AS stock_name,
-              db.trade_date,
-              db.close,
-              db.pct_chg,
-              db.vol,
-              db.amount
+                s.ts_code,
+                s.symbol AS code,
+                s.name AS stock_name,
+                db.trade_date,
+                db.close,
+                db.pct_chg,
+                db.vol,
+                db.amount
             FROM stocks s
             JOIN daily_bars db ON s.ts_code = db.ts_code
-            WHERE {' AND '.join(where_sql)}
+            WHERE {" AND ".join(where_sql)}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT 300
-            """
-        )
+            """)
         rows = (await self.db.execute(sql, params)).mappings().all()
 
         results: List[dict] = []
         for row in rows:
             pct = float(row["pct_chg"] or 0)
             amt = float(row["amount"] or 0)
-            score = pct * 5 + min(amt / 1e8, 20)  # 简单综合评分
+            score = pct * 5 + min(amt / 1e8, 20)
             signal = "hold"
             if pct >= 2:
                 signal = "buy"
@@ -130,22 +126,20 @@ class SelectionService:
             params["trade_date"] = date
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
-        sql = text(
-            f"""
+        sql = text(f"""
             SELECT
-              sr.selection_id,
-              sr.ts_code,
-              split_part(sr.ts_code, '.', 1) AS code,
-              s.name AS stock_name,
-              sr.trade_date,
-              sr.score
+                sr.selection_id,
+                sr.ts_code,
+                split_part(sr.ts_code, '.', 1) AS code,
+                s.name AS stock_name,
+                sr.trade_date,
+                sr.score
             FROM selection_results sr
             LEFT JOIN stocks s ON s.ts_code = sr.ts_code
             {where_sql}
             ORDER BY sr.trade_date DESC
             LIMIT :limit
-            """
-        )
+            """)
         rows = (await self.db.execute(sql, params)).mappings().all()
         return [
             {

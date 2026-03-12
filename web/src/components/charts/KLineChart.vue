@@ -190,9 +190,9 @@ const calculateEMA = (data: KlineData[], period: number): (number | null)[] => {
       result.push(base)
       continue
     }
-    const ema = (close - prevEma) * multiplier + prevEma
-    prevEma = ema
-    result.push(ema)
+    const emaValue: number = (close - prevEma) * multiplier + prevEma
+    prevEma = emaValue
+    result.push(emaValue)
   }
 
   return result

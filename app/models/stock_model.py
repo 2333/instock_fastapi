@@ -122,6 +122,7 @@ class DailyBar(Base):
 class FundFlow(Base):
     __tablename__ = "fund_flows"
     __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date", name="uq_fund_flows_ts_code_trade_date"),
         Index("ix_fund_flows_ts_code", "ts_code"),
         Index("ix_fund_flows_trade_date", "trade_date"),
     )
@@ -129,6 +130,7 @@ class FundFlow(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     net_amount_main: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=True)
     net_amount_hf: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=True)
     net_amount_zz: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=True)
@@ -166,6 +168,7 @@ class Indicator(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     indicator_name: Mapped[str] = mapped_column(String(50), nullable=False)
     indicator_value: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

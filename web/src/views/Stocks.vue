@@ -75,12 +75,6 @@
         >
       </div>
     </div>
-    <div class="date-hint">
-      <span v-if="effectiveDate">当前展示交易日：{{ effectiveDate }}</span>
-      <span v-if="isDateFallback" class="date-fallback">
-        （{{ selectedDate }} 无数据，已回退到最近交易日）
-      </span>
-    </div>
 
     <div class="info-bar">
       <span v-if="effectiveDate && activeTab === 'stocks'">当前交易日：{{ effectiveDate }}</span>
@@ -264,7 +258,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, inject } from 'vue'
-import { stockApi, attentionApi, fundFlowApi } from '@/api'
+import { stockApi, attentionApi, marketApi } from '@/api'
 
 interface Stock {
   date: string | null
@@ -396,14 +390,7 @@ const filteredData = computed(() => {
     }
   }
 
-  if (minAmount.value !== null && !Number.isNaN(minAmount.value)) {
-    result = result.filter((s) => (s.amount || 0) >= minAmount.value!)
-  }
-
-  const sorted = [...result]
-  sorted.sort((a, b) => compareStock(a, b, sortKey.value, sortDirection.value))
-
-  return sorted
+  return result
 })
 
 const paginatedData = computed(() => {
@@ -540,14 +527,6 @@ watch(selectedDate, () => {
     return
   }
   fetchData()
-})
-
-watch(selectedDate, () => {
-  if (currentPage.value !== 1) {
-    currentPage.value = 1
-    return
-  }
-  fetchStocks()
 })
 </script>
 

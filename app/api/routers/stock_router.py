@@ -8,7 +8,7 @@ from app.services.stock_service import StockService
 router = APIRouter()
 
 
-@router.get("/stocks", response_model=List[StockSpotResponse])
+@router.get("/stocks")
 async def get_stocks(
     date: Optional[str] = Query(None, description="交易日期"),
     page: int = Query(1, ge=1),
@@ -16,7 +16,8 @@ async def get_stocks(
     db: AsyncSession = Depends(get_db),
 ):
     service = StockService(db)
-    return await service.get_stocks(date, page, page_size)
+    data, total = await service.get_stocks_with_total(date, page, page_size)
+    return {"items": data, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/stocks/{code}", response_model=StockDetailResponse)

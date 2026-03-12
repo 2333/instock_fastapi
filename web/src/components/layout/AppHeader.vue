@@ -66,16 +66,20 @@
       </div>
 
       <div class="user-menu">
-        <button class="user-btn" @click="toggleUserMenu">
-          <div class="user-avatar">U</div>
-          <span class="user-name">{{ t('user') }}</span>
-        </button>
-        <div v-if="showUserMenu" class="user-dropdown">
-          <a href="#" class="dropdown-item">{{ t('profile') }}</a>
-          <a href="#" class="dropdown-item">{{ t('preferences') }}</a>
-          <hr class="dropdown-divider" />
-          <a href="#" class="dropdown-item">{{ t('logout') }}</a>
-        </div>
+        <template v-if="currentUser">
+          <button class="user-btn" @click="toggleUserMenu">
+            <div class="user-avatar">{{ currentUser.username?.charAt(0).toUpperCase() }}</div>
+            <span class="user-name">{{ currentUser.username }}</span>
+          </button>
+          <div v-if="showUserMenu" class="user-dropdown">
+            <router-link to="/settings" class="dropdown-item" @click="showUserMenu = false">{{ t('preferences') }}</router-link>
+            <hr class="dropdown-divider" />
+            <a href="#" class="dropdown-item" @click.prevent="handleLogoutClick">{{ t('logout') }}</a>
+          </div>
+        </template>
+        <template v-else>
+          <router-link to="/login" class="login-link">登录</router-link>
+        </template>
       </div>
     </div>
   </header>
@@ -83,8 +87,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
+import { authApi } from '@/api'
 
+const router = useRouter()
 const emit = defineEmits<{
   (e: 'refresh'): void
   (e: 'settings'): void
@@ -93,12 +100,19 @@ const emit = defineEmits<{
 const marketOpen = ref(false)
 const showUserMenu = ref(false)
 const { t, toggleLocale } = useLocale()
+const currentUser = ref<any>(null)
 
 const refreshData = () => emit('refresh')
 const openSettings = () => emit('settings')
 
 const toggleUserMenu = () => {
   showUserMenu.value = !showUserMenu.value
+}
+
+const handleLogoutClick = () => {
+  authApi.removeToken()
+  showUserMenu.value = false
+  router.push('/login')
 }
 
 const checkMarketStatus = () => {
@@ -120,9 +134,17 @@ const checkMarketStatus = () => {
 
 let intervalId: number | null = null
 
-onMounted(() => {
+onMounted(async () => {
   checkMarketStatus()
   intervalId = window.setInterval(checkMarketStatus, 60000)
+  
+  if (authApi.isAuthenticated()) {
+    try {
+      currentUser.value = await authApi.getMe()
+    } catch (e) {
+      authApi.removeToken()
+    }
+  }
 })
 
 onUnmounted(() => {
@@ -350,5 +372,20 @@ onUnmounted(() => {
   margin: 8px 0;
   border: none;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.login-link {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: #2962FF;
+  color: #fff;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #1E53E5;
+  }
 }
 </style>

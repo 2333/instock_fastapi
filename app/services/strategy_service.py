@@ -1,8 +1,4 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, select
-from typing import List, Optional
-from decimal import Decimal
-
+from sqlalchemy import text
 
 STRATEGIES = [
     {
@@ -63,17 +59,29 @@ class StrategyService:
         self.db = db
 
     @staticmethod
-    def get_strategy_list() -> List[dict]:
+    def get_strategy_list() -> list[dict]:
         return STRATEGIES
 
-    async def run_strategy(self, strategy_name: str, date: Optional[str]):
+    async def run_strategy(self, strategy_name: str, date: str | None):
         return {"status": "success", "strategy": strategy_name, "count": 0}
 
     async def get_results(
-        self, strategy_name: Optional[str] = None, date: Optional[str] = None, limit: int = 100
+        self, strategy_name: str | None = None, date: str | None = None, limit: int = 100
     ):
-        query = text("""
-            SELECT 
+        where_clauses = []
+        params = {"limit": limit}
+
+        if strategy_name:
+            where_clauses.append("st.name = :strategy_name")
+            params["strategy_name"] = strategy_name
+        if date:
+            where_clauses.append("sr.trade_date = :trade_date")
+            params["trade_date"] = date
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        query = text(f"""
+            SELECT
                 sr.id,
                 sr.trade_date as date,
                 sr.score,
@@ -89,8 +97,9 @@ class StrategyService:
             LEFT JOIN stocks s ON sr.ts_code = s.ts_code
             LEFT JOIN strategies st ON sr.strategy_id = st.id
             LEFT JOIN daily_bars db ON sr.ts_code = db.ts_code AND sr.trade_date = db.trade_date
+            {where_sql}
             ORDER BY sr.score DESC, sr.trade_date DESC
             LIMIT :limit
         """)
-        result = await self.db.execute(query, {"limit": limit})
+        result = await self.db.execute(query, params)
         return [dict(row._mapping) for row in result.fetchall()]

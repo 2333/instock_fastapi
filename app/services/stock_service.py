@@ -1,8 +1,11 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, select, and_
-from typing import List, Optional, Any
 import logging
+from typing import List, Optional
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import get_settings
+from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
 from core.crawling.base import AdjustType
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.eastmoney import EastMoneyCrawler
@@ -15,16 +18,18 @@ class StockService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _normalize_row_mapping(row: dict) -> dict:
+        return normalize_stock_payload(dict(row))
+
     async def _resolve_trade_date(self, target_date: Optional[str]) -> Optional[str]:
         if target_date:
             result = await self.db.execute(
-                text(
-                    """
+                text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
                     WHERE trade_date <= :target_date
-                    """
-                ),
+                """),
                 {"target_date": target_date},
             )
         else:
@@ -36,14 +41,15 @@ class StockService:
 
     async def get_stocks(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
         offset = (page - 1) * page_size
-
-        # 指定日期若无数据则自动回退到最近一个交易日
         date = await self._resolve_trade_date(date)
 
         if date:
             query = text("""
-                SELECT 
-                    s.ts_code as code,
+                SELECT
+                    s.symbol as code,
+                    s.ts_code,
+                    s.symbol,
+                    s.exchange,
                     s.name,
                     s.industry,
                     db.trade_date as date,
@@ -62,10 +68,12 @@ class StockService:
                 LIMIT :limit OFFSET :offset
             """)
         else:
-            # 如果没有找到任何交易日的数据，返回股票基本信息
             query = text("""
-                SELECT 
-                    s.ts_code as code,
+                SELECT
+                    s.symbol as code,
+                    s.ts_code,
+                    s.symbol,
+                    s.exchange,
                     s.name,
                     s.industry,
                     null as date,
@@ -83,7 +91,36 @@ class StockService:
             """)
 
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
-        return [row._mapping for row in result.fetchall()]
+        return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
+
+    async def get_stocks_with_total(
+        self, date: Optional[str], page: int, page_size: int
+    ) -> tuple[List[dict], int]:
+        """获取股票列表和总数"""
+        date = await self._resolve_trade_date(date)
+
+        # 获取总数
+        if date:
+            count_query = text("""
+                SELECT COUNT(*) as total
+                FROM stocks s
+                INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = :date
+                WHERE s.is_etf = false AND s.list_status = 'L'
+            """)
+        else:
+            count_query = text("""
+                SELECT COUNT(*) as total
+                FROM stocks s
+                WHERE s.is_etf = false AND s.list_status = 'L'
+            """)
+
+        count_result = await self.db.execute(count_query, {"date": date})
+        count_row = count_result.fetchone()
+        total = count_row[0] if count_row else 0
+
+        # 获取分页数据
+        data = await self.get_stocks(date, page, page_size)
+        return data, total
 
     @staticmethod
     def _normalize_date(value: Optional[str]) -> Optional[str]:
@@ -165,7 +202,7 @@ class StockService:
         if not (start_date and end_date):
             return []
         bars_query = text("""
-            SELECT * FROM daily_bars 
+            SELECT * FROM daily_bars
             WHERE ts_code = :ts_code AND trade_date BETWEEN :start_date AND :end_date
             ORDER BY trade_date ASC
         """)
@@ -178,15 +215,40 @@ class StockService:
     async def get_stock_detail(
         self, code: str, start_date: Optional[str], end_date: Optional[str], adjust: str = "bfq"
     ) -> Optional[dict]:
+        candidates = build_code_variants(code)
+        symbol = extract_symbol(code)
         stock_query = text("""
-            SELECT * FROM stocks WHERE symbol = :code OR ts_code = :code LIMIT 1
+            SELECT *
+            FROM stocks
+            WHERE symbol = :symbol
+               OR ts_code = :code
+               OR ts_code = :code_sh
+               OR ts_code = :code_sz
+               OR ts_code = :code_bj
+               OR ts_code = :code_sse
+               OR ts_code = :code_szse
+               OR ts_code = :code_bse
+            LIMIT 1
         """)
-        result = await self.db.execute(stock_query, {"code": code})
+        result = await self.db.execute(
+            stock_query,
+            {
+                "symbol": symbol,
+                "code": code,
+                "code_sh": next((item for item in candidates if item.endswith(".SH")), ""),
+                "code_sz": next((item for item in candidates if item.endswith(".SZ")), ""),
+                "code_bj": next((item for item in candidates if item.endswith(".BJ")), ""),
+                "code_sse": next((item for item in candidates if item.endswith(".SSE")), ""),
+                "code_szse": next((item for item in candidates if item.endswith(".SZSE")), ""),
+                "code_bse": next((item for item in candidates if item.endswith(".BSE")), ""),
+            },
+        )
         row = result.fetchone()
         if not row:
             return {"error": "Stock not found", "code": code}
 
         stock = dict(row._mapping)
+        internal_ts_code = stock["ts_code"]
 
         requested_adjust = adjust.lower()
         stock["adjust_requested"] = requested_adjust
@@ -197,7 +259,7 @@ class StockService:
             adjust_type = self._parse_adjust(adjust)
             if adjust_type == AdjustType.NO_ADJUST:
                 stock["bars"] = await self._query_bars_from_db(
-                    ts_code=stock["ts_code"],
+                    ts_code=internal_ts_code,
                     start_date=start_date,
                     end_date=end_date,
                 )
@@ -212,22 +274,25 @@ class StockService:
                     stock["bars"] = adjusted_bars
                 else:
                     stock["bars"] = await self._query_bars_from_db(
-                        ts_code=stock["ts_code"],
+                        ts_code=internal_ts_code,
                         start_date=start_date,
                         end_date=end_date,
                     )
                     stock["adjust_applied"] = "bfq"
                     stock["adjust_note"] = "requested_adjust_data_unavailable_fallback_to_bfq"
 
-        return stock
+        return normalize_stock_payload(stock)
 
     async def get_etf_list(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
         offset = (page - 1) * page_size
 
         if date:
             query = text("""
-                SELECT 
-                    s.ts_code as code,
+                SELECT
+                    s.symbol as code,
+                    s.ts_code,
+                    s.symbol,
+                    s.exchange,
                     s.name,
                     db.trade_date as date,
                     db.open,
@@ -246,8 +311,11 @@ class StockService:
             """)
         else:
             query = text("""
-                SELECT 
-                    s.ts_code as code,
+                SELECT
+                    s.symbol as code,
+                    s.ts_code,
+                    s.symbol,
+                    s.exchange,
                     s.name,
                     db.trade_date as date,
                     db.open,
@@ -266,15 +334,41 @@ class StockService:
             """)
 
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
-        return [row._mapping for row in result.fetchall()]
+        return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
     async def get_etf_detail(self, code: str) -> Optional[dict]:
+        candidates = build_code_variants(code)
+        symbol = extract_symbol(code)
         query = text("""
-            SELECT * FROM stocks WHERE (ts_code = :code OR symbol = :code) AND is_etf = true
+            SELECT *
+            FROM stocks
+            WHERE is_etf = true
+              AND (
+                symbol = :symbol
+                OR ts_code = :code
+                OR ts_code = :code_sh
+                OR ts_code = :code_sz
+                OR ts_code = :code_bj
+                OR ts_code = :code_sse
+                OR ts_code = :code_szse
+                OR ts_code = :code_bse
+              )
         """)
-        result = await self.db.execute(query, {"code": code})
+        result = await self.db.execute(
+            query,
+            {
+                "symbol": symbol,
+                "code": code,
+                "code_sh": next((item for item in candidates if item.endswith(".SH")), ""),
+                "code_sz": next((item for item in candidates if item.endswith(".SZ")), ""),
+                "code_bj": next((item for item in candidates if item.endswith(".BJ")), ""),
+                "code_sse": next((item for item in candidates if item.endswith(".SSE")), ""),
+                "code_szse": next((item for item in candidates if item.endswith(".SZSE")), ""),
+                "code_bse": next((item for item in candidates if item.endswith(".BSE")), ""),
+            },
+        )
         row = result.fetchone()
-        return dict(row._mapping) if row else None
+        return normalize_stock_payload(dict(row._mapping)) if row else None
 
     async def get_stock_count(self, is_etf: bool = False) -> int:
         query = text(

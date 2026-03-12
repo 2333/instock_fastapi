@@ -35,8 +35,7 @@ class ProxyManager:
         self.test_url = "http://myip.ipip.net"
         self.pool_size = 20
         self.min_size = 10
-        self.data: List[str] = []
-        self._init_pool()
+        self.data: List[str] = self.load_proxies()
 
     def _load_api_config(self) -> Optional[Dict]:
         try:
@@ -61,12 +60,6 @@ class ProxyManager:
 
         param_str = "&".join([f"{k}={v}" for k, v in params.items()])
         return f"{base_url}?{param_str}&count={count}"
-
-    def _init_pool(self):
-        proxies = self.load_proxies()
-        self.data = self.test_proxies(proxies) if proxies else []
-        self.save_proxies(self.data)
-        self.ensure_pool()
 
     def fetch_and_save_proxies(self, count: int, append: bool = False):
         api_url = self._build_api_url(count)
@@ -137,6 +130,8 @@ class ProxyManager:
         return valid
 
     def ensure_pool(self):
+        if not self.data:
+            self.data = self.load_proxies()
         if not self.data or len(self.data) < self.min_size:
             need_count = self.pool_size - len(self.data) if self.data else self.pool_size
             logger.info(f"代理池数量不足{self.min_size}，补充{need_count}条代理")
@@ -188,9 +183,5 @@ class ProxyManager:
             if len(self.data) < self.min_size:
                 self.ensure_pool()
 
-
-proxy_manager = ProxyManager()
-
-
 def get_proxy_manager() -> ProxyManager:
-    return proxy_manager
+    return ProxyManager()

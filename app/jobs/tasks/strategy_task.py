@@ -122,7 +122,12 @@ async def run():
                 await session.commit()
                 strategies = [default_strategy]
 
-            result = await session.execute(select(Stock.ts_code).where(Stock.list_status == "L"))
+            result = await session.execute(
+                select(Stock.ts_code).where(
+                    Stock.list_status == "L",
+                    Stock.is_etf == False,
+                )
+            )
             ts_codes = [row[0] for row in result.fetchall()]
             logger.info(f"共 {len(ts_codes)} 只股票待处理")
 

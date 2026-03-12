@@ -37,16 +37,17 @@ cd instock_fastapi
 make docker-up
 
 # 3. 验证服务
-make status
+make docker-status
+make docker-smoke
 ```
 
-访问: http://localhost:3000
+访问: http://localhost:3001
 
 ### 方式二：本地开发
 
 ```bash
-# 1. 安装依赖
-make setup
+# 1. 安装 uv 并同步后端依赖
+uv sync --dev
 
 # 2. 启动后端开发服务器
 make dev
@@ -55,7 +56,7 @@ make dev
 make frontend-dev
 ```
 
-访问: http://localhost:3000 (前端) | http://localhost:8000 (后端)
+访问: http://localhost:3000 (前端开发服务器) | http://localhost:8000 (后端)
 
 ---
 
@@ -117,8 +118,9 @@ instock_fastapi/
 
 ```bash
 # 安装依赖
-make install          # 生产依赖
-make install-dev     # 开发依赖
+make install         # 同步生产依赖
+make install-dev     # 同步开发依赖
+make sync            # 更新本地 uv 环境
 
 # 启动服务
 make dev             # 后端开发服务器
@@ -126,6 +128,8 @@ make frontend-dev    # 前端开发服务器
 
 # 代码质量
 make lint            # 检查代码
+make style-check     # 检查增量严格规范
+make style-fix       # 修复增量严格规范
 make format          # 格式化代码
 make test            # 运行测试
 
@@ -133,6 +137,7 @@ make test            # 运行测试
 make docker-up       # 启动 Docker
 make docker-down     # 停止 Docker
 make docker-rebuild  # 重构并重启
+make docker-smoke    # 验证容器服务是否可用
 
 # 数据库
 make init-db         # 初始化数据库
@@ -141,11 +146,14 @@ make init-db         # 初始化数据库
 ### 添加新依赖
 
 ```bash
-# 安装新包
-pip install <package-name>
+# 生产依赖
+uv add <package-name>
 
-# 更新 requirements.txt
-pip freeze > requirements.txt
+# 开发依赖
+uv add --dev <package-name>
+
+# 更新锁文件
+uv lock
 ```
 
 ---
@@ -161,6 +169,7 @@ make docker-up
 
 # 检查状态
 make docker-status
+make docker-smoke
 ```
 
 ### 环境变量
@@ -181,6 +190,50 @@ REDIS_HOST=redis
 ## 📚 API 文档
 
 启动后访问: http://localhost:8000/docs
+
+## CI
+
+GitHub Actions 已提供第一版 CI，覆盖:
+
+- 后端 `uv sync --dev`
+- 后端 `pytest` 与覆盖率产物
+- 后端关键级别 `ruff` 检查
+- 后端增量 `black --check` + 全量 `ruff` 样式门禁
+- 前端 `npm ci`
+- 前端 `vue-tsc --noEmit`
+- 前端生产构建
+- 后端与前端 Docker 镜像构建校验
+- Docker Compose 启动与容器级 smoke test
+- 后端覆盖率下限校验（当前为 `30%`）
+
+本地可用对应预检命令:
+
+- `make ci-backend`
+- `make ci-frontend`
+- `make ci`
+- `make style-check`
+
+## 运行矩阵
+
+### `dev`
+
+- 后端: `uv sync --dev && make dev`
+- 前端: `cd web && npm ci && make frontend-dev`
+- 适用: 本地开发、调试、快速改动验证
+
+### `test`
+
+- 后端: `make ci-backend`
+- 前端: `make ci-frontend`
+- 容器级验活: `ENV_FILE=config/docker-ci.env docker compose up -d --build && make docker-smoke`
+- 适用: 提交前预检、CI 对齐
+
+### `prod-like`
+
+- 配置: 复制 `.env.example` 为 `.env` 并填写真实配置
+- 启动: `make docker-up`
+- 验活: `make docker-status && make docker-smoke`
+- 适用: 近似部署环境的本机验证
 
 ### 主要端点
 

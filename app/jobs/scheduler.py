@@ -35,10 +35,14 @@ def _acquire_scheduler_lock() -> bool:
         return True
 
 
-def start_scheduler():
+def start_scheduler() -> bool:
+    if scheduler.running:
+        logger.info("Scheduler already running in current process; skipping start.")
+        return True
+
     if not _acquire_scheduler_lock():
         logger.info("Scheduler already running in another process; skipping start.")
-        return
+        return False
 
     scheduler.add_job(
         id="fetch_daily_data",
@@ -86,10 +90,12 @@ def start_scheduler():
     )
     scheduler.start()
     logger.info("定时任务调度器已启动")
+    return True
 
 
 def stop_scheduler():
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown()
     global _scheduler_lock_handle
     if _scheduler_lock_handle is not None:
         try:
