@@ -26,6 +26,7 @@ from .base import (
     ProxyPool,
 )
 from core.proxy_manager import get_proxy_manager
+from app.utils.stock_codes import normalize_ts_code
 
 logger = logging.getLogger(__name__)
 
@@ -418,8 +419,7 @@ class EastMoneyCrawler(BaseCrawler):
             name = item.get("f14", "")
             if not code:
                 continue
-            market = "SZ" if code.startswith(("0", "3")) else "SH"
-            ts_code = f"{code}.SSE" if market == "SH" else f"{code}.SZSE"
+            ts_code = normalize_ts_code(code)
             result.append(
                 {
                     "ts_code": ts_code,

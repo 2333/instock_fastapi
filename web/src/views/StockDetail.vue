@@ -11,7 +11,7 @@
           <h1>{{ stockInfo.name }}</h1>
           <div class="stock-meta">
             <span class="stock-code">{{ stockInfo.code }}</span>
-            <span class="stock-market">{{ stockInfo.exchange === 'SSE' ? '上海' : '深圳' }}</span>
+            <span class="stock-market">{{ marketLabel }}</span>
           </div>
         </div>
         <div class="price-info">
@@ -160,6 +160,13 @@ const chartHint = ref('')
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
+const marketLabel = computed(() => {
+  const exchange = String(stockInfo.value?.exchange || '').toUpperCase()
+  if (exchange === 'SSE' || exchange === 'SH') return '上海'
+  if (exchange === 'SZSE' || exchange === 'SZ') return '深圳'
+  if (exchange === 'BSE' || exchange === 'BJ') return '北交所'
+  return exchange || '-'
+})
 
 const latestBar = computed<BarData | null>(() => {
   if (klineData.value.length > 0) {

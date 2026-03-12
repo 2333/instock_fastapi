@@ -42,10 +42,7 @@ class MarketDataService:
                 f.net_amount_xd as small_net_inflow,
                 f.trade_date
             FROM fund_flows f
-            INNER JOIN stocks s ON 
-                (f.ts_code = s.ts_code) OR 
-                (f.ts_code LIKE '%SH' AND s.ts_code = REPLACE(f.ts_code, 'SH', 'SSE')) OR
-                (f.ts_code LIKE '%SZ' AND s.ts_code = REPLACE(f.ts_code, 'SZ', 'SZSE'))
+            INNER JOIN stocks s ON split_part(f.ts_code, '.', 1) = s.symbol
             INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = f.trade_date
             WHERE f.trade_date = :date
             ORDER BY f.net_amount_main DESC NULLS LAST
@@ -62,7 +59,7 @@ class MarketDataService:
 
         query = text("""
             SELECT 
-                REPLACE(bt.ts_code, 'SH', '') as code,
+                split_part(bt.ts_code, '.', 1) as code,
                 COALESCE(s.name, '') as name,
                 bt.avg_price as price,
                 bt.total_volume as vol,
@@ -70,7 +67,7 @@ class MarketDataService:
                 bt.premium_rate,
                 bt.trade_date
             FROM stock_block_trades bt
-            LEFT JOIN stocks s ON REPLACE(bt.ts_code, 'SH', 'SSE') = s.ts_code OR REPLACE(bt.ts_code, 'SZ', 'SZSE') = s.ts_code
+            LEFT JOIN stocks s ON split_part(bt.ts_code, '.', 1) = s.symbol
             WHERE bt.trade_date = :date
             ORDER BY bt.total_amount DESC
             LIMIT :limit
@@ -86,7 +83,7 @@ class MarketDataService:
 
         query = text("""
             SELECT 
-                REPLACE(t.ts_code, 'SH', '') as code,
+                split_part(t.ts_code, '.', 1) as code,
                 COALESCE(s.name, '') as name,
                 db.close as close,
                 db.pct_chg as change_rate,
@@ -96,7 +93,7 @@ class MarketDataService:
                 t.ranking_times,
                 t.trade_date
             FROM stock_tops t
-            LEFT JOIN stocks s ON REPLACE(t.ts_code, 'SH', 'SSE') = s.ts_code OR REPLACE(t.ts_code, 'SZ', 'SZSE') = s.ts_code
+            LEFT JOIN stocks s ON split_part(t.ts_code, '.', 1) = s.symbol
             LEFT JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = t.trade_date
             WHERE t.trade_date = :date
             ORDER BY t.net_amount DESC NULLS LAST
@@ -113,7 +110,7 @@ class MarketDataService:
 
         query = text("""
             SELECT 
-                REPLACE(nb.ts_code, 'SH', '') as code,
+                split_part(nb.ts_code, '.', 1) as code,
                 COALESCE(s.name, '') as name,
                 nb.close as close,
                 nb.pct_chg as change_rate,
@@ -122,7 +119,7 @@ class MarketDataService:
                 nb.total_net_inflow,
                 nb.trade_date
             FROM north_bound_funds nb
-            LEFT JOIN stocks s ON REPLACE(nb.ts_code, 'SH', 'SSE') = s.ts_code OR REPLACE(nb.ts_code, 'SZ', 'SZSE') = s.ts_code
+            LEFT JOIN stocks s ON split_part(nb.ts_code, '.', 1) = s.symbol
             WHERE nb.trade_date = :date
             ORDER BY nb.total_net_inflow DESC NULLS LAST
             LIMIT :limit

@@ -8,7 +8,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PATH="/app/.venv/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -29,9 +32,11 @@ RUN wget -q https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.
     && rm -rf ta-lib ta-lib.tar.gz \
     && ldconfig
 
-COPY requirements.txt .
+RUN pip install uv
 
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev
 
 COPY --chmod=755 ./scripts/start.sh /usr/local/bin/start.sh
 
@@ -44,4 +49,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["sh", "-c", "uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port ${APP_PORT:-8000} --workers ${UVICORN_WORKERS:-1}"]

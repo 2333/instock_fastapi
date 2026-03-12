@@ -1,14 +1,19 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from typing import Dict, Any
+from sqlalchemy import text, insert
+from typing import Dict, Any, Optional
 from math import sqrt
+from decimal import Decimal
+
+from app.models.stock_model import BacktestResult
 
 
 class BacktestService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def run_backtest(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def run_backtest(
+        self, params: Dict[str, Any], user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         code = str(params.get("stock_code") or params.get("code") or "").strip()
         start_date = str(params.get("start_date") or "").strip()
         end_date = str(params.get("end_date") or "").strip()
@@ -19,6 +24,7 @@ class BacktestService:
                 "backtest_id": None,
                 "status": "failed",
                 "error": "missing_required_params",
+                "debug_user_id": user_id,
             }
 
         stock_sql = text(
@@ -38,20 +44,24 @@ class BacktestService:
             SELECT trade_date, close
             FROM daily_bars
             WHERE ts_code = :ts_code
-              AND trade_date BETWEEN :start_date AND :end_date
+            AND trade_date BETWEEN :start_date AND :end_date
             ORDER BY trade_date ASC
             """
         )
         bars = (
-            await self.db.execute(
-                bars_sql,
-                {
-                    "ts_code": stock_row["ts_code"],
-                    "start_date": start_date,
-                    "end_date": end_date,
-                },
+            (
+                await self.db.execute(
+                    bars_sql,
+                    {
+                        "ts_code": stock_row["ts_code"],
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
         if len(bars) < 2:
             return {
@@ -89,7 +99,9 @@ class BacktestService:
         for i, bar in enumerate(bars):
             close = float(bar["close"])
             equity = cash + shares * close
-            benchmark = initial_capital * (close / first_price) if first_price > 0 else initial_capital
+            benchmark = (
+                initial_capital * (close / first_price) if first_price > 0 else initial_capital
+            )
             equity_curve.append(
                 {
                     "date": bar["trade_date"],
@@ -108,7 +120,9 @@ class BacktestService:
                     max_drawdown = dd
 
         final_capital = equity_curve[-1]["equity"]
-        total_return = (final_capital - initial_capital) / initial_capital if initial_capital else 0.0
+        total_return = (
+            (final_capital - initial_capital) / initial_capital if initial_capital else 0.0
+        )
         years = max(len(bars) / 252.0, 1 / 252.0)
         annual_return = (1 + total_return) ** (1 / years) - 1 if total_return > -1 else -1.0
 
@@ -139,7 +153,9 @@ class BacktestService:
             "price": round(sell_price, 4),
             "quantity": shares,
             "profit": round(trade_profit, 2),
-            "return_pct": round(((sell_price - first_price) / first_price) * 100 if first_price else 0.0, 4),
+            "return_pct": round(
+                ((sell_price - first_price) / first_price) * 100 if first_price else 0.0, 4
+            ),
             "hold_days": max(len(bars) - 1, 0),
         }
 
@@ -149,7 +165,7 @@ class BacktestService:
         if trade_profit <= 0:
             profit_factor = 0.0
 
-        return {
+        result = {
             "backtest_id": f"bt_{stock_row['symbol']}_{start_date}_{end_date}",
             "status": "completed",
             "summary": {
@@ -159,7 +175,9 @@ class BacktestService:
                 "annual_return": round(annual_return * 100, 4),
                 "max_drawdown": round(max_drawdown * 100, 4),
                 "sharpe_ratio": round(sharpe, 4),
-                "win_rate": round((winning_trades / max(winning_trades + losing_trades, 1)) * 100, 4),
+                "win_rate": round(
+                    (winning_trades / max(winning_trades + losing_trades, 1)) * 100, 4
+                ),
                 "total_trades": 1,
                 "winning_trades": winning_trades,
                 "profit_factor": round(profit_factor, 4),
@@ -175,5 +193,67 @@ class BacktestService:
             },
         }
 
-    async def get_result(self, backtest_id: str) -> Dict[str, Any]:
-        return {"backtest_id": backtest_id, "status": "completed"}
+        if user_id:
+            try:
+                backtest_record = BacktestResult(
+                    user_id=user_id,
+                    name=f"{stock_row['symbol']} {start_date}~{end_date}",
+                    start_date=start_date,
+                    end_date=end_date,
+                    initial_capital=Decimal(str(round(initial_capital, 2))),
+                    final_capital=Decimal(str(round(final_capital, 2))),
+                    total_return=Decimal(str(round(total_return * 100, 4))),
+                    annual_return=Decimal(str(round(annual_return * 100, 4))),
+                    max_drawdown=Decimal(str(round(max_drawdown * 100, 4))),
+                    sharpe_ratio=Decimal(str(round(sharpe, 4))),
+                    win_rate=Decimal(
+                        str(
+                            round(
+                                (winning_trades / max(winning_trades + losing_trades, 1)) * 100, 4
+                            )
+                        )
+                    ),
+                    total_trades=1,
+                    result_data={
+                        "equity_curve": equity_curve,
+                        "trades": [buy_trade, sell_trade],
+                        "external_backtest_id": result["backtest_id"],
+                        "meta": {
+                            "code": stock_row["symbol"],
+                            "name": stock_row["name"],
+                            "strategy": params.get("strategy") or "buy_hold",
+                        },
+                    },
+                )
+                self.db.add(backtest_record)
+                await self.db.commit()
+                await self.db.refresh(backtest_record)
+                result["backtest_id"] = str(backtest_record.id)
+                result["saved_to_db"] = True
+            except Exception as e:
+                result["saved_to_db"] = False
+                result["save_error"] = str(e)
+        else:
+            result["saved_to_db"] = False
+
+        return result
+
+    async def get_result(self, backtest_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
+        if user_id:
+            query = text("""
+                SELECT * FROM backtest_results
+                WHERE user_id = :user_id
+                AND (
+                    CAST(id AS TEXT) = :backtest_id
+                    OR result_data->>'external_backtest_id' = :backtest_id
+                )
+                LIMIT 1
+            """)
+            result = await self.db.execute(
+                query,
+                {"user_id": user_id, "backtest_id": backtest_id},
+            )
+            row = result.fetchone()
+            if row:
+                return {"backtest_id": str(row[0]), "status": "completed", "data": row._mapping}
+        return {"backtest_id": backtest_id, "status": "not_found"}

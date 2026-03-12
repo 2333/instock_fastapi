@@ -1,6 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { authApi } from '@/api'
 
 const routes = [
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/Login.vue'),
+    meta: { title: '登录', public: true }
+  },
   {
     path: '/',
     name: 'Dashboard',
@@ -38,6 +45,12 @@ const routes = [
     meta: { title: '策略选股' }
   },
   {
+    path: '/attention',
+    name: 'Attention',
+    component: () => import('@/views/Attention.vue'),
+    meta: { title: '我的关注' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),
@@ -52,7 +65,17 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   document.title = `${to.meta.title || 'InStock'} - 智能股票分析平台`
-  next()
+  
+  const isPublic = to.meta.public
+  const isAuthenticated = authApi.isAuthenticated()
+  
+  if (!isPublic && !isAuthenticated) {
+    next({ name: 'Login', query: { redirect: to.fullPath } })
+  } else if (to.name === 'Login' && isAuthenticated) {
+    next({ name: 'Dashboard' })
+  } else {
+    next()
+  }
 })
 
 export default router

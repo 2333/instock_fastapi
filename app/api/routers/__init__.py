@@ -9,6 +9,8 @@ from app.api.routers import (
     selection_router,
     fund_flow_router,
     attention_router,
+    auth_router,
+    market_router,
 )
 
 router = APIRouter()
@@ -22,5 +24,7 @@ router.include_router(backtest_router.router, prefix="/api/v1")
 router.include_router(selection_router.router, prefix="/api/v1")
 router.include_router(fund_flow_router.router, prefix="/api/v1")
 router.include_router(attention_router.router, prefix="/api/v1")
+router.include_router(auth_router.router, prefix="/api/v1")
+router.include_router(market_router.router, prefix="/api/v1")
 
 __all__ = ["router"]

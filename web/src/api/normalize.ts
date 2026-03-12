@@ -53,9 +53,9 @@ export interface NormalizedIndex {
   changeRate: number     // 涨跌幅 (%)
   volume: number         // 成交量
   amount: number         // 成交额
-  high?: number          // 最高
-  low?: number           // 最低
-  open?: number          // 开盘
+  high?: number | null   // 最高
+  low?: number | null    // 最低
+  open?: number | null   // 开盘
 }
 
 // 字段映射配置
@@ -93,6 +93,11 @@ function getFirstValue<T>(data: RawStockData, fields: string[]): T | null {
   return null
 }
 
+function normalizeDisplayCode(value: string | null | undefined): string {
+  if (!value) return ''
+  return String(value).split('.')[0]
+}
+
 /**
  * 标准化股票数据
  */
@@ -109,7 +114,7 @@ export function normalizeStock(data: RawStockData): NormalizedStock {
   }
 
   return {
-    code: getFirstValue<string>(data, ['code', 'ts_code', 'symbol']) ?? '',
+    code: normalizeDisplayCode(getFirstValue<string>(data, ['code', 'ts_code', 'symbol'])),
     name: getFirstValue<string>(data, ['name']) ?? '-',
     price,
     change,
@@ -141,7 +146,7 @@ export function normalizeIndex(data: RawStockData): NormalizedIndex {
   }
 
   return {
-    code: getFirstValue<string>(data, ['code', 'ts_code']) ?? '',
+    code: normalizeDisplayCode(getFirstValue<string>(data, ['code', 'ts_code'])),
     name: getFirstValue<string>(data, ['name']) ?? '-',
     current,
     change,

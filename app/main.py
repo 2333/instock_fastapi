@@ -16,6 +16,8 @@ from app.api.routers import (
     selection_router,
     fund_flow_router,
     attention_router,
+    auth_router,
+    market_router,
 )
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.database import init_db, close_db
@@ -29,8 +31,11 @@ async def lifespan(app: FastAPI):
     logger.info("Starting InStock API...")
     await init_db()
     logger.info("Database initialized")
-    start_scheduler()
-    logger.info("Scheduler started")
+    scheduler_started = start_scheduler()
+    if scheduler_started:
+        logger.info("Scheduler started")
+    else:
+        logger.info("Scheduler skipped in this worker")
     yield
     await close_db()
     stop_scheduler()
@@ -58,7 +63,9 @@ async def log_requests(request: Request, call_next):
 cors_origins = settings.get_cors_origins()
 cors_allow_credentials = settings.CORS_ALLOW_CREDENTIALS
 if "*" in cors_origins and cors_allow_credentials:
-    logger.warning("CORS_ALLOW_ORIGINS='*' is incompatible with credentials; disabling credentials.")
+    logger.warning(
+        "CORS_ALLOW_ORIGINS='*' is incompatible with credentials; disabling credentials."
+    )
     cors_allow_credentials = False
 
 app.add_middleware(
@@ -88,6 +95,8 @@ app.include_router(backtest_router.router, prefix="/api/v1")
 app.include_router(selection_router.router, prefix="/api/v1")
 app.include_router(fund_flow_router.router, prefix="/api/v1")
 app.include_router(attention_router.router, prefix="/api/v1")
+app.include_router(auth_router.router, prefix="/api/v1")
+app.include_router(market_router.router, prefix="/api/v1")
 
 
 @app.get("/", response_class=HTMLResponse)

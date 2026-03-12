@@ -146,6 +146,16 @@
         </div>
       </aside>
 
+      <div
+        v-show="!configCollapsed"
+        class="panel-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整条件面板宽度"
+        @mousedown="startConfigResize"
+        @touchstart.prevent="startConfigResize"
+      ></div>
+
       <main class="results-panel">
         <div v-if="!hasResults" class="empty-state">
           <div class="empty-icon">📊</div>
@@ -285,6 +295,7 @@
 import { ref, reactive, onMounted, shallowRef, onBeforeUnmount, inject } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import { backtestApi } from '@/api'
+import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface Trade {
   id: number
@@ -303,11 +314,17 @@ const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
 const configPanelRef = ref<HTMLElement | null>(null)
-const configPanelWidth = ref(380)
 const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
 const PANEL_COLLAPSED_KEY = 'instock_backtest_panel_collapsed'
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+const { panelWidth: configPanelWidth, hydrateWidth: hydrateConfigWidth, startResize: startConfigResize } = useResizablePanel({
+  panelRef: configPanelRef,
+  storageKey: PANEL_WIDTH_KEY,
+  defaultWidth: 380,
+  minWidth: 320,
+  maxWidth: 560,
+})
 
 const config = reactive({
   stockCode: '600519',
@@ -368,15 +385,6 @@ const resolveDateRange = () => {
   if (config.period === '5y') start.setFullYear(start.getFullYear() - 5)
   if (config.period === '10y') start.setFullYear(start.getFullYear() - 10)
   return { start: formatDate(start), end: formatDate(end) }
-}
-
-const persistPanelWidth = () => {
-  if (!configPanelRef.value) return
-  const width = Math.round(configPanelRef.value.getBoundingClientRect().width)
-  if (width >= 320 && width <= 560) {
-    configPanelWidth.value = width
-    window.localStorage.setItem(PANEL_WIDTH_KEY, String(width))
-  }
 }
 
 const toggleConfigPanel = () => {
@@ -491,16 +499,11 @@ const initEquityChart = async () => {
 }
 
 onMounted(() => {
-  const savedWidth = Number(window.localStorage.getItem(PANEL_WIDTH_KEY) || 0)
-  if (savedWidth >= 320 && savedWidth <= 560) configPanelWidth.value = savedWidth
+  hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
-  window.addEventListener('mouseup', persistPanelWidth)
-  window.addEventListener('touchend', persistPanelWidth)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('mouseup', persistPanelWidth)
-  window.removeEventListener('touchend', persistPanelWidth)
   equityChartInstance.value?.dispose()
 })
 </script>
@@ -586,11 +589,10 @@ onBeforeUnmount(() => {
 
 .backtest-layout {
   display: flex;
-  gap: 24px;
+  gap: 12px;
 }
 
 .config-panel {
-  width: clamp(320px, 28vw, 520px);
   min-width: 320px;
   max-width: 560px;
   flex-shrink: 0;
@@ -600,8 +602,38 @@ onBeforeUnmount(() => {
   padding: 20px;
   max-height: calc(100vh - 180px);
   overflow-y: auto;
-  resize: horizontal;
   overflow-x: hidden;
+}
+
+.panel-resizer {
+  position: relative;
+  flex: 0 0 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 16px;
+    bottom: 16px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    transition: background 0.2s ease;
+  }
+
+  &:hover::after {
+    background: rgba(41, 98, 255, 0.75);
+  }
 }
 
 .config-section {
@@ -676,14 +708,18 @@ onBeforeUnmount(() => {
 @media (max-width: 1200px) {
   .backtest-layout {
     flex-direction: column;
+    gap: 24px;
   }
 
   .config-panel {
     width: 100%;
     min-width: 0;
     max-width: none;
-    resize: none;
     max-height: none;
+  }
+
+  .panel-resizer {
+    display: none;
   }
 }
 

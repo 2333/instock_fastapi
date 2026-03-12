@@ -25,7 +25,11 @@
     </div>
 
     <div class="main-content">
-      <aside class="filter-panel">
+      <aside
+        ref="filterPanelRef"
+        class="filter-panel"
+        :style="{ width: `${filterPanelWidth}px` }"
+      >
         <div class="filter-section">
           <h4>形态类型</h4>
           <div class="filter-group">
@@ -153,6 +157,15 @@
           </select>
         </div>
       </aside>
+
+      <div
+        class="panel-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整形态筛选宽度"
+        @mousedown="startFilterResize"
+        @touchstart.prevent="startFilterResize"
+      ></div>
 
       <main class="results-panel">
         <div class="results-header">
@@ -386,6 +399,7 @@
 import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { patternApi, attentionApi } from '@/api'
+import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface PatternResult {
   id?: number
@@ -416,7 +430,16 @@ const dateTo = ref('')
 const emaSignalFilter = ref('')
 const bollSignalFilter = ref('')
 const indicatorMode = ref<'all' | 'any'>('all')
+const filterPanelRef = ref<HTMLElement | null>(null)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+const FILTER_PANEL_WIDTH_KEY = 'instock_patterns_panel_width'
+const { panelWidth: filterPanelWidth, hydrateWidth: hydrateFilterWidth, startResize: startFilterResize } = useResizablePanel({
+  panelRef: filterPanelRef,
+  storageKey: FILTER_PANEL_WIDTH_KEY,
+  defaultWidth: 320,
+  minWidth: 280,
+  maxWidth: 520,
+})
 
 const reversalPatterns = [
   { label: '晨星', value: 'MORNING_STAR' },
@@ -687,6 +710,7 @@ const addToWatchlist = async (result: PatternResult) => {
 }
 
 onMounted(() => {
+  hydrateFilterWidth()
   const queryCode = String(route.query.code || '').trim()
   if (queryCode) {
     selectedPatterns.value = []
@@ -782,18 +806,51 @@ onMounted(() => {
 
 .main-content {
   display: flex;
-  gap: 24px;
+  gap: 12px;
   height: calc(100% - 100px);
 }
 
 .filter-panel {
-  width: 280px;
   flex-shrink: 0;
+  min-width: 280px;
+  max-width: 520px;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 20px;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel-resizer {
+  position: relative;
+  flex: 0 0 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 16px;
+    bottom: 16px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    transition: background 0.2s ease;
+  }
+
+  &:hover::after {
+    background: rgba(41, 98, 255, 0.75);
+  }
 }
 
 .filter-section {
@@ -1173,6 +1230,25 @@ onMounted(() => {
 .page-info {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+@media (max-width: 1200px) {
+  .main-content {
+    flex-direction: column;
+    gap: 24px;
+    height: auto;
+  }
+
+  .filter-panel {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    max-height: 50vh;
+  }
+
+  .panel-resizer {
+    display: none;
+  }
 }
 
 .modal-overlay {

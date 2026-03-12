@@ -11,25 +11,26 @@ const api = axios.create({
 })
 
 const isAuthenticated = ref(!!localStorage.getItem(TOKEN_KEY))
+let refreshPromise: Promise<{ access_token: string; refresh_token: string }> | null = null
 
 export const authApi = {
-  login: (username: string, password: string) => 
+  login: (username: string, password: string) =>
     api.post('/auth/login', { username, password }) as Promise<{ access_token: string; refresh_token: string }>,
-  
+
   register: (username: string, email: string, password: string) =>
     api.post('/auth/register', { username, email, password }) as Promise<any>,
-  
+
   refreshToken: (refreshToken: string) =>
     api.post('/auth/refresh', { refresh_token: refreshToken }) as Promise<any>,
 
   getMe: () => api.get('/auth/me') as Promise<any>,
-  
+
   getSettings: () => api.get('/auth/settings') as Promise<any>,
-  
+
   updateSettings: (settings: any) => api.put('/auth/settings', settings) as Promise<any>,
-  
+
   getToken: () => localStorage.getItem(TOKEN_KEY),
-  
+
   setToken: (token: string, refreshToken?: string) => {
     localStorage.setItem(TOKEN_KEY, token)
     if (refreshToken) {
@@ -37,33 +38,69 @@ export const authApi = {
     }
     isAuthenticated.value = true
   },
-  
+
   removeToken: () => {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_TOKEN_KEY)
     isAuthenticated.value = false
   },
-  
+
   isAuthenticated: () => isAuthenticated.value,
-  
+
   authState: isAuthenticated,
 }
 
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
+  async (error) => {
     const status = error.response?.status
-    
+    const originalRequest = error.config as any
+
     if (status === 401) {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('refresh_token')
-      isAuthenticated.value = false
-      
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+      // refresh 请求本身失败时，不再重试，直接登出
+      if (originalRequest?.url?.includes('/auth/refresh') || originalRequest?._retry) {
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.removeItem(REFRESH_TOKEN_KEY)
+        isAuthenticated.value = false
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
+      }
+
+      const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
+
+      if (refreshToken) {
+        try {
+          originalRequest._retry = true
+          if (!refreshPromise) {
+            refreshPromise = authApi.refreshToken(refreshToken).finally(() => {
+              refreshPromise = null
+            })
+          }
+          const res = await refreshPromise
+          const newAccessToken = res.access_token
+          const newRefreshToken = res.refresh_token
+
+          authApi.setToken(newAccessToken, newRefreshToken)
+
+          originalRequest.headers = originalRequest.headers || {}
+          originalRequest.headers.Authorization = `Bearer ${newAccessToken}`
+          return api(originalRequest)
+        } catch (e) {
+          authApi.removeToken()
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
+        }
+      } else {
+        authApi.removeToken()
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
       }
     }
-    
+
     console.error('API Error:', error)
     return Promise.reject(error)
   }
@@ -80,7 +117,7 @@ api.interceptors.request.use((config) => {
 export const stockApi = {
   getStocks: (params?: { page?: number; page_size?: number; date?: string }) =>
     api.get('/stocks', { params }) as Promise<{ items: any[]; total: number; page: number; page_size: number }>,
-  
+
   getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq' }) =>
     api.get(`/stocks/${code}`, { params }) as Promise<any>,
 }
@@ -88,14 +125,14 @@ export const stockApi = {
 export const etfApi = {
   getEtfList: (params?: { page?: number; page_size?: number; date?: string }) =>
     api.get('/etf', { params }) as Promise<any>,
-  
+
   getEtfDetail: (code: string) => api.get(`/etf/${code}`) as Promise<any>,
 }
 
 export const indicatorApi = {
   getIndicators: (code: string, params?: { start_date?: string; end_date?: string; limit?: number }) =>
     api.get('/indicators', { params: { code, ...params } }) as Promise<any>,
-  
+
   getLatestIndicator: (code: string) =>
     api.get('/indicators/latest', { params: { code } }) as Promise<any>,
 }
@@ -103,7 +140,7 @@ export const indicatorApi = {
 export const patternApi = {
   getPatterns: (code: string, params?: { start_date?: string; end_date?: string; limit?: number }) =>
     api.get('/patterns', { params: { code, ...params } }) as Promise<any>,
-  
+
   getTodayPatterns: (params?: {
     signal?: string
     start_date?: string
@@ -124,10 +161,10 @@ export const patternApi = {
 
 export const strategyApi = {
   getStrategies: () => api.get('/strategies') as Promise<any>,
-  
+
   runStrategy: (strategy: string, date?: string) =>
     api.post('/strategies/run', { strategy, date }) as Promise<any>,
-  
+
   getResults: (params?: { strategy?: string; date?: string; limit?: number }) =>
     api.get('/strategies/results', { params }) as Promise<any>,
 }
@@ -140,15 +177,15 @@ export const backtestApi = {
     initial_capital: number
     stock_code?: string
   }) => api.post('/backtest', params) as Promise<any>,
-  
+
   getBacktest: (id: string) => api.get(`/backtest/${id}`) as Promise<any>,
 }
 
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
-  
+
   runSelection: (conditions: any) => api.post('/selection', conditions) as Promise<any>,
-  
+
   getHistory: (params?: { limit?: number }) =>
     api.get('/selection/history', { params }) as Promise<any>,
 }
@@ -156,10 +193,10 @@ export const selectionApi = {
 export const fundFlowApi = {
   getFundFlow: (code: string, days?: number) =>
     api.get(`/fund-flow/${code}`, { params: { days } }) as Promise<any>,
-  
+
   getIndustryFundFlow: (date?: string, limit?: number) =>
     api.get('/fund-flow/sector/industry', { params: { date, limit } }) as Promise<any>,
-  
+
   getConceptFundFlow: (date?: string, limit?: number) =>
     api.get('/fund-flow/sector/concept', { params: { date, limit } }) as Promise<any>,
 }
@@ -167,22 +204,22 @@ export const fundFlowApi = {
 export const marketApi = {
   getFundFlowRank: (date?: string, limit?: number) =>
     api.get('/market/fund-flow', { params: { date, limit } }) as Promise<any>,
-  
+
   getBlockTrades: (date?: string, limit?: number) =>
     api.get('/market/block-trades', { params: { date, limit } }) as Promise<any>,
-  
+
   getLHB: (date?: string, limit?: number) =>
     api.get('/market/lhb', { params: { date, limit } }) as Promise<any>,
-  
+
   getNorthBoundFunds: (date?: string, limit?: number) =>
     api.get('/market/north-bound', { params: { date, limit } }) as Promise<any>,
 }
 
 export const attentionApi = {
   getList: () => api.get('/attention') as Promise<any>,
-  
+
   add: (code: string) => api.post('/attention', { code }) as Promise<any>,
-  
+
   remove: (code: string) => api.delete(`/attention/${code}`) as Promise<any>,
 }
 

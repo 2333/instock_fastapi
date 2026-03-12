@@ -288,7 +288,7 @@ class BaseCrawler(ABC):
             return self._parse_response(response)
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP错误: {e.response.status_code} - {url}")
-            if e.response.status_code == 429:  # Rate limited
+            if e.response.status_code == 429:  # Rate Limited
                 await asyncio.sleep(5)
             if self.proxy_pool and proxy and e.response.status_code in {403, 429}:
                 self.proxy_pool.mark_failed(proxy)

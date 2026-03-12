@@ -4,22 +4,50 @@ import os
 from datetime import datetime, timedelta, date
 from typing import List, Optional
 
-from sqlalchemy import select, and_, text
+from sqlalchemy import inspect, select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
+from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
 from app.models.stock_model import Stock, DailyBar
+from app.utils.stock_codes import extract_symbol, normalize_exchange_name, normalize_ts_code
 from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.base import AdjustType, ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
+_supports_daily_bar_upsert = True
+BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
+TS_CODE_CHILD_TABLES = (
+    "daily_bars",
+    "fund_flows",
+    "attention",
+    "indicators",
+    "patterns",
+    "strategy_results",
+    "selection_results",
+    "stock_tops",
+    "stock_block_trades",
+    "stock_bonus",
+    "stock_limitup_reasons",
+    "stock_chip_races",
+    "north_bound_funds",
+    "backfill_daily_state",
+)
 
 
 def _build_proxy_pool() -> Optional[ProxyPool]:
+    if os.getenv("CRAWLER_PROXY_ENABLED", "false").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        logger.info("任务代理已关闭，使用直连模式")
+        return None
     proxy_file = os.getenv("CRAWLER_PROXY_FILE", "config/proxy.txt")
     pool = ProxyPool.from_file(proxy_file)
     if pool.proxies:
@@ -29,32 +57,145 @@ def _build_proxy_pool() -> Optional[ProxyPool]:
     return None
 
 
+def _is_tushare_required() -> bool:
+    value = os.getenv("TUSHARE_REQUIRED", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _inline_fallback_enabled() -> bool:
+    value = os.getenv("INLINE_FALLBACK_ENABLED", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+async def _ensure_backfill_state_table(session: AsyncSession) -> None:
+    await session.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS backfill_daily_state (
+              ts_code VARCHAR(20) PRIMARY KEY,
+              status VARCHAR(20) NOT NULL,
+              note TEXT NULL,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+    await session.commit()
+
+
+async def _migrate_legacy_stock_code(
+    session: AsyncSession,
+    legacy_stock: Stock,
+    *,
+    ts_code: str,
+    symbol: str,
+    name: str,
+    area: str | None,
+    industry: str | None,
+    market: str | None,
+    exchange: str,
+    is_etf: bool,
+) -> None:
+    connection = await session.connection()
+    existing_tables = set(await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names()))
+
+    current = await session.scalar(select(Stock).where(Stock.ts_code == ts_code))
+    if current is None:
+        current = Stock(
+            ts_code=ts_code,
+            symbol=symbol,
+            name=name,
+            area=area,
+            industry=industry,
+            market=market,
+            exchange=exchange,
+            list_status="L",
+            is_etf=is_etf,
+        )
+        session.add(current)
+        await session.flush()
+    else:
+        current.symbol = symbol
+        current.name = name
+        current.area = area
+        current.industry = industry
+        current.market = market
+        current.exchange = exchange
+        current.list_status = "L"
+        current.is_etf = is_etf
+
+    old_ts_code = legacy_stock.ts_code
+    for table in TS_CODE_CHILD_TABLES:
+        if table not in existing_tables:
+            continue
+        await session.execute(
+            text(f"UPDATE {table} SET ts_code = :new_ts_code WHERE ts_code = :old_ts_code"),
+            {"new_ts_code": ts_code, "old_ts_code": old_ts_code},
+        )
+
+    if "data_fetch_audit" in existing_tables:
+        await session.execute(
+            text(
+                """
+                UPDATE data_fetch_audit
+                SET entity_key = :new_ts_code
+                WHERE entity_key = :old_ts_code
+                """
+            ),
+            {"new_ts_code": ts_code, "old_ts_code": old_ts_code},
+        )
+
+    await session.delete(legacy_stock)
+
+
 async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = False) -> int:
     """保存股票/ETF列表"""
     count = 0
     for stock in stocks:
-        code = stock.get("f12") or stock.get("code")
+        code = extract_symbol(stock.get("f12") or stock.get("code") or stock.get("symbol"))
         if not code:
             continue
 
         symbol = code
-        if code.startswith("6"):
-            exchange = "SSE"
-        elif code.startswith(("0", "3")):
-            exchange = "SZSE"
-        else:
-            exchange = "UNKNOWN"
+        exchange = normalize_exchange_name(stock.get("exchange"), symbol)
+        ts_code = normalize_ts_code(stock.get("ts_code"), symbol=symbol, exchange=exchange)
 
         area = str(stock.get("f15")) if stock.get("f15") else None
         industry = str(stock.get("f16")) if stock.get("f16") else None
         market = str(stock.get("f17")) if stock.get("f17") else None
+        name = stock.get("f14") or stock.get("name", "")
+
+        normalized_stock = await session.scalar(select(Stock).where(Stock.ts_code == ts_code))
+        if normalized_stock is None:
+            legacy_stock = await session.scalar(
+                select(Stock).where(
+                    Stock.symbol == symbol,
+                    Stock.is_etf == is_etf,
+                    Stock.ts_code != ts_code,
+                )
+            )
+            if legacy_stock is not None:
+                await _migrate_legacy_stock_code(
+                    session,
+                    legacy_stock,
+                    ts_code=ts_code,
+                    symbol=symbol,
+                    name=name,
+                    area=area,
+                    industry=industry,
+                    market=market,
+                    exchange=exchange,
+                    is_etf=is_etf,
+                )
+                count += 1
+                continue
 
         stmt = (
             insert(Stock)
             .values(
-                ts_code=f"{code}.{exchange}",
+                ts_code=ts_code,
                 symbol=code,
-                name=stock.get("f14") or stock.get("name", ""),
+                name=name,
                 area=area,
                 industry=industry,
                 market=market,
@@ -65,10 +206,14 @@ async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = 
             .on_conflict_do_update(
                 index_elements=["ts_code"],
                 set_={
-                    "name": stock.get("f14") or stock.get("name", ""),
+                    "symbol": symbol,
+                    "name": name,
                     "area": area,
                     "industry": industry,
                     "market": market,
+                    "exchange": exchange,
+                    "list_status": "L",
+                    "is_etf": is_etf,
                     "updated_at": datetime.utcnow(),
                 },
             )
@@ -122,33 +267,33 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict])
     if not values:
         return 0
 
-    stmt = (
-        insert(DailyBar)
-        .values(values)
-        .on_conflict_do_update(
-            index_elements=["ts_code", "trade_date", "trade_date_dt"],
+    global _supports_daily_bar_upsert
+    if _supports_daily_bar_upsert:
+        daily_bar_insert = insert(DailyBar)
+        stmt = daily_bar_insert.values(values).on_conflict_do_update(
+            constraint="uq_daily_bars_ts_code_trade_date",
             set_={
-                "trade_date_dt": insert(DailyBar).excluded.trade_date_dt,
-                "open": insert(DailyBar).excluded.open,
-                "high": insert(DailyBar).excluded.high,
-                "low": insert(DailyBar).excluded.low,
-                "close": insert(DailyBar).excluded.close,
-                "pre_close": insert(DailyBar).excluded.pre_close,
-                "change": insert(DailyBar).excluded.change,
-                "pct_chg": insert(DailyBar).excluded.pct_chg,
-                "vol": insert(DailyBar).excluded.vol,
-                "amount": insert(DailyBar).excluded.amount,
+                "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
+                "open": daily_bar_insert.excluded.open,
+                "high": daily_bar_insert.excluded.high,
+                "low": daily_bar_insert.excluded.low,
+                "close": daily_bar_insert.excluded.close,
+                "pre_close": daily_bar_insert.excluded.pre_close,
+                "change": daily_bar_insert.excluded.change,
+                "pct_chg": daily_bar_insert.excluded.pct_chg,
+                "vol": daily_bar_insert.excluded.vol,
+                "amount": daily_bar_insert.excluded.amount,
             },
         )
-    )
-    try:
-        await session.execute(stmt)
-        await session.commit()
-        return len(values)
-    except SQLAlchemyError as exc:
-        # 兼容历史库结构（可能缺失 uq_daily_bars_ts_code_trade_date）
-        logger.warning("批量 upsert 失败，降级逐条保存: %s", exc)
-        await session.rollback()
+        try:
+            await session.execute(stmt)
+            await session.commit()
+            return len(values)
+        except SQLAlchemyError as exc:
+            await session.rollback()
+            # 兼容历史库结构（可能缺失 uq_daily_bars_ts_code_trade_date）
+            _supports_daily_bar_upsert = False
+            logger.warning("daily_bars upsert 不可用，后续改为兼容写入: %s", exc)
 
     count = 0
     for item in values:
@@ -185,29 +330,79 @@ async def fetch_and_save_stocks():
     crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
 
     try:
-        logger.info("Fetching A-stock list (tushare -> baostock -> eastmoney)...")
+        primary_only = not _inline_fallback_enabled()
+
+        logger.info(
+            "Fetching A-stock list (primary=tushare%s)...",
+            ", no-inline-fallback" if primary_only else " -> baostock -> eastmoney",
+        )
         stocks = await tushare_provider.fetch_stock_list()
+        if not stocks and primary_only:
+            logger.warning("A 股列表主数据源 Tushare 未返回结果，已记录待降级")
+            await record_fetch_audit(
+                task_name="fetch_daily_data",
+                entity_type="stock_list",
+                entity_key="A_SHARE",
+                status="needs_fallback",
+                source="tushare",
+                note="primary source returned empty",
+            )
+            stocks = []
         if not stocks:
             stocks = await baostock_provider.fetch_stock_list()
         if not stocks:
             stocks = await crawler.fetch(data_type="stock_list")
-        logger.info(f"Fetched {len(stocks)} stocks")
+        if stocks:
+            logger.info("Fetched %s stocks", len(stocks))
+            async with async_session_factory() as session:
+                count = await save_stocks(session, stocks, is_etf=False)
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_daily_data",
+                    entity_type="stock_list",
+                    entity_key="A_SHARE",
+                    status="done",
+                    source="tushare" if primary_only else "mixed",
+                    note=f"rows={count}",
+                )
+                await session.commit()
+                logger.info("Saved %s stocks to database", count)
 
-        async with async_session_factory() as session:
-            count = await save_stocks(session, stocks, is_etf=False)
-            logger.info(f"Saved {count} stocks to database")
-
-        logger.info("Fetching ETF list (tushare -> baostock -> eastmoney)...")
+        logger.info(
+            "Fetching ETF list (primary=tushare%s)...",
+            ", no-inline-fallback" if primary_only else " -> baostock -> eastmoney",
+        )
         etfs = await tushare_provider.fetch_etf_list()
+        if not etfs and primary_only:
+            logger.warning("ETF 列表主数据源 Tushare 未返回结果，已记录待降级")
+            await record_fetch_audit(
+                task_name="fetch_daily_data",
+                entity_type="stock_list",
+                entity_key="ETF",
+                status="needs_fallback",
+                source="tushare",
+                note="primary source returned empty",
+            )
+            etfs = []
         if not etfs:
             etfs = await baostock_provider.fetch_etf_list()
         if not etfs:
             etfs = await crawler.fetch(data_type="etf_list")
-        logger.info(f"Fetched {len(etfs)} ETFs")
-
-        async with async_session_factory() as session:
-            count = await save_stocks(session, etfs, is_etf=True)
-            logger.info(f"Saved {count} ETFs to database")
+        if etfs:
+            logger.info("Fetched %s ETFs", len(etfs))
+            async with async_session_factory() as session:
+                count = await save_stocks(session, etfs, is_etf=True)
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_daily_data",
+                    entity_type="stock_list",
+                    entity_key="ETF",
+                    status="done",
+                    source="tushare" if primary_only else "mixed",
+                    note=f"rows={count}",
+                )
+                await session.commit()
+                logger.info("Saved %s ETFs to database", count)
     finally:
         await crawler.close()
 
@@ -221,10 +416,11 @@ async def _fetch_bars_with_fallback(
     end_date: str,
     adjust: AdjustType,
     max_retries: int = 3,
-) -> List[dict]:
+) -> tuple[List[dict], str, str, str]:
     bars = []
     source = "tushare"
     last_error = None
+    primary_only = _is_tushare_required() or not _inline_fallback_enabled()
 
     # 1) 优先 Tushare（不走代理）
     for attempt in range(max_retries):
@@ -243,6 +439,13 @@ async def _fetch_bars_with_fallback(
             last_error = exc
             if attempt < max_retries - 1:
                 await asyncio.sleep(0.5)
+
+    if primary_only:
+        if bars:
+            return bars, "tushare", "done", ""
+        if last_error:
+            return [], "tushare", "needs_fallback", f"primary source error: {last_error}"
+        return [], "tushare", "needs_fallback", "primary source returned empty"
 
     # 2) Tushare 失败或无数据，降级 BaoStock（使用项目代理）
     if not bars:
@@ -286,7 +489,11 @@ async def _fetch_bars_with_fallback(
     if not bars and last_error:
         logger.warning("%s 三数据源均失败: %s", symbol, last_error)
 
-    return bars or []
+    if bars:
+        return bars, source, "done", ""
+    if last_error:
+        return [], source, "needs_fallback", f"all sources failed: {last_error}"
+    return [], source, "needs_fallback", "all sources returned empty"
 
 
 db_semaphore = asyncio.Semaphore(5)
@@ -305,7 +512,7 @@ async def _fetch_single_stock(
 ) -> tuple[str, int, bool]:
     async with semaphore:
         try:
-            bars = await _fetch_bars_with_fallback(
+            bars, source, status, note = await _fetch_bars_with_fallback(
                 tushare_provider=tushare_provider,
                 baostock_provider=baostock_provider,
                 em_crawler=em_crawler,
@@ -318,11 +525,50 @@ async def _fetch_single_stock(
                 async with db_semaphore:
                     async with async_session_factory() as session:
                         count = await save_daily_bars(session, stock.ts_code, bars)
-                        logger.info(f"[{idx}/{total}] {stock.symbol} 保存 {count} 条K线")
+                        await upsert_fetch_audit(
+                            session,
+                            task_name="fetch_daily_data",
+                            entity_type="daily_bar_sync",
+                            entity_key=stock.ts_code,
+                            status="done",
+                            source=source,
+                            note=f"rows={count}",
+                        )
+                        await session.commit()
+                        logger.info(
+                            f"[{idx}/{total}] {stock.symbol} 保存 {count} 条K线, source={source}"
+                        )
                 return stock.symbol, count, True
+            await record_fetch_audit(
+                task_name="fetch_daily_data",
+                entity_type="daily_bar_sync",
+                entity_key=stock.ts_code,
+                status=status,
+                source=source,
+                note=note,
+            )
+            logger.warning(
+                "[%s/%s] %s 未写入K线，status=%s, source=%s, note=%s",
+                idx,
+                total,
+                stock.symbol,
+                status,
+                source,
+                note,
+            )
             return stock.symbol, 0, True
         except Exception as e:
             logger.error(f"[{idx}/{total}] {stock.symbol} K线抓取失败: {e}")
+            if "session" in locals():
+                await session.rollback()
+            await record_fetch_audit(
+                task_name="fetch_daily_data",
+                entity_type="daily_bar_sync",
+                entity_key=stock.ts_code,
+                status="needs_fallback",
+                source="tushare",
+                note=f"unexpected task error: {e}",
+            )
             return stock.symbol, 0, False
 
 
@@ -373,19 +619,7 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
 async def _get_backfill_targets(
     session: AsyncSession, start: str, end: str, batch_size: int
 ) -> List[dict]:
-    await session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS backfill_daily_state (
-              ts_code VARCHAR(20) PRIMARY KEY,
-              status VARCHAR(20) NOT NULL,
-              note TEXT NULL,
-              updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-            )
-            """
-        )
-    )
-    await session.commit()
+    await _ensure_backfill_state_table(session)
 
     query = text(
         """
@@ -408,7 +642,7 @@ async def _get_backfill_targets(
                 SELECT 1
                 FROM backfill_daily_state st
                 WHERE st.ts_code = s.ts_code
-                  AND st.status IN ('done', 'nodata')
+                  AND st.status IN ('done', 'needs_fallback', 'nodata')
           )
         ORDER BY s.ts_code
         LIMIT :limit
@@ -420,19 +654,7 @@ async def _get_backfill_targets(
 
 
 async def _get_backfill_progress(session: AsyncSession, start: str, end: str) -> tuple[int, int]:
-    await session.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS backfill_daily_state (
-              ts_code VARCHAR(20) PRIMARY KEY,
-              status VARCHAR(20) NOT NULL,
-              note TEXT NULL,
-              updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-            )
-            """
-        )
-    )
-    await session.commit()
+    await _ensure_backfill_state_table(session)
 
     total_q = text(
         """
@@ -466,7 +688,7 @@ async def _get_backfill_progress(session: AsyncSession, start: str, end: str) ->
         """
         SELECT COUNT(*)
         FROM backfill_daily_state
-        WHERE status IN ('done', 'nodata')
+        WHERE status IN ('done', 'needs_fallback', 'nodata')
         """
     )
     total = (await session.execute(total_q, {"start": start, "end": end})).scalar() or 0
@@ -475,8 +697,75 @@ async def _get_backfill_progress(session: AsyncSession, start: str, end: str) ->
     return int(total), int(max(covered, marked))
 
 
+async def _get_fallback_targets(session: AsyncSession, batch_size: int) -> List[dict]:
+    query = text(
+        """
+        SELECT s.*
+        FROM stocks s
+        JOIN backfill_daily_state st ON st.ts_code = s.ts_code
+        WHERE st.status = 'needs_fallback'
+          AND s.list_status = 'L'
+        ORDER BY s.ts_code
+        LIMIT :limit
+        """
+    )
+    result = await session.execute(query, {"limit": batch_size})
+    rows = result.mappings().all()
+    return [dict(row) for row in rows]
+
+
+async def _fetch_bars_from_fallback(
+    baostock_provider: BaoStockProvider,
+    em_crawler: EastMoneyCrawler,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    adjust: AdjustType,
+    max_retries: int = 3,
+) -> tuple[List[dict], str, str]:
+    bars: List[dict] = []
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            bars = await baostock_provider.fetch_kline(
+                code=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust,
+                period="daily",
+            )
+            if bars:
+                return bars, "baostock", ""
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.5)
+
+    for attempt in range(max_retries):
+        try:
+            bars = await em_crawler.fetch(
+                data_type="kline",
+                code=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=adjust,
+                period="daily",
+            )
+            if bars:
+                return bars, "eastmoney", ""
+        except Exception as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1)
+
+    if last_error:
+        return [], "fallback", f"all fallback sources failed: {last_error}"
+    return [], "fallback", "all fallback sources returned empty"
+
+
 async def run_historical_backfill() -> bool:
-    """增量回补 2020-2025 日线（Tushare 优先，BaoStock 次之，EastMoney 兜底）"""
+    """增量回补 2020-2025 日线。可通过 TUSHARE_REQUIRED 强制仅允许 Tushare。"""
     start = os.getenv("BACKFILL_START_DATE", "20200101")
     end = os.getenv("BACKFILL_END_DATE", "20251231")
     batch_size = int(os.getenv("BACKFILL_BATCH_SIZE", "150"))
@@ -504,7 +793,7 @@ async def run_historical_backfill() -> bool:
         logger.info("开始回补 %s 只股票（%s-%s）", len(targets), start, end)
         for idx, stock in enumerate(targets, 1):
             try:
-                bars = await _fetch_bars_with_fallback(
+                bars, source, status, note = await _fetch_bars_with_fallback(
                     tushare_provider=tushare_provider,
                     baostock_provider=baostock_provider,
                     em_crawler=em_crawler,
@@ -515,6 +804,16 @@ async def run_historical_backfill() -> bool:
                 )
                 if bars:
                     count = await save_daily_bars(session, stock["ts_code"], bars)
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="historical_backfill",
+                        entity_type="daily_bar",
+                        entity_key=stock["ts_code"],
+                        trade_date=end,
+                        status="done",
+                        source=source,
+                        note=f"rows={count}",
+                    )
                     await session.execute(
                         text(
                             """
@@ -524,32 +823,207 @@ async def run_historical_backfill() -> bool:
                             DO UPDATE SET status='done', note=:note, updated_at=NOW()
                             """
                         ),
-                        {"ts_code": stock["ts_code"], "note": f"rows={count}"},
+                        {"ts_code": stock["ts_code"], "note": f"rows={count},source={source}"},
                     )
                     await session.commit()
                     logger.info(
-                        "[%s/%s] 回补 %s 成功，写入 %s 条",
+                        "[%s/%s] 回补 %s 成功，写入 %s 条, source=%s",
                         idx,
                         len(targets),
                         stock["symbol"],
                         count,
+                        source,
                     )
                 else:
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="historical_backfill",
+                        entity_type="daily_bar",
+                        entity_key=stock["ts_code"],
+                        trade_date=end,
+                        status=status,
+                        source=source,
+                        note=note,
+                    )
                     await session.execute(
                         text(
                             """
                             INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
-                            VALUES (:ts_code, 'nodata', 'source returned empty', NOW())
+                            VALUES (:ts_code, :status, :note, NOW())
                             ON CONFLICT (ts_code)
-                            DO UPDATE SET status='nodata', note='source returned empty', updated_at=NOW()
+                            DO UPDATE SET status=:status, note=:note, updated_at=NOW()
                             """
                         ),
-                        {"ts_code": stock["ts_code"]},
+                        {"ts_code": stock["ts_code"], "status": status, "note": note},
                     )
                     await session.commit()
-                    logger.warning("[%s/%s] %s 无可用日线数据", idx, len(targets), stock["symbol"])
+                    logger.warning(
+                        "[%s/%s] %s 跳过，status=%s, source=%s, note=%s",
+                        idx,
+                        len(targets),
+                        stock["symbol"],
+                        status,
+                        source,
+                        note,
+                    )
             except Exception as exc:
                 logger.error("[%s/%s] %s 回补失败: %s", idx, len(targets), stock["symbol"], exc)
+                await session.rollback()
+                await upsert_fetch_audit(
+                    session,
+                    task_name="historical_backfill",
+                    entity_type="daily_bar",
+                    entity_key=stock["ts_code"],
+                    trade_date=end,
+                    status="needs_fallback",
+                    source="tushare",
+                    note=f"unexpected task error: {exc}",
+                )
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
+                        VALUES (:ts_code, 'needs_fallback', :note, NOW())
+                        ON CONFLICT (ts_code)
+                        DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
+                        """
+                    ),
+                    {"ts_code": stock["ts_code"], "note": f"unexpected task error: {exc}"},
+                )
+                await session.commit()
+            await asyncio.sleep(sleep_seconds)
+
+    await em_crawler.close()
+    return False
+
+
+async def run_historical_fallback_backfill() -> bool:
+    start = os.getenv("BACKFILL_START_DATE", "20200101")
+    end = os.getenv("BACKFILL_END_DATE", "20251231")
+    batch_size = int(os.getenv("FALLBACK_BACKFILL_BATCH_SIZE", os.getenv("BACKFILL_BATCH_SIZE", "100")))
+    sleep_seconds = float(os.getenv("FALLBACK_BACKFILL_ITEM_SLEEP", os.getenv("BACKFILL_ITEM_SLEEP", "0.05")))
+
+    proxy_pool = _build_proxy_pool()
+    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
+    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+
+    async with async_session_factory() as session:
+        await _ensure_backfill_state_table(session)
+        pending_q = text("SELECT COUNT(*) FROM backfill_daily_state WHERE status = 'needs_fallback'")
+        pending = (await session.execute(pending_q)).scalar() or 0
+        logger.info("降级补偿待处理: %s", pending)
+        if pending == 0:
+            logger.info("降级补偿已完成")
+            await em_crawler.close()
+            return True
+
+        targets = await _get_fallback_targets(session, batch_size)
+        if not targets:
+            logger.info("本轮降级补偿无待处理标的")
+            await em_crawler.close()
+            return True
+
+        logger.info("开始降级补偿 %s 只股票（%s-%s）", len(targets), start, end)
+        start_date = f"{start[:4]}-{start[4:6]}-{start[6:]}"
+        end_date = f"{end[:4]}-{end[4:6]}-{end[6:]}"
+        for idx, stock in enumerate(targets, 1):
+            try:
+                bars, source, note = await _fetch_bars_from_fallback(
+                    baostock_provider=baostock_provider,
+                    em_crawler=em_crawler,
+                    symbol=stock["symbol"],
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust=AdjustType.NO_ADJUST,
+                )
+                if bars:
+                    count = await save_daily_bars(session, stock["ts_code"], bars)
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="historical_backfill_fallback",
+                        entity_type="daily_bar",
+                        entity_key=stock["ts_code"],
+                        trade_date=end,
+                        status="done",
+                        source=source,
+                        note=f"rows={count}",
+                    )
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
+                            VALUES (:ts_code, 'done', :note, NOW())
+                            ON CONFLICT (ts_code)
+                            DO UPDATE SET status='done', note=:note, updated_at=NOW()
+                            """
+                        ),
+                        {"ts_code": stock["ts_code"], "note": f"rows={count},source={source}"},
+                    )
+                    await session.commit()
+                    logger.info(
+                        "[%s/%s] 降级补偿 %s 成功，写入 %s 条, source=%s",
+                        idx,
+                        len(targets),
+                        stock["symbol"],
+                        count,
+                        source,
+                    )
+                else:
+                    await upsert_fetch_audit(
+                        session,
+                        task_name="historical_backfill_fallback",
+                        entity_type="daily_bar",
+                        entity_key=stock["ts_code"],
+                        trade_date=end,
+                        status="needs_fallback",
+                        source=source,
+                        note=note,
+                    )
+                    await session.execute(
+                        text(
+                            """
+                            INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
+                            VALUES (:ts_code, 'needs_fallback', :note, NOW())
+                            ON CONFLICT (ts_code)
+                            DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
+                            """
+                        ),
+                        {"ts_code": stock["ts_code"], "note": note},
+                    )
+                    await session.commit()
+                    logger.warning(
+                        "[%s/%s] %s 降级补偿未写入，source=%s, note=%s",
+                        idx,
+                        len(targets),
+                        stock["symbol"],
+                        source,
+                        note,
+                    )
+            except Exception as exc:
+                await session.rollback()
+                logger.error("[%s/%s] %s 降级补偿失败: %s", idx, len(targets), stock["symbol"], exc)
+                await upsert_fetch_audit(
+                    session,
+                    task_name="historical_backfill_fallback",
+                    entity_type="daily_bar",
+                    entity_key=stock["ts_code"],
+                    trade_date=end,
+                    status="needs_fallback",
+                    source="fallback",
+                    note=f"unexpected fallback error: {exc}",
+                )
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
+                        VALUES (:ts_code, 'needs_fallback', :note, NOW())
+                        ON CONFLICT (ts_code)
+                        DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
+                        """
+                    ),
+                    {"ts_code": stock["ts_code"], "note": f"unexpected fallback error: {exc}"},
+                )
+                await session.commit()
             await asyncio.sleep(sleep_seconds)
 
     await em_crawler.close()
