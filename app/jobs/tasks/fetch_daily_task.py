@@ -67,6 +67,16 @@ def _inline_fallback_enabled() -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _should_use_eastmoney_direct(*, exchange: str | None = None, is_etf: bool = False) -> bool:
+    """ETF 与北交所日线直接走 EastMoney。
+
+    这两类标的在当前接入里，Tushare/BaoStock 要么天然不支持、要么经常返回空，
+    继续走 primary-only 逻辑只会稳定地产生 needs_fallback，造成“经常更新不全”。
+    """
+    normalized_exchange = (exchange or "").strip().upper()
+    return is_etf or normalized_exchange == "BJ"
+
+
 async def _ensure_backfill_state_table(session: AsyncSession) -> None:
     await session.execute(
         text(
@@ -416,11 +426,37 @@ async def _fetch_bars_with_fallback(
     end_date: str,
     adjust: AdjustType,
     max_retries: int = 3,
+    exchange: str | None = None,
+    is_etf: bool = False,
 ) -> tuple[List[dict], str, str, str]:
     bars = []
     source = "tushare"
     last_error = None
     primary_only = _is_tushare_required() or not _inline_fallback_enabled()
+    eastmoney_direct = _should_use_eastmoney_direct(exchange=exchange, is_etf=is_etf)
+
+    # ETF 与北交所当前直接交给 EastMoney，避免主源稳定返回空结果。
+    if eastmoney_direct:
+        source = "eastmoney"
+        for attempt in range(max_retries):
+            try:
+                bars = await em_crawler.fetch(
+                    data_type="kline",
+                    code=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust=adjust,
+                    period="daily",
+                )
+                if bars:
+                    return bars, source, "done", ""
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+        if last_error:
+            return [], source, "needs_fallback", f"eastmoney direct error: {last_error}"
+        return [], source, "needs_fallback", "eastmoney direct returned empty"
 
     # 1) 优先 Tushare（不走代理）
     for attempt in range(max_retries):
@@ -520,6 +556,8 @@ async def _fetch_single_stock(
                 start_date=start_date,
                 end_date=end_date,
                 adjust=AdjustType.NO_ADJUST,
+                exchange=stock.exchange,
+                is_etf=stock.is_etf,
             )
             if bars:
                 async with db_semaphore:
@@ -801,6 +839,8 @@ async def run_historical_backfill() -> bool:
                     start_date=f"{start[:4]}-{start[4:6]}-{start[6:]}",
                     end_date=f"{end[:4]}-{end[4:6]}-{end[6:]}",
                     adjust=AdjustType.NO_ADJUST,
+                    exchange=stock.get("exchange"),
+                    is_etf=bool(stock.get("is_etf", False)),
                 )
                 if bars:
                     count = await save_daily_bars(session, stock["ts_code"], bars)

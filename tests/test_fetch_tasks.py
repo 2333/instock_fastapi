@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy import select
 
-from app.jobs.tasks import fetch_fund_flow_task
+from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
 from app.jobs.tasks.fetch_daily_task import _ensure_backfill_state_table, save_stocks
 from app.models.stock_model import Base, DailyBar, Stock
 from tests.conftest import async_engine_test, async_session_factory_test
@@ -33,6 +33,68 @@ async def test_fetch_sector_data_uses_fallback_chain(monkeypatch):
     assert used_source == "fallback"
     fetch_by_source.assert_not_awaited()
     fetch_with_fallback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_bars_routes_etf_directly_to_eastmoney(monkeypatch):
+    monkeypatch.setenv("INLINE_FALLBACK_ENABLED", "false")
+    tushare = AsyncMock()
+    tushare.fetch_kline = AsyncMock()
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock(return_value=[{"date": "2026-03-13", "close": 1}])
+
+    bars, source, status, note = await fetch_daily_task._fetch_bars_with_fallback(
+        tushare_provider=tushare,
+        baostock_provider=baostock,
+        em_crawler=eastmoney,
+        symbol="159001",
+        start_date="2026-03-10",
+        end_date="2026-03-13",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        exchange="SZ",
+        is_etf=True,
+    )
+
+    assert bars == [{"date": "2026-03-13", "close": 1}]
+    assert source == "eastmoney"
+    assert status == "done"
+    assert note == ""
+    eastmoney.fetch.assert_awaited_once()
+    tushare.fetch_kline.assert_not_awaited()
+    baostock.fetch_kline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_bars_routes_bj_directly_to_eastmoney(monkeypatch):
+    monkeypatch.setenv("INLINE_FALLBACK_ENABLED", "false")
+    tushare = AsyncMock()
+    tushare.fetch_kline = AsyncMock()
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock(return_value=[{"date": "2026-03-13", "close": 1}])
+
+    bars, source, status, note = await fetch_daily_task._fetch_bars_with_fallback(
+        tushare_provider=tushare,
+        baostock_provider=baostock,
+        em_crawler=eastmoney,
+        symbol="920000",
+        start_date="2026-03-10",
+        end_date="2026-03-13",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        exchange="BJ",
+        is_etf=False,
+    )
+
+    assert bars == [{"date": "2026-03-13", "close": 1}]
+    assert source == "eastmoney"
+    assert status == "done"
+    assert note == ""
+    eastmoney.fetch.assert_awaited_once()
+    tushare.fetch_kline.assert_not_awaited()
+    baostock.fetch_kline.assert_not_awaited()
 
 
 @pytest.mark.asyncio
