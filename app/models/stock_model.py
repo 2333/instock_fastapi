@@ -119,6 +119,38 @@ class DailyBar(Base):
     stock: Mapped["Stock"] = relationship("Stock", backref="daily_bars")
 
 
+class DailyBasic(Base):
+    __tablename__ = "daily_basic"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date", name="uq_daily_basic_ts_code_trade_date"),
+        Index("ix_daily_basic_ts_code", "ts_code"),
+        Index("ix_daily_basic_trade_date", "trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(20), ForeignKey("stocks.ts_code"), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    turnover_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    turnover_rate_f: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    volume_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    pe: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    pe_ttm: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    pb: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    ps: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    ps_ttm: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    dv_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    dv_ttm: Mapped[Optional[Decimal]] = mapped_column(Numeric(20, 6), nullable=True)
+    total_share: Mapped[Optional[Decimal]] = mapped_column(Numeric(24, 4), nullable=True)
+    float_share: Mapped[Optional[Decimal]] = mapped_column(Numeric(24, 4), nullable=True)
+    free_share: Mapped[Optional[Decimal]] = mapped_column(Numeric(24, 4), nullable=True)
+    total_mv: Mapped[Optional[Decimal]] = mapped_column(Numeric(24, 4), nullable=True)
+    circ_mv: Mapped[Optional[Decimal]] = mapped_column(Numeric(24, 4), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    stock: Mapped["Stock"] = relationship("Stock", backref="daily_basic_rows")
+
+
 class FundFlow(Base):
     __tablename__ = "fund_flows"
     __table_args__ = (

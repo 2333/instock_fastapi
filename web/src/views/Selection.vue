@@ -1,651 +1,773 @@
 <template>
-  <div class="selection-page">
-    <div class="page-header">
-      <div class="header-left">
-        <h1>股票精选</h1>
-        <p class="subtitle">根据条件筛选和选择股票</p>
+  <div class="selection-studio">
+    <header class="studio-header">
+      <div>
+        <p class="eyebrow">Selection Studio</p>
+        <h1>组合选股</h1>
+        <p class="subtitle">用规则树组合技术指标、基本面和形态条件，统一周期做实时筛选。</p>
       </div>
-      <div class="header-right">
-        <button class="btn btn-secondary" @click="toggleCriteriaPanel">
-          {{ criteriaCollapsed ? '展开条件' : '收起条件' }}
-        </button>
-        <button class="btn btn-secondary" @click="saveCriteria">保存条件</button>
-        <button class="btn btn-primary" @click="runSelection" :disabled="loading">
-          {{ loading ? '运行中...' : '开始筛选' }}
+      <div class="header-actions">
+        <select v-model="selectedPresetId" class="pill-select" @change="handlePresetChange">
+          <option value="">当前未绑定方案</option>
+          <option v-for="preset in presets" :key="preset.id" :value="String(preset.id)">
+            {{ preset.name }}
+          </option>
+        </select>
+        <select v-model="period" class="pill-select" @change="schedulePreview">
+          <option v-for="periodItem in catalog?.periods || []" :key="periodItem.key" :value="periodItem.key">
+            {{ periodItem.label }}
+          </option>
+        </select>
+        <button class="ghost-btn" @click="resetTemplate">新方案</button>
+        <button class="ghost-btn" @click="savePreset(false)">保存</button>
+        <button class="ghost-btn" @click="savePreset(true)">另存为</button>
+        <button class="ghost-btn danger" :disabled="!selectedPresetId" @click="deletePreset">删除</button>
+        <button class="primary-btn" :disabled="running" @click="runSelection(true)">
+          {{ running ? '筛选中...' : '立即筛选' }}
         </button>
       </div>
-    </div>
+    </header>
 
-    <div class="selection-layout">
-      <aside
-        v-show="!criteriaCollapsed"
-        ref="criteriaPanelRef"
-        class="criteria-panel"
-        :style="{ width: `${criteriaPanelWidth}px` }"
-      >
-        <div class="panel-section">
-          <h3>价格条件</h3>
-          <div class="criteria-group">
-            <label>价格范围</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.priceMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.priceMax" placeholder="最大" class="input-small">
-            </div>
+    <section class="template-bar">
+      <label>
+        <span>方案名称</span>
+        <input v-model.trim="presetName" type="text" placeholder="例如：日线趋势突破" />
+      </label>
+      <div class="summary-chips">
+        <span v-for="group in catalog?.groups || []" :key="group.key" class="summary-chip">
+          {{ group.label }} {{ group.items.length }}
+        </span>
+      </div>
+    </section>
+
+    <div class="studio-layout">
+      <section class="builder-panel">
+        <div class="panel-header">
+          <div>
+            <h2>规则树</h2>
+            <p>每个条件都可以配置参数、左右值比较和时序包装；组之间支持 AND / OR / NOT。</p>
           </div>
-          <div class="criteria-group">
-            <label>市值 (亿元)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.marketCapMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.marketCapMax" placeholder="最大" class="input-small">
-            </div>
+          <div class="panel-actions">
+            <span class="status-pill">周期：{{ periodLabel }}</span>
+            <span class="status-pill">条件：{{ totalConditions }}</span>
           </div>
         </div>
 
-        <div class="panel-section">
-          <h3>涨跌幅条件</h3>
-          <div class="criteria-group">
-            <label>日涨跌 (%)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.changeMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.changeMax" placeholder="最大" class="input-small">
-            </div>
+        <SelectionRuleTree
+          :node="rootRule"
+          :depth="0"
+          :metric-map="metricMap"
+          :operator-labels="operatorLabels"
+          @add-condition="openNewCondition"
+          @add-group="addGroup"
+          @edit-condition="openExistingCondition"
+          @remove-node="removeNode"
+          @update-group="updateGroup"
+        />
+      </section>
+
+      <aside class="results-panel">
+        <div class="panel-header compact">
+          <div>
+            <h2>结果</h2>
+            <p v-if="resultMeta.trade_date">{{ resultMeta.trade_date }} · {{ periodLabel }} · 共 {{ results.length }} 只</p>
+            <p v-else>配置条件后点击“立即筛选”，或保存时自动预览。</p>
           </div>
-          <div class="criteria-group">
-            <label>周涨跌 (%)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.weekChangeMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.weekChangeMax" placeholder="最大" class="input-small">
-            </div>
+          <div class="panel-actions">
+            <span class="status-pill">{{ running ? '实时刷新中' : '已同步' }}</span>
           </div>
         </div>
 
-        <div class="panel-section">
-          <h3>技术指标</h3>
-          <div class="criteria-group">
-            <label>市盈率</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.peMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.peMax" placeholder="最大" class="input-small">
-            </div>
-          </div>
-          <div class="criteria-group">
-            <label>RSI (14)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.rsiMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.rsiMax" placeholder="最大" class="input-small">
-            </div>
-          </div>
-          <div class="criteria-group">
-            <label>MACD 信号</label>
-            <div class="checkbox-group">
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="criteria.macdBullish">
-                <span>MACD 看涨</span>
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="criteria.macdBearish">
-                <span>MACD 看跌</span>
-              </label>
-            </div>
-          </div>
+        <div v-if="!results.length" class="empty-state">
+          <div class="empty-mark">RULES</div>
+          <h3>当前没有命中结果</h3>
+          <p>先在左侧规则树里添加条件，或加载一个已有方案。</p>
         </div>
 
-        <div class="panel-section">
-          <h3>成交量条件</h3>
-          <div class="criteria-group">
-            <label>量比</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.volumeRatioMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.volumeRatioMax" placeholder="最大" class="input-small">
+        <div v-else class="results-list">
+          <article v-for="item in results" :key="item.ts_code" class="result-card" @click="$router.push(`/stock/${item.code}`)">
+            <div class="result-top">
+              <div>
+                <p class="result-code">{{ item.code }}</p>
+                <h3>{{ item.stock_name }}</h3>
+              </div>
+              <div class="result-score">
+                <span>Score</span>
+                <strong>{{ item.score.toFixed(2) }}</strong>
+              </div>
             </div>
-          </div>
+
+            <div class="result-metrics">
+              <span>{{ item.signal }}</span>
+              <span>收盘 {{ formatNumber(item.snapshot?.close) }}</span>
+              <span>涨跌 {{ formatSigned(item.snapshot?.pct_chg) }}%</span>
+              <span>{{ item.matched_conditions || 0 }}/{{ item.total_conditions || 0 }} 条命中</span>
+            </div>
+
+            <div class="result-explanations">
+              <p v-for="explanation in item.explanations?.slice(0, 2) || []" :key="explanation.id">
+                <strong>{{ explanation.label || explanation.metric_key }}</strong>
+                <span>{{ operatorLabels[explanation.operator] || explanation.operator }}</span>
+                <span>{{ formatScalar(explanation.match_left) }}</span>
+                <span>{{ formatScalar(explanation.match_right) }}</span>
+              </p>
+            </div>
+          </article>
         </div>
       </aside>
-
-      <div
-        v-show="!criteriaCollapsed"
-        class="panel-resizer"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整筛选条件宽度"
-        @mousedown="startCriteriaResize"
-        @touchstart.prevent="startCriteriaResize"
-      ></div>
-
-      <main class="results-panel">
-        <div v-if="!hasResults" class="empty-state">
-          <div class="empty-icon">🎯</div>
-          <h3>暂无结果</h3>
-          <p>配置筛选条件后点击"开始筛选"</p>
-        </div>
-
-        <template v-else>
-          <div class="results-header">
-            <span class="results-count">共 {{ results.length }} 只股票</span>
-            <div class="results-actions">
-              <select v-model="sortBy" class="filter-select">
-                <option value="score">按评分排序</option>
-                <option value="date">按日期排序</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="results-table-wrapper">
-            <table class="results-table">
-              <thead>
-                <tr>
-                  <th>代码</th>
-                  <th>名称</th>
-                  <th>评分</th>
-                  <th>信号</th>
-                  <th>日期</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr 
-                  v-for="stock in sortedResults" 
-                  :key="stock.code"
-                  @click="$router.push(`/stock/${stock.code}`)"
-                >
-                  <td class="stock-code">{{ stock.code }}</td>
-                  <td class="stock-name">{{ stock.name || '-' }}</td>
-                  <td>{{ stock.score }}</td>
-                  <td>
-                    <span class="signal-badge" :class="stock.signal">{{ stock.signal }}</span>
-                  </td>
-                  <td>{{ stock.date || stock.trade_date }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </template>
-      </main>
     </div>
+
+    <SelectionConditionModal
+      :visible="conditionModalVisible"
+      :catalog="catalog"
+      :initial-node="editingCondition"
+      @close="closeConditionModal"
+      @save="saveCondition"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { computed, inject, onMounted, onUnmounted, ref } from 'vue'
 import { selectionApi } from '@/api'
-import { useResizablePanel } from '@/composables/useResizablePanel'
+import SelectionConditionModal from '@/components/selection/SelectionConditionModal.vue'
+import SelectionRuleTree from '@/components/selection/SelectionRuleTree.vue'
+import type {
+  CatalogMetric,
+  ConditionNode,
+  GroupNode,
+  SelectionCatalog,
+  SelectionPreset,
+  SelectionResultItem,
+  SelectionRunResponse,
+  SelectionNode,
+} from '@/components/selection/types'
 
-interface StockResult {
-  ts_code: string
-  code: string
-  stock_name: string
-  name?: string
-  score: number
-  signal: string
-  trade_date: string
-  date?: string
+const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+
+const catalog = ref<SelectionCatalog | null>(null)
+const presets = ref<SelectionPreset[]>([])
+const results = ref<SelectionResultItem[]>([])
+const running = ref(false)
+const period = ref<'daily' | 'weekly' | 'monthly'>('daily')
+const presetName = ref('未命名方案')
+const selectedPresetId = ref('')
+const rootRule = ref<GroupNode>(createEmptyGroup())
+const conditionModalVisible = ref(false)
+const editingCondition = ref<ConditionNode | null>(null)
+const editingParentId = ref<string | null>(null)
+const editingNodeId = ref<string | null>(null)
+const resultMeta = ref<{ trade_date: string | null }>({ trade_date: null })
+let previewTimer: number | null = null
+
+const metricMap = computed<Record<string, CatalogMetric>>(() => Object.fromEntries((catalog.value?.groups || []).flatMap((group) => group.items).map((metric) => [metric.key, metric])))
+const operatorLabels = computed<Record<string, string>>(() => Object.fromEntries((catalog.value?.operators || []).map((operator) => [operator.key, operator.label])))
+const periodLabel = computed(() => catalog.value?.periods.find((item) => item.key === period.value)?.label || period.value)
+const totalConditions = computed(() => countConditions(rootRule.value))
+
+function generateId() {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `node_${Math.random().toString(36).slice(2, 10)}`
 }
 
-const loading = ref(false)
-const hasResults = ref(false)
-const results = ref<StockResult[]>([])
-const sortBy = ref('score')
-const criteriaPanelRef = ref<HTMLElement | null>(null)
-const criteriaCollapsed = ref(false)
-const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
-const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
-const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
-const { panelWidth: criteriaPanelWidth, hydrateWidth: hydrateCriteriaWidth, startResize: startCriteriaResize } = useResizablePanel({
-  panelRef: criteriaPanelRef,
-  storageKey: CRITERIA_WIDTH_KEY,
-  defaultWidth: 360,
-  minWidth: 300,
-  maxWidth: 520,
-})
-
-const criteria = reactive({
-  priceMin: null as number | null,
-  priceMax: null as number | null,
-  market: '' as '' | 'sh' | 'sz',
-  changeMin: null as number | null,
-  changeMax: null as number | null,
-  marketCapMin: null as number | null,
-  marketCapMax: null as number | null,
-  weekChangeMin: null as number | null,
-  weekChangeMax: null as number | null,
-  peMin: null as number | null,
-  peMax: null as number | null,
-  rsiMin: null as number | null,
-  rsiMax: null as number | null,
-  macdBullish: false,
-  macdBearish: false,
-  volumeRatioMin: null as number | null,
-  volumeRatioMax: null as number | null,
-})
-const CRITERIA_STORAGE_KEY = 'instock_selection_criteria'
-
-const sortedResults = computed(() => {
-  const sorted = [...results.value]
-  sorted.sort((a, b) => {
-    switch (sortBy.value) {
-      case 'score': return Number(b.score) - Number(a.score)
-      case 'date': return (b.date || b.trade_date || '').localeCompare(a.date || a.trade_date || '')
-      default: return Number(b.score) - Number(a.score)
-    }
-  })
-  return sorted
-})
-
-const fetchResults = async () => {
-  loading.value = true
-  try {
-    const data = await selectionApi.getHistory({ limit: 100 })
-    results.value = (data || []).map((r: any) => ({
-      ...r,
-      code: r.code || r.symbol || r.ts_code?.split('.')[0],
-      name: r.stock_name || r.name,
-    }))
-    hasResults.value = results.value.length > 0
-  } catch (e) {
-    console.error('Failed to fetch selection results:', e)
-    results.value = []
-  } finally {
-    loading.value = false
+function createEmptyGroup(): GroupNode {
+  return {
+    node_type: 'group',
+    id: generateId(),
+    label: '主规则',
+    combinator: 'and',
+    children: [],
   }
 }
 
-const runSelection = async () => {
-  loading.value = true
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function buildDefaultCondition(metric?: CatalogMetric): ConditionNode {
+  const targetMetric = metric || catalog.value?.groups[0]?.items[0]
+  const output = targetMetric?.outputs[0]
+  return {
+    node_type: 'condition',
+    id: generateId(),
+    label: targetMetric?.label,
+    left: {
+      source_type: 'indicator',
+      metric_key: targetMetric?.key || 'close',
+      output_key: targetMetric?.default_output || output?.key || 'value',
+      params: Object.fromEntries((targetMetric?.params || []).map((param) => [param.key, param.default])),
+    },
+    operator: targetMetric?.operators[0] || 'gt',
+    right: {
+      source_type: 'value',
+      value: output?.kind === 'boolean' ? true : 0,
+    },
+    time_rule: {
+      mode: 'current',
+      lookback: 1,
+    },
+    weight: 1,
+  }
+}
+
+function countConditions(node: SelectionNode): number {
+  if (node.node_type === 'condition') return 1
+  return node.children.reduce((sum, child) => sum + countConditions(child), 0)
+}
+
+function findNode(node: SelectionNode, id: string): SelectionNode | null {
+  if (node.id === id) return node
+  if (node.node_type === 'condition') return null
+  for (const child of node.children) {
+    const found = findNode(child, id)
+    if (found) return found
+  }
+  return null
+}
+
+function addNodeToGroup(node: GroupNode, groupId: string, child: SelectionNode): boolean {
+  if (node.id === groupId) {
+    node.children.push(child)
+    return true
+  }
+  for (const item of node.children) {
+    if (item.node_type === 'group' && addNodeToGroup(item, groupId, child)) {
+      return true
+    }
+  }
+  return false
+}
+
+function replaceNode(node: GroupNode, nodeId: string, nextNode: SelectionNode): boolean {
+  const index = node.children.findIndex((child) => child.id === nodeId)
+  if (index >= 0) {
+    node.children.splice(index, 1, nextNode)
+    return true
+  }
+  for (const child of node.children) {
+    if (child.node_type === 'group' && replaceNode(child, nodeId, nextNode)) {
+      return true
+    }
+  }
+  return false
+}
+
+function removeNodeFromGroup(node: GroupNode, nodeId: string): boolean {
+  const index = node.children.findIndex((child) => child.id === nodeId)
+  if (index >= 0) {
+    node.children.splice(index, 1)
+    return true
+  }
+  for (const child of node.children) {
+    if (child.node_type === 'group' && removeNodeFromGroup(child, nodeId)) {
+      return true
+    }
+  }
+  return false
+}
+
+async function fetchCatalog() {
+  catalog.value = await selectionApi.getConditions()
+  if (!catalog.value?.periods.find((item) => item.key === period.value)) {
+    period.value = catalog.value?.periods[0]?.key || 'daily'
+  }
+}
+
+async function fetchPresets() {
+  presets.value = await selectionApi.getMyConditions()
+}
+
+function hydrateFromPreset(preset: SelectionPreset) {
+  const template = preset.params || {}
+  selectedPresetId.value = String(preset.id)
+  presetName.value = preset.name
+  period.value = template.period || 'daily'
+  rootRule.value = cloneValue(template.root || createEmptyGroup())
+  results.value = []
+  resultMeta.value = { trade_date: null }
+}
+
+function resetTemplate() {
+  selectedPresetId.value = ''
+  presetName.value = '未命名方案'
+  rootRule.value = createEmptyGroup()
+  period.value = catalog.value?.periods[0]?.key || 'daily'
+  results.value = []
+  resultMeta.value = { trade_date: null }
+}
+
+async function handlePresetChange() {
+  const preset = presets.value.find((item) => String(item.id) === selectedPresetId.value)
+  if (!preset) {
+    resetTemplate()
+    return
+  }
+  hydrateFromPreset(preset)
+  await runSelection(false)
+}
+
+function buildTemplate() {
+  return {
+    version: 1,
+    name: presetName.value,
+    period: period.value,
+    root: cloneValue(rootRule.value),
+  }
+}
+
+async function savePreset(asCopy: boolean) {
   try {
-    const data = await selectionApi.runSelection(criteria)
-    results.value = (data || []).map((r: any) => ({
-      ...r,
-      code: r.code || r.symbol || r.ts_code?.split('.')[0],
-      name: r.stock_name || r.name,
-    }))
-    hasResults.value = results.value.length > 0
-    showNotification?.('success', `筛选完成，共 ${results.value.length} 只`)
-  } catch (e) {
-    console.error('Failed to run selection:', e)
+    let name = presetName.value.trim() || '未命名方案'
+    if (asCopy || !selectedPresetId.value) {
+      const input = window.prompt('方案名称', name)
+      if (!input) return
+      name = input.trim() || name
+    }
+    const payload = {
+      name,
+      category: 'template',
+      description: `规则树方案 · ${periodLabel.value}`,
+      params: buildTemplate(),
+      is_active: true,
+    }
+    if (selectedPresetId.value && !asCopy) {
+      await selectionApi.updateMyCondition(Number(selectedPresetId.value), payload)
+      showNotification?.('success', '方案已更新')
+    } else {
+      await selectionApi.createMyCondition(payload)
+      showNotification?.('success', '方案已保存')
+    }
+    await fetchPresets()
+    const preset = presets.value.find((item) => item.name === name)
+    if (preset) selectedPresetId.value = String(preset.id)
+    presetName.value = name
+  } catch (error) {
+    console.error(error)
+    showNotification?.('error', '保存方案失败')
+  }
+}
+
+async function deletePreset() {
+  if (!selectedPresetId.value) return
+  if (!window.confirm('确定删除当前方案吗？')) return
+  try {
+    await selectionApi.deleteMyCondition(Number(selectedPresetId.value))
+    showNotification?.('success', '方案已删除')
+    await fetchPresets()
+    resetTemplate()
+  } catch (error) {
+    console.error(error)
+    showNotification?.('error', '删除方案失败')
+  }
+}
+
+async function runSelection(persistResult = false) {
+  running.value = true
+  try {
+    const response = await selectionApi.runSelection({
+      template: buildTemplate(),
+      persist_result: persistResult,
+      limit: 200,
+    }) as SelectionRunResponse | SelectionResultItem[]
+    if (Array.isArray(response)) {
+      results.value = response
+      resultMeta.value = { trade_date: response[0]?.trade_date || null }
+    } else {
+      results.value = response.items || []
+      resultMeta.value = { trade_date: response.trade_date || null }
+    }
+  } catch (error) {
+    console.error(error)
     showNotification?.('error', '执行筛选失败')
   } finally {
-    loading.value = false
+    running.value = false
   }
 }
 
-const saveCriteria = () => {
-  window.localStorage.setItem(CRITERIA_STORAGE_KEY, JSON.stringify(criteria))
-  showNotification?.('success', '筛选条件已保存')
+function schedulePreview() {
+  if (previewTimer) window.clearTimeout(previewTimer)
+  previewTimer = window.setTimeout(() => {
+    runSelection(false)
+  }, 450)
 }
 
-const toggleCriteriaPanel = () => {
-  criteriaCollapsed.value = !criteriaCollapsed.value
-  window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
+function openNewCondition(groupId: string) {
+  editingNodeId.value = null
+  editingParentId.value = groupId
+  editingCondition.value = buildDefaultCondition(catalog.value?.groups[0]?.items[0])
+  conditionModalVisible.value = true
 }
 
-onMounted(() => {
-  const savedCriteria = window.localStorage.getItem(CRITERIA_STORAGE_KEY)
-  if (savedCriteria) {
-    try {
-      Object.assign(criteria, JSON.parse(savedCriteria))
-    } catch {
-      // ignore broken local cache
-    }
+function openExistingCondition(nodeId: string) {
+  const node = findNode(rootRule.value, nodeId)
+  if (!node || node.node_type !== 'condition') return
+  editingNodeId.value = nodeId
+  editingParentId.value = null
+  editingCondition.value = cloneValue(node)
+  conditionModalVisible.value = true
+}
+
+function closeConditionModal() {
+  conditionModalVisible.value = false
+  editingCondition.value = null
+  editingNodeId.value = null
+  editingParentId.value = null
+}
+
+function saveCondition(condition: ConditionNode) {
+  if (editingNodeId.value) {
+    replaceNode(rootRule.value, editingNodeId.value, condition)
+  } else if (editingParentId.value) {
+    addNodeToGroup(rootRule.value, editingParentId.value, condition)
   }
-  hydrateCriteriaWidth()
-  criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
-  fetchResults()
+  closeConditionModal()
+  schedulePreview()
+}
+
+function addGroup(groupId: string) {
+  addNodeToGroup(rootRule.value, groupId, {
+    node_type: 'group',
+    id: generateId(),
+    label: '子规则',
+    combinator: 'and',
+    children: [],
+  })
+  schedulePreview()
+}
+
+function removeNode(nodeId: string) {
+  removeNodeFromGroup(rootRule.value, nodeId)
+  schedulePreview()
+}
+
+function updateGroup(payload: { id: string; combinator: 'and' | 'or' | 'not' }) {
+  const node = findNode(rootRule.value, payload.id)
+  if (!node || node.node_type !== 'group') return
+  node.combinator = payload.combinator
+  schedulePreview()
+}
+
+function formatNumber(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--'
+  return Number(value).toFixed(2)
+}
+
+function formatSigned(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--'
+  const number = Number(value)
+  return `${number >= 0 ? '+' : ''}${number.toFixed(2)}`
+}
+
+function formatScalar(value: string | number | boolean | null | undefined) {
+  if (value === null || value === undefined || value === '') return '--'
+  if (typeof value === 'number') return value.toFixed(2)
+  return String(value)
+}
+
+onMounted(async () => {
+  await fetchCatalog()
+  await fetchPresets()
+  if (presets.value.length) {
+    hydrateFromPreset(presets.value[0])
+    await runSelection(false)
+  }
 })
 
+onUnmounted(() => {
+  if (previewTimer) window.clearTimeout(previewTimer)
+})
 </script>
 
 <style scoped lang="scss">
-.selection-page {
+.selection-studio {
+  --panel-bg: rgba(12, 15, 19, 0.92);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text-muted: rgba(255, 255, 255, 0.58);
   padding: 24px;
 }
 
-.page-header {
+.studio-header,
+.panel-header,
+.template-bar {
+  border: 1px solid var(--panel-border);
+  background: radial-gradient(circle at top left, rgba(73, 156, 255, 0.16), transparent 34%), linear-gradient(180deg, rgba(17, 20, 25, 0.98), rgba(11, 14, 18, 0.98));
+  border-radius: 24px;
+  padding: 20px 22px;
+}
+
+.studio-header {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 24px;
-
-  h1 {
-    margin: 0;
-    font-size: 28px;
-    font-weight: 600;
-  }
-
-  .subtitle {
-    margin: 4px 0 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.5);
-  }
-}
-
-.header-right {
-  display: flex;
-  gap: 12px;
-}
-
-.btn {
-  padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-
-  &.btn-primary {
-    background: #2962FF;
-    color: white;
-
-    &:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-  }
-
-  &.btn-secondary {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  &.btn-small {
-    padding: 6px 12px;
-    font-size: 12px;
-  }
-}
-
-.selection-layout {
-  display: flex;
-  gap: 12px;
-}
-
-.criteria-panel {
-  min-width: 280px;
-  max-width: 600px;
-  flex-shrink: 0;
-  background: rgba(26, 26, 26, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 20px;
-  max-height: calc(100vh - 140px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  position: relative;
-}
-
-.panel-resizer {
-  position: relative;
-  flex: 0 0 12px;
-  margin: 0 -6px;
-  cursor: col-resize;
-  touch-action: none;
-
-  &::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-  }
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 16px;
-    bottom: 16px;
-    left: 50%;
-    width: 2px;
-    transform: translateX(-50%);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.12);
-    transition: background 0.2s ease;
-  }
-
-  &:hover::after {
-    background: rgba(41, 98, 255, 0.75);
-  }
-}
-
-.panel-section {
-  margin-bottom: 24px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-
-  h3 {
-    margin: 0 0 16px;
-    font-size: 14px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.8);
-  }
-}
-
-.criteria-group {
+  gap: 20px;
   margin-bottom: 16px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-
-  label {
-    display: block;
-    margin-bottom: 8px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-  }
 }
 
-.range-inputs {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
 }
 
-.input-small {
-  min-width: 0;
-  width: 100%;
-  padding: 8px;
+h1,
+h2,
+h3 {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.subtitle,
+.panel-header p,
+.template-bar span,
+.result-explanations p {
+  color: var(--text-muted);
+}
+
+.subtitle {
+  margin: 10px 0 0;
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+.header-actions,
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.pill-select,
+.template-bar input,
+.ghost-btn,
+.primary-btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-
-  &:focus {
-    outline: none;
-    border-color: #2962FF;
-  }
+  color: rgba(255, 255, 255, 0.92);
+  padding: 10px 14px;
 }
 
-.checkbox-group {
+.primary-btn {
+  background: linear-gradient(135deg, #58a9ff, #8ed5ff);
+  color: #081018;
+  border-color: transparent;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.ghost-btn {
+  cursor: pointer;
+}
+
+.ghost-btn.danger {
+  color: #ffb7b7;
+}
+
+.template-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.template-bar label {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 260px;
+  color: rgba(255, 255, 255, 0.62);
 }
 
-.checkbox-item {
+.summary-chips {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.summary-chip,
+.status-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  min-width: 0;
-
-  input {
-    accent-color: #2962FF;
-  }
-
-  span {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-    overflow-wrap: anywhere;
-  }
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
 }
 
+.studio-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.9fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.builder-panel,
 .results-panel {
-  flex: 1;
-  min-width: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 24px;
+  padding: 20px;
+  background: var(--panel-bg);
 }
 
-@media (max-width: 1200px) {
-  .selection-layout {
-    flex-direction: column;
-    gap: 24px;
-  }
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
 
-  .criteria-panel {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    max-height: 50vh;
-  }
+.panel-header.compact {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
 
-  .panel-resizer {
-    display: none;
-  }
+.panel-header p {
+  margin: 8px 0 0;
+  line-height: 1.5;
 }
 
 .empty-state {
+  min-height: 320px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px;
-  background: rgba(26, 26, 26, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
   text-align: center;
-
-  .empty-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-  }
-
-  h3 {
-    margin: 0 0 8px;
-    font-size: 20px;
-  }
-
-  p {
-    margin: 0;
-    color: rgba(255, 255, 255, 0.5);
-  }
+  gap: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  color: var(--text-muted);
 }
 
-.results-header {
+.empty-mark {
+  font-size: 12px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(120, 197, 255, 0.62);
+}
+
+.results-list {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.results-count {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.results-actions {
-  display: flex;
+  flex-direction: column;
   gap: 12px;
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
-.filter-select {
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(26, 26, 26, 0.5);
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
-}
-
-.results-table-wrapper {
-  background: rgba(26, 26, 26, 0.5);
+.result-card {
+  border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  overflow: hidden;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease;
 }
 
-.results-table {
-  width: 100%;
-  border-collapse: collapse;
+.result-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(88, 169, 255, 0.42);
+}
 
-  th,
-  td {
-    padding: 12px 16px;
-    text-align: left;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+.result-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.result-code {
+  margin: 0 0 4px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+}
+
+.result-top h3 {
+  font-size: 18px;
+}
+
+.result-score {
+  text-align: right;
+}
+
+.result-score span {
+  display: block;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.result-score strong {
+  font-size: 28px;
+  color: #93d8ff;
+}
+
+.result-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.result-metrics span {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 12px;
+}
+
+.result-explanations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.result-explanations p {
+  margin: 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.result-explanations strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+@media (max-width: 1180px) {
+  .studio-layout {
+    grid-template-columns: 1fr;
   }
 
-  th {
-    background: rgba(26, 26, 26, 0.95);
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-  }
-
-  td {
-    font-size: 13px;
-  }
-
-  tbody tr {
-    cursor: pointer;
-    transition: background 0.2s;
-
-    &:hover {
-      background: rgba(255, 255, 255, 0.03);
-    }
+  .results-list {
+    max-height: none;
   }
 }
 
-.stock-code {
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.stock-name {
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.signal-badge {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-
-  &.buy {
-    background: rgba(0, 200, 83, 0.15);
-    color: #00C853;
+@media (max-width: 860px) {
+  .studio-header,
+  .template-bar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  &.sell {
-    background: rgba(255, 23, 68, 0.15);
-    color: #FF1744;
-  }
-
-  &.hold {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-.macd-badge {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-
-  &.bullish {
-    background: rgba(0, 200, 83, 0.15);
-    color: #00C853;
-  }
-
-  &.bearish {
-    background: rgba(255, 23, 68, 0.15);
-    color: #FF1744;
+  .header-actions,
+  .summary-chips {
+    justify-content: flex-start;
   }
 }
 </style>

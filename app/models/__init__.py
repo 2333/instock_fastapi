@@ -2,6 +2,7 @@ from app.models.stock_model import (
     Base,
     Stock,
     DailyBar,
+    DailyBasic,
     FundFlow,
     Attention,
     Indicator,

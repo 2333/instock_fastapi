@@ -184,6 +184,16 @@ export const backtestApi = {
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
 
+  getMyConditions: () => api.get('/selection/my-conditions') as Promise<any>,
+
+  createMyCondition: (payload: any) => api.post('/selection/my-conditions', payload) as Promise<any>,
+
+  updateMyCondition: (conditionId: number, payload: any) =>
+    api.put(`/selection/my-conditions/${conditionId}`, payload) as Promise<any>,
+
+  deleteMyCondition: (conditionId: number) =>
+    api.delete(`/selection/my-conditions/${conditionId}`) as Promise<any>,
+
   runSelection: (conditions: any) => api.post('/selection', conditions) as Promise<any>,
 
   getHistory: (params?: { limit?: number }) =>

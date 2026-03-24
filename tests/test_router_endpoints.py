@@ -191,6 +191,54 @@ async def test_pattern_endpoints_cover_latest_trade_date_branch(client):
 
 
 @pytest.mark.asyncio
+async def test_selection_endpoint_runs_new_rule_tree_payload(client, current_user_override):
+    payload = {
+        "template": {
+            "version": 1,
+            "name": "收盘价强于阈值",
+            "period": "daily",
+            "root": {
+                "node_type": "group",
+                "id": "root",
+                "combinator": "and",
+                "children": [
+                    {
+                        "node_type": "condition",
+                        "id": "c1",
+                        "label": "收盘价大于10",
+                        "left": {
+                            "source_type": "indicator",
+                            "metric_key": "close",
+                            "output_key": "value",
+                            "params": {},
+                        },
+                        "operator": "gt",
+                        "right": {
+                            "source_type": "value",
+                            "value": 10,
+                        },
+                        "time_rule": {
+                            "mode": "current",
+                            "lookback": 1,
+                        },
+                        "weight": 1,
+                    }
+                ],
+            },
+        },
+        "persist_result": False,
+    }
+
+    response = await client.post('/api/v1/selection', json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body['matched_count'] == 1
+    assert body['items'][0]['code'] == '000001'
+    assert body['items'][0]['explanations'][0]['label'] == '收盘价大于10'
+
+
+@pytest.mark.asyncio
 async def test_selection_endpoints_cover_crud_and_service_calls(client, current_user_override):
     condition = SimpleNamespace(
         id=1,

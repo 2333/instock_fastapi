@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
 from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
-from app.models.stock_model import Stock, DailyBar
+from app.models.stock_model import DailyBasic, DailyBar, Stock
 from app.utils.stock_codes import extract_symbol, normalize_exchange_name, normalize_ts_code
 from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.base import AdjustType, ProxyPool
@@ -20,10 +20,12 @@ from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
 _supports_daily_bar_upsert = True
+_supports_daily_basic_upsert = True
 BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
 TS_CODE_CHILD_TABLES = (
     "daily_bars",
     "fund_flows",
+    "daily_basic",
     "attention",
     "indicators",
     "patterns",
@@ -330,6 +332,168 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict])
         count += 1
     await session.commit()
     return count
+
+
+async def save_daily_basics(session: AsyncSession, rows: List[dict], trade_date: str) -> int:
+    values = []
+    for row in rows:
+        ts_code = row.get("ts_code")
+        if not ts_code:
+            code = extract_symbol(row.get("code") or row.get("symbol"))
+            if not code:
+                continue
+            exchange = normalize_exchange_name(row.get("exchange"), code)
+            ts_code = normalize_ts_code(row.get("ts_code"), symbol=code, exchange=exchange)
+        date_str = str(row.get("trade_date") or trade_date).replace("-", "")
+        try:
+            trade_date_dt = datetime.strptime(date_str, "%Y%m%d").date()
+        except Exception:
+            trade_date_dt = None
+        values.append(
+            {
+                "ts_code": ts_code,
+                "trade_date": date_str,
+                "trade_date_dt": trade_date_dt,
+                "turnover_rate": row.get("turnover_rate"),
+                "turnover_rate_f": row.get("turnover_rate_f"),
+                "volume_ratio": row.get("volume_ratio"),
+                "pe": row.get("pe"),
+                "pe_ttm": row.get("pe_ttm"),
+                "pb": row.get("pb"),
+                "ps": row.get("ps"),
+                "ps_ttm": row.get("ps_ttm"),
+                "dv_ratio": row.get("dv_ratio"),
+                "dv_ttm": row.get("dv_ttm"),
+                "total_share": row.get("total_share"),
+                "float_share": row.get("float_share"),
+                "free_share": row.get("free_share"),
+                "total_mv": row.get("total_mv"),
+                "circ_mv": row.get("circ_mv"),
+            }
+        )
+
+    if not values:
+        return 0
+
+    global _supports_daily_basic_upsert
+    if _supports_daily_basic_upsert:
+        daily_basic_insert = insert(DailyBasic)
+        stmt = daily_basic_insert.values(values).on_conflict_do_update(
+            constraint="uq_daily_basic_ts_code_trade_date",
+            set_={
+                "trade_date_dt": daily_basic_insert.excluded.trade_date_dt,
+                "turnover_rate": daily_basic_insert.excluded.turnover_rate,
+                "turnover_rate_f": daily_basic_insert.excluded.turnover_rate_f,
+                "volume_ratio": daily_basic_insert.excluded.volume_ratio,
+                "pe": daily_basic_insert.excluded.pe,
+                "pe_ttm": daily_basic_insert.excluded.pe_ttm,
+                "pb": daily_basic_insert.excluded.pb,
+                "ps": daily_basic_insert.excluded.ps,
+                "ps_ttm": daily_basic_insert.excluded.ps_ttm,
+                "dv_ratio": daily_basic_insert.excluded.dv_ratio,
+                "dv_ttm": daily_basic_insert.excluded.dv_ttm,
+                "total_share": daily_basic_insert.excluded.total_share,
+                "float_share": daily_basic_insert.excluded.float_share,
+                "free_share": daily_basic_insert.excluded.free_share,
+                "total_mv": daily_basic_insert.excluded.total_mv,
+                "circ_mv": daily_basic_insert.excluded.circ_mv,
+            },
+        )
+        try:
+            await session.execute(stmt)
+            await session.commit()
+            return len(values)
+        except SQLAlchemyError as exc:
+            await session.rollback()
+            _supports_daily_basic_upsert = False
+            logger.warning("daily_basic upsert 不可用，后续改为兼容写入: %s", exc)
+
+    count = 0
+    for item in values:
+        result = await session.execute(
+            select(DailyBasic).where(
+                DailyBasic.ts_code == item["ts_code"],
+                DailyBasic.trade_date == item["trade_date"],
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.trade_date_dt = item["trade_date_dt"]
+            existing.turnover_rate = item["turnover_rate"]
+            existing.turnover_rate_f = item["turnover_rate_f"]
+            existing.volume_ratio = item["volume_ratio"]
+            existing.pe = item["pe"]
+            existing.pe_ttm = item["pe_ttm"]
+            existing.pb = item["pb"]
+            existing.ps = item["ps"]
+            existing.ps_ttm = item["ps_ttm"]
+            existing.dv_ratio = item["dv_ratio"]
+            existing.dv_ttm = item["dv_ttm"]
+            existing.total_share = item["total_share"]
+            existing.float_share = item["float_share"]
+            existing.free_share = item["free_share"]
+            existing.total_mv = item["total_mv"]
+            existing.circ_mv = item["circ_mv"]
+        else:
+            session.add(DailyBasic(**item))
+        count += 1
+    await session.commit()
+    return count
+
+
+async def fetch_and_save_daily_basic(days: int = 10):
+    proxy_pool = _build_proxy_pool()
+    tushare_provider = TushareProvider()
+    crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT DISTINCT trade_date
+                FROM daily_bars
+                ORDER BY trade_date DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": max(1, days)},
+        )
+        trade_dates = [row[0] for row in result.fetchall()]
+
+    for trade_date in trade_dates:
+        source = "tushare"
+        rows = await tushare_provider.fetch_daily_basic(trade_date)
+        if not rows:
+            rows = await crawler.fetch_daily_basic(trade_date)
+            source = "eastmoney"
+        async with async_session_factory() as session:
+            if rows:
+                count = await save_daily_basics(session, rows, trade_date)
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_daily_data",
+                    entity_type="daily_basic",
+                    entity_key=trade_date,
+                    trade_date=trade_date,
+                    status="done",
+                    source=source,
+                    note=f"rows={count}",
+                )
+                await session.commit()
+            else:
+                await upsert_fetch_audit(
+                    session,
+                    task_name="fetch_daily_data",
+                    entity_type="daily_basic",
+                    entity_key=trade_date,
+                    trade_date=trade_date,
+                    status="needs_fallback",
+                    source=source,
+                    note="daily_basic returned empty",
+                )
+                await session.commit()
+
+    await crawler.close()
 
 
 async def fetch_and_save_stocks():
@@ -1077,6 +1241,7 @@ async def run():
         await fetch_and_save_stocks()
         daily_days = int(os.getenv("DAILY_SYNC_DAYS", "60"))
         await fetch_and_save_daily_bars(days=daily_days)
+        await fetch_and_save_daily_basic(days=min(daily_days, 15))
         logger.info("数据抓取任务完成")
     except Exception as e:
         logger.error(f"数据抓取任务失败: {e}", exc_info=True)

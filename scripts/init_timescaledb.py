@@ -45,6 +45,8 @@ def init_timescaledb():
             ("ix_stocks_name", "stocks", "name"),
             ("ix_fund_flows_ts_code", "fund_flows", "ts_code"),
             ("ix_fund_flows_trade_date", "fund_flows", "trade_date"),
+            ("ix_daily_basic_ts_code", "daily_basic", "ts_code"),
+            ("ix_daily_basic_trade_date", "daily_basic", "trade_date"),
             ("ix_indicators_ts_code", "indicators", "ts_code"),
             ("ix_indicators_trade_date", "indicators", "trade_date"),
             ("ix_patterns_ts_code", "patterns", "ts_code"),

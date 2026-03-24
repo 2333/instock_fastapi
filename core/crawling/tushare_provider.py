@@ -66,6 +66,9 @@ class TushareProvider:
     async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_fund_flow_rank_sync, trade_date)
 
+    async def fetch_daily_basic(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_daily_basic_sync, trade_date)
+
     async def fetch_sector_fund_flow(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_sector_fund_flow_sync, sector_type, trade_date)
 
@@ -241,6 +244,53 @@ class TushareProvider:
                 }
             )
         return rows
+
+    def _fetch_daily_basic_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        pro = self._get_pro()
+        if not pro:
+            return []
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+
+        try:
+            df = self._call_pro(
+                "daily_basic",
+                trade_date=trade_date,
+                fields=(
+                    "ts_code,trade_date,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,"
+                    "dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv"
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Tushare daily_basic 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            rows.append(
+                {
+                    "ts_code": str(row.get("ts_code") or ""),
+                    "trade_date": str(row.get("trade_date") or trade_date),
+                    "turnover_rate": self._pick_float(row, "turnover_rate"),
+                    "turnover_rate_f": self._pick_float(row, "turnover_rate_f"),
+                    "volume_ratio": self._pick_float(row, "volume_ratio"),
+                    "pe": self._pick_float(row, "pe"),
+                    "pe_ttm": self._pick_float(row, "pe_ttm"),
+                    "pb": self._pick_float(row, "pb"),
+                    "ps": self._pick_float(row, "ps"),
+                    "ps_ttm": self._pick_float(row, "ps_ttm"),
+                    "dv_ratio": self._pick_float(row, "dv_ratio"),
+                    "dv_ttm": self._pick_float(row, "dv_ttm"),
+                    "total_share": self._pick_float(row, "total_share"),
+                    "float_share": self._pick_float(row, "float_share"),
+                    "free_share": self._pick_float(row, "free_share"),
+                    "total_mv": self._pick_float(row, "total_mv"),
+                    "circ_mv": self._pick_float(row, "circ_mv"),
+                }
+            )
+        return [row for row in rows if row["ts_code"]]
 
     def _fetch_fund_flow_rank_sync(self, trade_date: str) -> List[Dict[str, Any]]:
         pro = self._get_pro()

@@ -129,7 +129,10 @@ async def run_selection(
     db: AsyncSession = Depends(get_db),
 ):
     service = SelectionService(db)
-    return await service.run_selection(conditions, date)
+    try:
+        return await service.run_selection(conditions, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/selection/history")

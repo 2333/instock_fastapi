@@ -83,6 +83,8 @@ class EastMoneyCrawler(BaseCrawler):
             return await self.fetch_kline(**kwargs)
         elif data_type == "spot":
             return await self.fetch_stock_spot(kwargs.get("code"))
+        elif data_type == "daily_basic":
+            return await self.fetch_daily_basic(kwargs.get("trade_date"))
         elif data_type == "trade_calendar":
             return await self.fetch_trade_calendar(
                 start_date=kwargs.get("start_date"),
@@ -116,7 +118,7 @@ class EastMoneyCrawler(BaseCrawler):
                 "po": "1",
                 "pz": page_size,
                 "pn": page,
-                "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f24,f25,f62",
+                "fields": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f62",
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
             }
 
@@ -196,6 +198,40 @@ class EastMoneyCrawler(BaseCrawler):
 
         logger.info(f"获取ETF列表完成，共 {len(all_etfs)} 只ETF")
         return all_etfs
+
+    async def fetch_daily_basic(self, trade_date: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取 daily_basic 兼容字段（东方财富快照降级）。"""
+        date_str = (trade_date or datetime.utcnow().strftime("%Y%m%d")).replace("-", "")
+        stocks = await self.fetch_stock_list()
+        result: List[Dict[str, Any]] = []
+        for item in stocks:
+            code = str(item.get("f12") or "").strip()
+            if not code:
+                continue
+            market_flag = str(item.get("f13") or "")
+            exchange = "SSE" if market_flag == "1" else "SZSE"
+            result.append(
+                {
+                    "ts_code": normalize_ts_code(symbol=code, exchange=exchange),
+                    "trade_date": date_str,
+                    "turnover_rate": item.get("f8"),
+                    "turnover_rate_f": item.get("f8"),
+                    "volume_ratio": item.get("f10"),
+                    "pe": item.get("f9"),
+                    "pe_ttm": item.get("f9"),
+                    "pb": item.get("f23"),
+                    "ps": None,
+                    "ps_ttm": None,
+                    "dv_ratio": item.get("f25"),
+                    "dv_ttm": item.get("f25"),
+                    "total_share": None,
+                    "float_share": None,
+                    "free_share": None,
+                    "total_mv": item.get("f20"),
+                    "circ_mv": item.get("f21"),
+                }
+            )
+        return result
 
     async def fetch_stock_spot(self, code: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取实时行情"""
