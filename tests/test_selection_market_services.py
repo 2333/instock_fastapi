@@ -148,3 +148,24 @@ async def test_market_data_service_returns_rows_for_all_rankings():
     assert block_trades == [{"code": "000002"}]
     assert lhb == [{"code": "000003"}]
     assert north_bound == [{"code": "000004"}]
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_resolves_trade_date_from_target_table():
+    db = Mock()
+    db.execute = AsyncMock(return_value=make_result(row=("20240102",)))
+    service = MarketDataService(db)
+
+    resolved = await service._resolve_trade_date(None, "stock_tops")
+
+    assert resolved == "20240102"
+    query = db.execute.await_args.args[0]
+    assert "FROM stock_tops" in str(query)
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_rejects_unsupported_trade_date_table():
+    service = MarketDataService(Mock())
+
+    with pytest.raises(ValueError):
+        await service._resolve_trade_date(None, "invalid_table")

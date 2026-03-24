@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -8,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.build_info import get_build_info
 from app.config import get_settings
 from app.api.routers import stock_router, etf_router, indicator_router, strategy_router
 from app.api.routers import (
@@ -19,21 +21,23 @@ from app.api.routers import (
     auth_router,
     market_router,
 )
-from app.jobs.scheduler import start_scheduler, stop_scheduler
+from app.jobs.scheduler import recover_missed_market_jobs, start_scheduler, stop_scheduler
 from app.database import init_db, close_db
 from app.logging_config import logger
 
 settings = get_settings()
+build_info = get_build_info()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting InStock API...")
+    logger.info(f"Starting InStock API {build_info.release} ({build_info.git_sha})...")
     await init_db()
     logger.info("Database initialized")
     scheduler_started = start_scheduler()
     if scheduler_started:
         logger.info("Scheduler started")
+        app.state.market_recovery_task = asyncio.create_task(recover_missed_market_jobs())
     else:
         logger.info("Scheduler skipped in this worker")
     yield
@@ -45,7 +49,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="InStock API",
     description="股票分析系统 API 文档 | Stock Analysis API",
-    version="1.0.0",
+    version=build_info.version,
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -101,14 +105,22 @@ app.include_router(market_router.router, prefix="/api/v1")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "version": build_info.version,
+            "git_sha": build_info.git_sha,
+        },
+    )
 
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
-        "version": "1.0.0",
+        "version": build_info.version,
+        "git_sha": build_info.git_sha,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -117,7 +129,8 @@ async def health_check():
 async def api_info():
     return {
         "name": "InStock API",
-        "version": "1.0.0",
+        "version": build_info.version,
+        "git_sha": build_info.git_sha,
         "description": "股票分析系统 API",
         "docs": "/docs",
         "redoc": "/redoc",

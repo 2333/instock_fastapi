@@ -205,7 +205,7 @@
         <div class="results-header">
           <div class="results-summary">
             <span class="results-count">共找到 {{ groupedResults.length }} 只股票</span>
-            <span class="summary-chip">形态子行 {{ totalPatternRows }}</span>
+            <span class="summary-chip">已显示 {{ visiblePatternRows }} / {{ totalPatternRows }} 个形态</span>
             <span class="summary-chip">区间内出现 {{ totalOccurrences }} 次</span>
             <span class="summary-chip accent">{{ currentEvaluationRangeLabel }}</span>
           </div>
@@ -242,7 +242,7 @@
               <template v-if="paginatedGroups.length > 0">
                 <template v-for="stock in paginatedGroups" :key="stock.groupKey">
                   <tr
-                    v-for="(pattern, index) in stock.patternRows"
+                    v-for="(pattern, index) in getVisiblePatternRows(stock)"
                     :key="pattern.rowKey"
                     class="result-row"
                     :class="{ 'group-start': index === 0 }"
@@ -250,7 +250,7 @@
                     <td
                       v-if="index === 0"
                       class="checkbox-col merged-cell"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <input
                         v-model="selectedStocks"
@@ -261,7 +261,7 @@
                     <td
                       v-if="index === 0"
                       class="merged-cell stock-merged"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <div class="stock-cell">
                         <span class="stock-code">{{ stock.code }}</span>
@@ -270,6 +270,13 @@
                       <div class="stock-summary">
                         <span>最高 {{ formatConfidence(stock.maxConfidence) }}</span>
                         <span>{{ stock.patternRows.length }} 个形态</span>
+                        <button
+                          v-if="hasCollapsedPatterns(stock)"
+                          class="toggle-patterns-btn"
+                          @click="toggleStockExpansion(stock.groupKey)"
+                        >
+                          {{ isStockExpanded(stock.groupKey) ? '收起' : `展开剩余 ${stock.patternRows.length - DEFAULT_VISIBLE_PATTERNS} 个` }}
+                        </button>
                       </div>
                     </td>
 
@@ -318,7 +325,7 @@
                     <td
                       v-if="index === 0"
                       class="merged-cell action-merged"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <div class="action-stack">
                         <button class="action-btn" title="查看图表" @click="viewChart(stock)">
@@ -524,6 +531,7 @@ const selectedStocks = ref<string[]>([])
 const stockKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = 20
+const DEFAULT_VISIBLE_PATTERNS = 3
 const sortBy = ref<SortOption>('confidence')
 const minConfidence = ref(60)
 const dateFrom = ref('')
@@ -533,6 +541,7 @@ const latestEvaluatedDate = ref('')
 const emaSignalFilter = ref('')
 const bollSignalFilter = ref('')
 const indicatorMode = ref<'all' | 'any'>('all')
+const expandedStocks = ref<Record<string, boolean>>({})
 const filterPanelRef = ref<HTMLElement | null>(null)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 const FILTER_PANEL_WIDTH_KEY = 'instock_patterns_panel_width'
@@ -888,6 +897,23 @@ const totalPatternRows = computed(() =>
   groupedResults.value.reduce((sum, group) => sum + group.patternRows.length, 0)
 )
 
+const isStockExpanded = (groupKey: string) => Boolean(expandedStocks.value[groupKey])
+
+const hasCollapsedPatterns = (group: PatternStockGroup) => group.patternRows.length > DEFAULT_VISIBLE_PATTERNS
+
+const getVisiblePatternRows = (group: PatternStockGroup) => {
+  if (isStockExpanded(group.groupKey) || !hasCollapsedPatterns(group)) {
+    return group.patternRows
+  }
+  return group.patternRows.slice(0, DEFAULT_VISIBLE_PATTERNS)
+}
+
+const getVisiblePatternCount = (group: PatternStockGroup) => getVisiblePatternRows(group).length
+
+const visiblePatternRows = computed(() =>
+  groupedResults.value.reduce((sum, group) => sum + getVisiblePatternCount(group), 0)
+)
+
 const totalOccurrences = computed(() =>
   groupedResults.value.reduce((sum, group) => sum + group.totalOccurrences, 0)
 )
@@ -906,6 +932,13 @@ const allSelected = computed(() => {
 
 const getPatternOccurrenceHint = (pattern: PatternRowGroup) =>
   `${getPatternLabel(pattern.pattern_name)} 在当前评估区间共出现 ${pattern.occurrenceCount} 次，更多标记请到股票详情查看。`
+
+const toggleStockExpansion = (groupKey: string) => {
+  expandedStocks.value = {
+    ...expandedStocks.value,
+    [groupKey]: !expandedStocks.value[groupKey],
+  }
+}
 
 const selectRangePreset = (preset: RangePreset) => {
   rangePreset.value = preset
@@ -954,11 +987,13 @@ const fetchPatterns = async () => {
 
     latestEvaluatedDate.value = patternResults.value.reduce((latest, row) => row.trade_date > latest ? row.trade_date : latest, '')
     selectedStocks.value = []
+    expandedStocks.value = {}
     currentPage.value = 1
   } catch (error) {
     console.error('Failed to fetch patterns:', error)
     patternResults.value = []
     latestEvaluatedDate.value = ''
+    expandedStocks.value = {}
   } finally {
     loading.value = false
   }
@@ -1547,6 +1582,22 @@ onMounted(() => {
   margin-top: 10px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.48);
+}
+
+.toggle-patterns-btn {
+  width: fit-content;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8fb0ff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s;
+
+  &:hover {
+    color: #bed0ff;
+  }
 }
 
 .pattern-name-row {

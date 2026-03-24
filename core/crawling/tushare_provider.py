@@ -25,18 +25,26 @@ logger = logging.getLogger(__name__)
 class TushareConfig:
     token: Optional[str] = None
     min_delay: float = 0.2
+    max_inflight: int = 1
 
 
 class TushareProvider:
     _lock = threading.Lock()
     _pro: Any = None
     _last_request_ts = 0.0
+    _request_semaphore = threading.BoundedSemaphore(
+        max(1, int(os.getenv("TUSHARE_MAX_INFLIGHT", "1")))
+    )
 
     def __init__(self, config: Optional[TushareConfig] = None):
         self.config = config or TushareConfig()
         self.token = (self.config.token or os.getenv("TUSHARE_TOKEN") or "").strip()
         self.http_url = os.getenv("TUSHARE_HTTP_URL", "http://lianghua.nanyangqiankun.top")
         self._compat_enabled = False
+        requested_inflight = max(1, int(self.config.max_inflight))
+        class_inflight = max(1, int(os.getenv("TUSHARE_MAX_INFLIGHT", "1")))
+        if requested_inflight != class_inflight:
+            self.__class__._request_semaphore = threading.BoundedSemaphore(requested_inflight)
 
     async def fetch_stock_list(self) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_stock_list_sync)
@@ -68,6 +76,18 @@ class TushareProvider:
 
     async def fetch_sector_fund_flow(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_sector_fund_flow_sync, sector_type, trade_date)
+
+    async def fetch_top_list(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_top_list_sync, trade_date)
+
+    async def fetch_top_inst(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_top_inst_sync, trade_date)
+
+    async def fetch_block_trade(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_block_trade_sync, trade_date)
+
+    async def is_trade_date(self, trade_date: str) -> bool:
+        return await asyncio.to_thread(self._is_trade_date_sync, trade_date)
 
     def _get_pro(self) -> Optional[Any]:
         if not self.token:
@@ -104,15 +124,13 @@ class TushareProvider:
             logger.warning("Tushare API 不存在: %s", func_name)
             return None
 
-        self._wait_rate_limit()
         try:
-            return fn(**kwargs)
+            return self._run_with_limits(lambda: fn(**kwargs))
         except Exception as exc:
             if not self._compat_enabled:
                 logger.warning("Tushare %s 调用失败，尝试兼容模式: %s", func_name, exc)
                 self._enable_compat_mode(pro)
-                self._wait_rate_limit()
-                return fn(**kwargs)
+                return self._run_with_limits(lambda: fn(**kwargs))
             raise
 
     def _fetch_stock_list_sync(self) -> List[Dict[str, Any]]:
@@ -202,7 +220,14 @@ class TushareProvider:
             else:
                 import tushare as ts  # type: ignore
 
-                df = ts.pro_bar(ts_code=ts_code, adj=adjust.value, start_date=start, end_date=end)
+                df = self._run_with_limits(
+                    lambda: ts.pro_bar(
+                        ts_code=ts_code,
+                        adj=adjust.value,
+                        start_date=start,
+                        end_date=end,
+                    )
+                )
         except Exception as exc:
             logger.warning("Tushare daily/pro_bar 抓取失败 %s: %s", ts_code, exc)
             return []
@@ -299,15 +324,13 @@ class TushareProvider:
             if not callable(api):
                 continue
             try:
-                self._wait_rate_limit()
                 try:
-                    df = api(trade_date=trade_date)
+                    df = self._run_with_limits(lambda: api(trade_date=trade_date))
                 except Exception as exc:
                     if not self._compat_enabled:
                         logger.warning("Tushare %s 调用失败，尝试兼容模式: %s", fn, exc)
                         self._enable_compat_mode(pro)
-                        self._wait_rate_limit()
-                        df = api(trade_date=trade_date)
+                        df = self._run_with_limits(lambda: api(trade_date=trade_date))
                     else:
                         raise
                 if df is not None and not df.empty:
@@ -341,6 +364,121 @@ class TushareProvider:
             )
         return [r for r in rows if r["name"]]
 
+    def _fetch_top_list_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro("top_list", trade_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare top_list 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_code = self._pick_str(row, "ts_code")
+            if not ts_code:
+                continue
+            rows.append(
+                {
+                    "ts_code": ts_code,
+                    "name": self._pick_str(row, "name"),
+                    "trade_date": self._pick_str(row, "trade_date") or trade_date,
+                    "close": self._pick_float(row, "close"),
+                    "pct_change": self._pick_float(row, "pct_change"),
+                    "turnover_rate": self._pick_float(row, "turnover_rate"),
+                    "amount": self._pick_float(row, "amount"),
+                    "buy_amount": self._pick_float(row, "l_buy"),
+                    "sell_amount": self._pick_float(row, "l_sell"),
+                    "net_amount": self._pick_float(row, "net_amount"),
+                    "reason": self._pick_str(row, "reason"),
+                }
+            )
+        return rows
+
+    def _fetch_top_inst_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro("top_inst", trade_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare top_inst 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_code = self._pick_str(row, "ts_code")
+            if not ts_code:
+                continue
+            rows.append(
+                {
+                    "ts_code": ts_code,
+                    "trade_date": self._pick_str(row, "trade_date") or trade_date,
+                    "side": self._pick_str(row, "side"),
+                    "buy": self._pick_float(row, "buy"),
+                    "sell": self._pick_float(row, "sell"),
+                    "net_buy": self._pick_float(row, "net_buy"),
+                    "reason": self._pick_str(row, "reason"),
+                }
+            )
+        return rows
+
+    def _fetch_block_trade_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro("block_trade", trade_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare block_trade 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_code = self._pick_str(row, "ts_code")
+            if not ts_code:
+                continue
+            rows.append(
+                {
+                    "ts_code": ts_code,
+                    "trade_date": self._pick_str(row, "trade_date") or trade_date,
+                    "price": self._pick_float(row, "price"),
+                    "vol": self._pick_float(row, "vol"),
+                    "amount": self._pick_float(row, "amount"),
+                    "buyer": self._pick_str(row, "buyer"),
+                    "seller": self._pick_str(row, "seller"),
+                }
+            )
+        return rows
+
+    def _is_trade_date_sync(self, trade_date: str) -> bool:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro(
+                "trade_cal",
+                exchange="",
+                start_date=trade_date,
+                end_date=trade_date,
+            )
+        except Exception as exc:
+            logger.warning("Tushare trade_cal 抓取失败: %s", exc)
+            return False
+
+        if df is None or df.empty:
+            return False
+
+        for _, row in df.iterrows():
+            value = row.get("is_open")
+            try:
+                return int(value) == 1
+            except Exception:
+                return str(value).strip() == "1"
+        return False
+
     def _wait_rate_limit(self) -> None:
         with self._lock:
             now = time.monotonic()
@@ -348,6 +486,11 @@ class TushareProvider:
             if elapsed < self.config.min_delay:
                 time.sleep(self.config.min_delay - elapsed)
             self._last_request_ts = time.monotonic()
+
+    def _run_with_limits(self, callback):
+        with self.__class__._request_semaphore:
+            self._wait_rate_limit()
+            return callback()
 
     @staticmethod
     def _to_ymd(value: Optional[str], default: str) -> str:

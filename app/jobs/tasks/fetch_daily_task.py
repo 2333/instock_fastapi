@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
+from app.jobs.market_calendar import is_trading_day, should_skip_market_task
 from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
 from app.models.stock_model import Stock, DailyBar
 from app.utils.stock_codes import extract_symbol, normalize_exchange_name, normalize_ts_code
@@ -1074,6 +1075,8 @@ async def run():
     logger.info(f"执行数据抓取任务: {datetime.now()}")
 
     try:
+        if should_skip_market_task("数据抓取任务", today_is_trading_day=await is_trading_day()):
+            return
         await fetch_and_save_stocks()
         daily_days = int(os.getenv("DAILY_SYNC_DAYS", "60"))
         await fetch_and_save_daily_bars(days=daily_days)
