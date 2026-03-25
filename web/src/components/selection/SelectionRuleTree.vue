@@ -1,27 +1,25 @@
 <template>
-  <section class="group-card" :style="{ '--depth': String(depth) }">
-    <header class="group-header">
-      <div>
-        <p class="group-meta">{{ depth === 0 ? '根规则组' : '子规则组' }}</p>
-        <div class="group-title-row">
-          <h3>{{ node.label || `规则组 ${node.id.slice(-4)}` }}</h3>
-          <select class="group-select" :value="node.combinator" @change="onCombinatorChange">
-            <option value="and">AND</option>
-            <option value="or">OR</option>
-            <option value="not">NOT</option>
-          </select>
-        </div>
+  <section :class="['condition-group', { root: depth === 0 }]">
+    <header class="group-toolbar">
+      <div class="group-heading">
+        <span class="group-tag">{{ depth === 0 ? '主条件组' : '子条件组' }}</span>
+        <h3>{{ depth === 0 ? '全部条件' : (node.label || `条件组 ${node.id.slice(-4)}`) }}</h3>
       </div>
-      <div class="group-actions">
-        <button class="ghost-btn" @click="$emit('add-condition', node.id)">添加条件</button>
-        <button class="ghost-btn" @click="$emit('add-group', node.id)">添加子组</button>
-        <button v-if="depth > 0" class="danger-btn" @click="$emit('remove-node', node.id)">删除组</button>
+      <div class="group-controls">
+        <select class="group-select" :value="node.combinator" @change="onCombinatorChange">
+          <option value="and">AND</option>
+          <option value="or">OR</option>
+          <option value="not">NOT</option>
+        </select>
+        <button class="btn btn-secondary" @click="$emit('add-condition', node.id)">添加条件</button>
+        <button class="btn btn-secondary" @click="$emit('add-group', node.id)">添加子组</button>
+        <button v-if="depth > 0" class="btn btn-danger" @click="$emit('remove-node', node.id)">删除分组</button>
       </div>
     </header>
 
     <div class="group-children">
       <div v-if="!node.children.length" class="group-empty">
-        这个组还没有条件。先加一个指标条件，或再拆一个子组。
+        当前还没有条件。先添加一个条件，或者拆出一个子组来组合逻辑。
       </div>
 
       <template v-for="child in node.children" :key="child.id">
@@ -38,15 +36,17 @@
           @update-group="$emit('update-group', $event)"
         />
 
-        <article v-else class="condition-card">
-          <div class="condition-main">
-            <p class="condition-pill">条件</p>
-            <h4>{{ child.label || metricLabel(child.left.metric_key) }}</h4>
+        <article v-else class="condition-item">
+          <div class="condition-body">
+            <div class="condition-header">
+              <h4>{{ child.label || metricLabel(child.left.metric_key) }}</h4>
+              <span class="condition-tag">条件</span>
+            </div>
             <p class="condition-summary">{{ renderCondition(child) }}</p>
           </div>
           <div class="condition-actions">
-            <button class="ghost-btn" @click="$emit('edit-condition', child.id)">配置</button>
-            <button class="danger-btn" @click="$emit('remove-node', child.id)">删除</button>
+            <button class="btn btn-secondary" @click="$emit('edit-condition', child.id)">编辑</button>
+            <button class="btn btn-danger" @click="$emit('remove-node', child.id)">删除</button>
           </div>
         </article>
       </template>
@@ -111,126 +111,161 @@ const onCombinatorChange = (event: Event) => {
 </script>
 
 <style scoped lang="scss">
-.group-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background: linear-gradient(180deg, rgba(17, 20, 24, 0.92), rgba(10, 12, 15, 0.96));
-  padding: 18px;
-  position: relative;
+.condition-group {
+  border-left: 2px solid rgba(41, 98, 255, 0.2);
+  padding-left: 16px;
+
+  &.root {
+    border-left: none;
+    padding-left: 0;
+  }
 }
 
-.group-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 18px;
-  pointer-events: none;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+.condition-group:not(.root) {
+  margin-left: 6px;
+  padding-top: 4px;
 }
 
-.group-header {
+.group-toolbar {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.group-meta {
-  margin: 0 0 6px;
+.group-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group-tag {
   font-size: 11px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.42);
 }
 
-.group-title-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.group-title-row h3 {
+.group-heading h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   color: rgba(255, 255, 255, 0.92);
 }
 
-.group-select {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.88);
-  padding: 6px 12px;
-}
-
-.group-actions,
+.group-controls,
 .condition-actions {
   display: flex;
-  gap: 8px;
-  align-items: flex-start;
   flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.group-select {
+  min-width: 88px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .group-children {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .group-empty {
-  border: 1px dashed rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
-  padding: 18px;
-  color: rgba(255, 255, 255, 0.56);
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 16px;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 13px;
 }
 
-.condition-card {
+.condition-item {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  border-radius: 14px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.condition-main h4 {
-  margin: 0 0 6px;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.9);
+.condition-body {
+  min-width: 0;
 }
 
-.condition-pill {
-  margin: 0 0 6px;
+.condition-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.condition-header h4 {
+  margin: 0;
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.condition-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(41, 98, 255, 0.14);
+  color: #8fb7ff;
   font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #86b7ff;
+  font-weight: 600;
 }
 
 .condition-summary {
   margin: 0;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(255, 255, 255, 0.64);
   line-height: 1.5;
+  font-size: 13px;
 }
 
-.ghost-btn,
-.danger-btn {
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.danger-btn {
-  color: #ffb4b4;
+.btn:hover {
+  border-color: rgba(41, 98, 255, 0.3);
+  background: rgba(41, 98, 255, 0.08);
+}
+
+.btn-danger {
+  color: #ffb5b5;
+}
+
+.btn-danger:hover {
+  border-color: rgba(255, 23, 68, 0.28);
+  background: rgba(255, 23, 68, 0.08);
 }
 
 @media (max-width: 900px) {
-  .group-header,
-  .condition-card {
+  .group-toolbar,
+  .condition-item {
     flex-direction: column;
   }
 }

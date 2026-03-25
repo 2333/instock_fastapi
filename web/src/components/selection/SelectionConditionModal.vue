@@ -2,6 +2,7 @@
   <div v-if="visible && draft" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal-shell">
       <aside class="catalog-pane">
+        <div class="panel-caption">指标库</div>
         <div class="catalog-search">
           <input v-model.trim="keyword" type="text" placeholder="搜索指标或形态" />
         </div>
@@ -33,7 +34,7 @@
       <section class="editor-pane">
         <header class="editor-header">
           <div>
-            <p class="eyebrow">条件配置</p>
+            <p class="eyebrow">条件设置</p>
             <h3>{{ draft.label || selectedLeftMetric?.label || '未命名条件' }}</h3>
           </div>
           <button class="close-btn" @click="$emit('close')">关闭</button>
@@ -43,8 +44,8 @@
 
         <div class="form-grid">
           <label>
-            <span>条件名</span>
-            <input v-model.trim="draft.label" type="text" placeholder="例如：日线 MACD 金叉" />
+            <span>条件名称</span>
+            <input v-model.trim="draft.label" type="text" placeholder="例如：MACD 金叉" />
           </label>
 
           <label>
@@ -110,12 +111,7 @@
                 <option :value="true">是</option>
                 <option :value="false">否</option>
               </select>
-              <input
-                v-else-if="valueInputKind === 'number'"
-                v-model.number="valueNumber"
-                type="number"
-                step="0.1"
-              />
+              <input v-else-if="valueInputKind === 'number'" v-model.number="valueNumber" type="number" step="0.1" />
               <input v-else v-model="valueText" type="text" />
             </label>
           </div>
@@ -186,8 +182,8 @@
         </div>
 
         <footer class="editor-footer">
-          <button class="ghost-btn" @click="$emit('close')">取消</button>
-          <button class="primary-btn" @click="submit">确定并刷新</button>
+          <button class="btn btn-secondary" @click="$emit('close')">取消</button>
+          <button class="btn btn-primary" @click="submit">确定并刷新</button>
         </footer>
       </section>
     </div>
@@ -392,29 +388,29 @@ watch(valueBoolean, syncDraftRightValue)
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 6, 9, 0.72);
-  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background: rgba(4, 8, 14, 0.72);
+  backdrop-filter: blur(6px);
   z-index: 2000;
 }
 
 .modal-shell {
-  width: min(1200px, 100%);
-  max-height: min(90vh, 920px);
+  width: min(1080px, 100%);
+  max-height: min(88vh, 860px);
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   overflow: hidden;
-  border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(16, 19, 23, 0.98), rgba(8, 10, 13, 0.98));
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #11161f;
 }
 
 .catalog-pane,
 .editor-pane {
-  padding: 24px;
+  padding: 20px;
   overflow-y: auto;
 }
 
@@ -423,43 +419,53 @@ watch(valueBoolean, syncDraftRightValue)
   background: rgba(255, 255, 255, 0.02);
 }
 
+.panel-caption,
+.eyebrow {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+
 .catalog-search input,
 .editor-pane input,
 .editor-pane select {
   width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  padding: 11px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .catalog-groups {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 16px 0;
+  margin: 14px 0;
 }
 
 .group-chip,
 .metric-row,
 .close-btn,
-.ghost-btn,
-.primary-btn {
+.btn {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.9);
-  cursor: pointer;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .group-chip {
+  padding: 7px 10px;
   border-radius: 999px;
-  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .group-chip.active {
-  background: rgba(84, 172, 255, 0.18);
-  border-color: rgba(84, 172, 255, 0.4);
+  border-color: rgba(41, 98, 255, 0.32);
+  background: rgba(41, 98, 255, 0.12);
 }
 
 .catalog-list {
@@ -469,38 +475,31 @@ watch(valueBoolean, syncDraftRightValue)
 }
 
 .metric-row {
-  text-align: left;
-  border-radius: 14px;
-  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 12px;
+  text-align: left;
+  border-radius: 10px;
+  cursor: pointer;
 }
 
 .metric-row.active {
-  border-color: rgba(84, 172, 255, 0.45);
-  background: rgba(84, 172, 255, 0.12);
+  border-color: rgba(41, 98, 255, 0.34);
+  background: rgba(41, 98, 255, 0.12);
 }
 
 .metric-row span {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .editor-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.eyebrow {
-  margin: 0 0 6px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .editor-header h3,
@@ -509,12 +508,16 @@ watch(valueBoolean, syncDraftRightValue)
   color: rgba(255, 255, 255, 0.94);
 }
 
+.preview-box,
+.param-block {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .preview-box {
-  border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 20px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 16px;
   color: rgba(255, 255, 255, 0.82);
   line-height: 1.5;
 }
@@ -523,11 +526,11 @@ watch(valueBoolean, syncDraftRightValue)
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .form-grid.single {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 1fr;
 }
 
 label {
@@ -537,36 +540,39 @@ label {
 }
 
 label span {
-  color: rgba(255, 255, 255, 0.62);
   font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .param-block {
-  margin-bottom: 18px;
-  padding: 16px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 16px;
 }
 
 .editor-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 22px;
 }
 
 .close-btn,
-.ghost-btn,
-.primary-btn {
-  border-radius: 999px;
-  padding: 10px 16px;
+.btn {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  cursor: pointer;
 }
 
-.primary-btn {
-  background: linear-gradient(135deg, #4b9cff, #7bc8ff);
-  color: #081018;
+.btn-primary {
+  background: #2962FF;
+  color: #fff;
   border-color: transparent;
+}
+
+.btn-secondary:hover,
+.close-btn:hover {
+  border-color: rgba(41, 98, 255, 0.28);
+  background: rgba(41, 98, 255, 0.08);
 }
 
 @media (max-width: 980px) {

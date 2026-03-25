@@ -1,55 +1,74 @@
 <template>
-  <div class="selection-studio">
-    <header class="studio-header">
-      <div>
-        <p class="eyebrow">Selection Studio</p>
-        <h1>组合选股</h1>
-        <p class="subtitle">用规则树组合技术指标、基本面和形态条件，统一周期做实时筛选。</p>
+  <div class="selection-page">
+    <div class="page-header">
+      <div class="header-left">
+        <h1>策略选股</h1>
+        <p class="subtitle">使用条件组组合技术指标、基本面和形态信号，统一周期进行实时筛选。</p>
       </div>
-      <div class="header-actions">
-        <select v-model="selectedPresetId" class="pill-select" @change="handlePresetChange">
-          <option value="">当前未绑定方案</option>
-          <option v-for="preset in presets" :key="preset.id" :value="String(preset.id)">
-            {{ preset.name }}
-          </option>
-        </select>
-        <select v-model="period" class="pill-select" @change="schedulePreview">
-          <option v-for="periodItem in catalog?.periods || []" :key="periodItem.key" :value="periodItem.key">
-            {{ periodItem.label }}
-          </option>
-        </select>
-        <button class="ghost-btn" @click="resetTemplate">新方案</button>
-        <button class="ghost-btn" @click="savePreset(false)">保存</button>
-        <button class="ghost-btn" @click="savePreset(true)">另存为</button>
-        <button class="ghost-btn danger" :disabled="!selectedPresetId" @click="deletePreset">删除</button>
-        <button class="primary-btn" :disabled="running" @click="runSelection(true)">
+      <div class="header-right">
+        <span class="last-updated">{{ running ? '预览刷新中' : '预览已同步' }}</span>
+        <button class="btn btn-primary" :disabled="running" @click="runSelection(true)">
           {{ running ? '筛选中...' : '立即筛选' }}
         </button>
       </div>
-    </header>
+    </div>
 
-    <section class="template-bar">
-      <label>
-        <span>方案名称</span>
-        <input v-model.trim="presetName" type="text" placeholder="例如：日线趋势突破" />
-      </label>
-      <div class="summary-chips">
-        <span v-for="group in catalog?.groups || []" :key="group.key" class="summary-chip">
+    <section class="card workspace-card">
+      <div class="workspace-grid">
+        <label class="field field-medium">
+          <span>条件方案</span>
+          <select v-model="selectedPresetId" @change="handlePresetChange">
+            <option value="">当前未绑定方案</option>
+            <option v-for="preset in presets" :key="preset.id" :value="String(preset.id)">
+              {{ preset.name }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field field-small">
+          <span>周期</span>
+          <select v-model="period" @change="schedulePreview">
+            <option v-for="periodItem in catalog?.periods || []" :key="periodItem.key" :value="periodItem.key">
+              {{ periodItem.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field field-grow">
+          <span>方案名称</span>
+          <input v-model.trim="presetName" type="text" placeholder="例如：日线趋势突破" />
+        </label>
+
+        <div class="toolbar-actions">
+          <button class="btn btn-secondary" @click="resetTemplate">新方案</button>
+          <button class="btn btn-secondary" @click="savePreset(false)">保存</button>
+          <button class="btn btn-secondary" @click="savePreset(true)">另存为</button>
+          <button class="btn btn-danger" :disabled="!selectedPresetId" @click="deletePreset">删除</button>
+        </div>
+      </div>
+
+      <div class="workspace-meta">
+        <span class="meta-chip guide-chip">1. 选择方案与周期</span>
+        <span class="meta-chip guide-chip">2. 添加条件并配置参数</span>
+        <span class="meta-chip guide-chip">3. 点击立即筛选查看结果</span>
+        <span class="meta-chip">条件 {{ totalConditions }}</span>
+        <span class="meta-chip">周期 {{ periodLabel }}</span>
+        <span v-if="resultMeta.trade_date" class="meta-chip">最近筛选 {{ resultMeta.trade_date }}</span>
+        <span v-for="group in catalog?.groups || []" :key="group.key" class="meta-chip">
           {{ group.label }} {{ group.items.length }}
         </span>
       </div>
     </section>
 
-    <div class="studio-layout">
-      <section class="builder-panel">
-        <div class="panel-header">
+    <div class="selection-layout">
+      <section class="card builder-card">
+        <div class="card-header">
           <div>
-            <h2>规则树</h2>
-            <p>每个条件都可以配置参数、左右值比较和时序包装；组之间支持 AND / OR / NOT。</p>
+            <h3>条件编辑</h3>
+            <p>所有逻辑都在条件组中完成。每个条件都支持参数、左右值比较和最近 N 周期判断。</p>
           </div>
-          <div class="panel-actions">
-            <span class="status-pill">周期：{{ periodLabel }}</span>
-            <span class="status-pill">条件：{{ totalConditions }}</span>
+          <div class="header-tags">
+            <span class="status-chip">支持 AND / OR / NOT</span>
           </div>
         </div>
 
@@ -66,55 +85,67 @@
         />
       </section>
 
-      <aside class="results-panel">
-        <div class="panel-header compact">
+      <section class="card results-card">
+        <div class="card-header">
           <div>
-            <h2>结果</h2>
-            <p v-if="resultMeta.trade_date">{{ resultMeta.trade_date }} · {{ periodLabel }} · 共 {{ results.length }} 只</p>
-            <p v-else>配置条件后点击“立即筛选”，或保存时自动预览。</p>
+            <h3>筛选结果</h3>
+            <p v-if="resultMeta.trade_date">{{ resultMeta.trade_date }} · {{ periodLabel }} · 共 {{ results.length }} 只股票</p>
+            <p v-else>配置好条件后，点击“立即筛选”，或者等待自动预览刷新。</p>
           </div>
-          <div class="panel-actions">
-            <span class="status-pill">{{ running ? '实时刷新中' : '已同步' }}</span>
+          <div class="header-tags">
+            <span class="status-chip accent">{{ results.length }} 只</span>
           </div>
         </div>
 
         <div v-if="!results.length" class="empty-state">
-          <div class="empty-mark">RULES</div>
-          <h3>当前没有命中结果</h3>
-          <p>先在左侧规则树里添加条件，或加载一个已有方案。</p>
+          <h4>当前没有命中结果</h4>
+          <p>先在左侧添加条件，或者切换到一个已有方案。</p>
         </div>
 
-        <div v-else class="results-list">
-          <article v-for="item in results" :key="item.ts_code" class="result-card" @click="$router.push(`/stock/${item.code}`)">
-            <div class="result-top">
-              <div>
-                <p class="result-code">{{ item.code }}</p>
-                <h3>{{ item.stock_name }}</h3>
-              </div>
-              <div class="result-score">
-                <span>Score</span>
-                <strong>{{ item.score.toFixed(2) }}</strong>
-              </div>
-            </div>
-
-            <div class="result-metrics">
-              <span>{{ item.signal }}</span>
-              <span>收盘 {{ formatNumber(item.snapshot?.close) }}</span>
-              <span>涨跌 {{ formatSigned(item.snapshot?.pct_chg) }}%</span>
-              <span>{{ item.matched_conditions || 0 }}/{{ item.total_conditions || 0 }} 条命中</span>
-            </div>
-
-            <div class="result-explanations">
-              <p v-for="explanation in item.explanations?.slice(0, 2) || []" :key="explanation.id">
-                <strong>{{ explanation.label || explanation.metric_key }}</strong>
-                <span>{{ operatorLabels[explanation.operator] || explanation.operator }}</span>
-                <span>{{ formatScalar(explanation.match_left) }}</span>
-                <span>{{ formatScalar(explanation.match_right) }}</span>
-              </p>
-            </div>
-          </article>
+        <div v-else class="results-table-wrapper">
+          <table class="results-table">
+            <thead>
+              <tr>
+                <th>股票</th>
+                <th>信号</th>
+                <th>收盘价</th>
+                <th>涨跌幅</th>
+                <th>条件命中</th>
+                <th>评分</th>
+                <th>命中说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in results" :key="item.ts_code" class="result-row" @click="$router.push(`/stock/${item.code}`)">
+                <td>
+                  <div class="stock-cell">
+                    <span class="stock-code">{{ item.code }}</span>
+                    <strong>{{ item.stock_name }}</strong>
+                  </div>
+                </td>
+                <td>
+                  <span class="signal-chip" :class="getSignalClass(item.signal)">
+                    {{ formatSignalLabel(item.signal) }}
+                  </span>
+                </td>
+                <td>{{ formatNumber(item.snapshot?.close) }}</td>
+                <td :class="['change-cell', { positive: Number(item.snapshot?.pct_chg || 0) >= 0, negative: Number(item.snapshot?.pct_chg || 0) < 0 }]">
+                  {{ formatSigned(item.snapshot?.pct_chg) }}%
+                </td>
+                <td>{{ item.matched_conditions || 0 }}/{{ item.total_conditions || 0 }}</td>
+                <td class="score-cell">{{ item.score.toFixed(2) }}</td>
+                <td>
+                  <div class="explanation-list">
+                    <span v-for="explanation in item.explanations?.slice(0, 2) || []" :key="explanation.id" class="explanation-chip">
+                      {{ explanation.label || explanation.metric_key }} {{ operatorLabels[explanation.operator] || explanation.operator }} {{ formatScalar(explanation.match_right) }}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </aside>
+      </section>
     </div>
 
     <SelectionConditionModal
@@ -175,7 +206,7 @@ function createEmptyGroup(): GroupNode {
   return {
     node_type: 'group',
     id: generateId(),
-    label: '主规则',
+    label: '主条件组',
     combinator: 'and',
     children: [],
   }
@@ -327,7 +358,7 @@ async function savePreset(asCopy: boolean) {
     const payload = {
       name,
       category: 'template',
-      description: `规则树方案 · ${periodLabel.value}`,
+      description: `条件方案 · ${periodLabel.value}`,
       params: buildTemplate(),
       is_active: true,
     }
@@ -429,7 +460,7 @@ function addGroup(groupId: string) {
   addNodeToGroup(rootRule.value, groupId, {
     node_type: 'group',
     id: generateId(),
-    label: '子规则',
+    label: '子条件组',
     combinator: 'and',
     children: [],
   })
@@ -465,6 +496,22 @@ function formatScalar(value: string | number | boolean | null | undefined) {
   return String(value)
 }
 
+function getSignalClass(signal?: string | null) {
+  const text = (signal || '').toLowerCase()
+  if (text.includes('buy') || text.includes('bull') || text.includes('多') || text.includes('涨')) return 'bullish'
+  if (text.includes('sell') || text.includes('bear') || text.includes('空') || text.includes('跌')) return 'bearish'
+  return 'neutral'
+}
+
+function formatSignalLabel(signal?: string | null) {
+  if (!signal) return '中性'
+  const text = String(signal)
+  if (text === 'buy') return '看多'
+  if (text === 'sell') return '看空'
+  if (text === 'hold') return '观察'
+  return text
+}
+
 onMounted(async () => {
   await fetchCatalog()
   await fetchPresets()
@@ -480,294 +527,347 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.selection-studio {
-  --panel-bg: rgba(12, 15, 19, 0.92);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --text-muted: rgba(255, 255, 255, 0.58);
+.selection-page {
   padding: 24px;
 }
 
-.studio-header,
-.panel-header,
-.template-bar {
-  border: 1px solid var(--panel-border);
-  background: radial-gradient(circle at top left, rgba(73, 156, 255, 0.16), transparent 34%), linear-gradient(180deg, rgba(17, 20, 25, 0.98), rgba(11, 14, 18, 0.98));
-  border-radius: 24px;
-  padding: 20px 22px;
-}
-
-.studio-header {
+.page-header {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 16px;
+  gap: 16px;
+  margin-bottom: 24px;
+
+  h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .subtitle {
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.5);
+    max-width: 720px;
+  }
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.last-updated {
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.42);
 }
 
-h1,
-h2,
-h3 {
-  margin: 0;
-  color: rgba(255, 255, 255, 0.95);
+.card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 20px;
 }
 
-.subtitle,
-.panel-header p,
-.template-bar span,
-.result-explanations p {
-  color: var(--text-muted);
+.workspace-card {
+  margin-bottom: 20px;
 }
 
-.subtitle {
-  margin: 10px 0 0;
-  max-width: 720px;
-  line-height: 1.6;
+.workspace-grid {
+  display: grid;
+  grid-template-columns: 2.2fr 1fr 2fr auto;
+  gap: 12px;
+  align-items: end;
 }
 
-.header-actions,
-.panel-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.pill-select,
-.template-bar input,
-.ghost-btn,
-.primary-btn {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.92);
-  padding: 10px 14px;
-}
-
-.primary-btn {
-  background: linear-gradient(135deg, #58a9ff, #8ed5ff);
-  color: #081018;
-  border-color: transparent;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.ghost-btn {
-  cursor: pointer;
-}
-
-.ghost-btn.danger {
-  color: #ffb7b7;
-}
-
-.template-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.template-bar label {
+.field {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 260px;
-  color: rgba(255, 255, 255, 0.62);
+
+  span {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  input,
+  select {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.9);
+  }
 }
 
-.summary-chips {
+.toolbar-actions,
+.header-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 
-.summary-chip,
-.status-pill {
+.meta-chip,
+.status-chip {
   display: inline-flex;
   align-items: center;
+  padding: 6px 10px;
   border-radius: 999px;
-  padding: 8px 12px;
   background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 13px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.74);
 }
 
-.studio-layout {
+.guide-chip {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.status-chip.accent {
+  color: #8fb7ff;
+}
+
+.selection-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.9fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+  gap: 20px;
   align-items: start;
 }
 
-.builder-panel,
-.results-panel {
-  border: 1px solid var(--panel-border);
-  border-radius: 24px;
-  padding: 20px;
-  background: var(--panel-bg);
-}
-
-.panel-header {
+.card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
-}
 
-.panel-header.compact {
-  padding: 0;
-  background: transparent;
-  border: none;
-}
+  h3 {
+    margin: 0;
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.92);
+  }
 
-.panel-header p {
-  margin: 8px 0 0;
-  line-height: 1.5;
+  p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.54);
+    line-height: 1.5;
+  }
 }
 
 .empty-state {
-  min-height: 320px;
+  min-height: 260px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   text-align: center;
-  gap: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.12);
-  border-radius: 20px;
-  color: var(--text-muted);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.56);
+
+  h4 {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 18px;
+  }
+
+  p {
+    margin: 0;
+    font-size: 13px;
+  }
 }
 
-.empty-mark {
-  font-size: 12px;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: rgba(120, 197, 255, 0.62);
+.results-table-wrapper {
+  overflow: auto;
 }
 
-.results-list {
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    padding: 12px 14px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    vertical-align: middle;
+  }
+
+  th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  td {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.86);
+  }
+}
+
+.result-row {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.result-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stock-cell {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: calc(100vh - 250px);
-  overflow-y: auto;
-  padding-right: 4px;
+  gap: 4px;
 }
 
-.result-card {
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease;
-}
-
-.result-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(88, 169, 255, 0.42);
-}
-
-.result-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.result-code {
-  margin: 0 0 4px;
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.46);
-}
-
-.result-top h3 {
-  font-size: 18px;
-}
-
-.result-score {
-  text-align: right;
-}
-
-.result-score span {
-  display: block;
+.stock-code {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.48);
 }
 
-.result-score strong {
-  font-size: 28px;
-  color: #93d8ff;
+.signal-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 60px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+
+  &.bullish {
+    background: rgba(0, 200, 83, 0.14);
+    color: #00c853;
+  }
+
+  &.bearish {
+    background: rgba(255, 23, 68, 0.14);
+    color: #ff6b88;
+  }
+
+  &.neutral {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+  }
 }
 
-.result-metrics {
+.change-cell.positive {
+  color: #00c853;
+}
+
+.change-cell.negative {
+  color: #ff6b88;
+}
+
+.score-cell {
+  font-weight: 700;
+  color: #8fb7ff;
+}
+
+.explanation-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.result-metrics span {
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.74);
-  font-size: 12px;
-}
-
-.result-explanations {
-  display: flex;
-  flex-direction: column;
   gap: 6px;
 }
 
-.result-explanations p {
-  margin: 0;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  line-height: 1.5;
+.explanation-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.result-explanations strong {
-  color: rgba(255, 255, 255, 0.9);
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
-@media (max-width: 1180px) {
-  .studio-layout {
+.btn-primary {
+  background: #2962FF;
+  color: #fff;
+
+  &:hover:not(:disabled) {
+    background: #1E53E5;
+  }
+}
+
+.btn-secondary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.86);
+
+  &:hover:not(:disabled) {
+    border-color: rgba(41, 98, 255, 0.28);
+    background: rgba(41, 98, 255, 0.08);
+  }
+}
+
+.btn-danger {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 23, 68, 0.08);
+  color: #ff9bb0;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(255, 23, 68, 0.28);
+    background: rgba(255, 23, 68, 0.14);
+  }
+}
+
+@media (max-width: 1200px) {
+  .selection-layout {
     grid-template-columns: 1fr;
   }
-
-  .results-list {
-    max-height: none;
-  }
 }
 
-@media (max-width: 860px) {
-  .studio-header,
-  .template-bar {
+@media (max-width: 900px) {
+  .page-header,
+  .card-header {
     flex-direction: column;
-    align-items: stretch;
   }
 
-  .header-actions,
-  .summary-chips {
-    justify-content: flex-start;
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .workspace-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -242,7 +242,7 @@
               <template v-if="paginatedGroups.length > 0">
                 <template v-for="stock in paginatedGroups" :key="stock.groupKey">
                   <tr
-                    v-for="(pattern, index) in stock.patternRows"
+                    v-for="(pattern, index) in getVisiblePatternRows(stock)"
                     :key="pattern.rowKey"
                     class="result-row"
                     :class="{ 'group-start': index === 0 }"
@@ -250,7 +250,7 @@
                     <td
                       v-if="index === 0"
                       class="checkbox-col merged-cell"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <input
                         v-model="selectedStocks"
@@ -261,7 +261,7 @@
                     <td
                       v-if="index === 0"
                       class="merged-cell stock-merged"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <div class="stock-cell">
                         <span class="stock-code">{{ stock.code }}</span>
@@ -270,6 +270,13 @@
                       <div class="stock-summary">
                         <span>最高 {{ formatConfidence(stock.maxConfidence) }}</span>
                         <span>{{ stock.patternRows.length }} 个形态</span>
+                        <button
+                          v-if="stock.patternRows.length > collapsedPatternLimit"
+                          class="collapse-toggle"
+                          @click="togglePatternRows(stock.groupKey)"
+                        >
+                          {{ isPatternGroupExpanded(stock.groupKey) ? '收起' : `展开剩余 ${stock.patternRows.length - collapsedPatternLimit} 个` }}
+                        </button>
                       </div>
                     </td>
 
@@ -318,7 +325,7 @@
                     <td
                       v-if="index === 0"
                       class="merged-cell action-merged"
-                      :rowspan="stock.patternRows.length"
+                      :rowspan="getVisiblePatternCount(stock)"
                     >
                       <div class="action-stack">
                         <button class="action-btn" title="查看图表" @click="viewChart(stock)">
@@ -511,6 +518,8 @@ interface PatternStockGroup {
   totalOccurrences: number
 }
 
+const collapsedPatternLimit = 3
+
 type RangePreset = 'latest' | '5d' | '20d' | '60d' | 'custom'
 type SortOption = 'confidence' | 'date' | 'code' | 'pattern_count'
 
@@ -521,6 +530,7 @@ const showConfig = ref(false)
 const selectedPatterns = ref<string[]>([])
 const selectedSignals = ref<string[]>([])
 const selectedStocks = ref<string[]>([])
+const expandedPatternGroups = ref<string[]>([])
 const stockKeyword = ref('')
 const currentPage = ref(1)
 const pageSize = 20
@@ -884,6 +894,22 @@ const groupedResults = computed<PatternStockGroup[]>(() => {
   return groups
 })
 
+const isPatternGroupExpanded = (groupKey: string) => expandedPatternGroups.value.includes(groupKey)
+
+const getVisiblePatternRows = (group: PatternStockGroup) => (
+  isPatternGroupExpanded(group.groupKey) ? group.patternRows : group.patternRows.slice(0, collapsedPatternLimit)
+)
+
+const getVisiblePatternCount = (group: PatternStockGroup) => getVisiblePatternRows(group).length
+
+const togglePatternRows = (groupKey: string) => {
+  if (expandedPatternGroups.value.includes(groupKey)) {
+    expandedPatternGroups.value = expandedPatternGroups.value.filter((item) => item !== groupKey)
+    return
+  }
+  expandedPatternGroups.value = [...expandedPatternGroups.value, groupKey]
+}
+
 const totalPatternRows = computed(() =>
   groupedResults.value.reduce((sum, group) => sum + group.patternRows.length, 0)
 )
@@ -954,6 +980,7 @@ const fetchPatterns = async () => {
 
     latestEvaluatedDate.value = patternResults.value.reduce((latest, row) => row.trade_date > latest ? row.trade_date : latest, '')
     selectedStocks.value = []
+    expandedPatternGroups.value = []
     currentPage.value = 1
   } catch (error) {
     console.error('Failed to fetch patterns:', error)
@@ -1041,7 +1068,9 @@ const addToWatchlist = async (group: PatternStockGroup) => {
   }
 }
 
-watch(groupedResults, () => {
+watch(groupedResults, (groups) => {
+  const availableKeys = new Set(groups.map((group) => group.groupKey))
+  expandedPatternGroups.value = expandedPatternGroups.value.filter((key) => availableKeys.has(key))
   if (currentPage.value > totalPages.value) {
     currentPage.value = totalPages.value
   }
@@ -1543,10 +1572,24 @@ onMounted(() => {
 .stock-summary {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
   margin-top: 10px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.48);
+}
+
+.collapse-toggle {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8fb7ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  color: #c4d8ff;
 }
 
 .pattern-name-row {

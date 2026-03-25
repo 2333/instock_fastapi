@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.11-slim
 
 LABEL maintainer="instock"
@@ -16,6 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
+    git \
+    openssh-client \
     build-essential \
     libtool \
     autoconf \
@@ -36,7 +40,10 @@ RUN pip install uv
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-dev
+RUN --mount=type=ssh mkdir -p -m 0700 /root/.ssh \
+    && printf "Host github.com\n  HostName ssh.github.com\n  Port 443\n  User git\n" > /root/.ssh/config \
+    && ssh-keyscan -p 443 ssh.github.com >> /root/.ssh/known_hosts \
+    && uv sync --frozen --no-dev
 
 COPY --chmod=755 ./scripts/start.sh /usr/local/bin/start.sh
 
