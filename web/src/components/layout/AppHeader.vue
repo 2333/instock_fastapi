@@ -1,7 +1,7 @@
 <template>
   <header class="app-header">
     <div class="header-left">
-      <router-link to="/" class="logo">
+      <router-link :to="preferences.defaultHome" class="logo">
         <svg class="logo-icon" viewBox="0 0 32 32" fill="none">
           <path d="M16 2L4 8V24L16 30L28 24V8L16 2Z" fill="url(#logo-gradient)" />
           <path d="M16 2V30M4 8L16 14L28 8M4 16L16 22L28 16M4 24L16 18L28 24" stroke="rgba(255,255,255,0.3)" stroke-width="1" />
@@ -21,6 +21,10 @@
         <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
           <span class="nav-icon">📊</span>
           <span>{{ t('nav_dashboard') }}</span>
+        </router-link>
+        <router-link to="/workspace" class="nav-item" :class="{ active: $route.path.startsWith('/workspace') }">
+          <span class="nav-icon">🖥️</span>
+          <span>{{ t('nav_workspace') }}</span>
         </router-link>
         <router-link to="/stocks" class="nav-item" :class="{ active: $route.path.startsWith('/stocks') }">
           <span class="nav-icon">📈</span>
@@ -90,6 +94,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLocale } from '@/composables/useLocale'
 import { authApi } from '@/api'
+import { useUserPreferences } from '@/composables/useUserPreferences'
 
 const router = useRouter()
 const emit = defineEmits<{
@@ -101,6 +106,7 @@ const marketOpen = ref(false)
 const showUserMenu = ref(false)
 const { t, toggleLocale } = useLocale()
 const currentUser = ref<any>(null)
+const { preferences, loadUserPreferences } = useUserPreferences()
 
 const refreshData = () => emit('refresh')
 const openSettings = () => emit('settings')
@@ -137,6 +143,7 @@ let intervalId: number | null = null
 onMounted(async () => {
   checkMarketStatus()
   intervalId = window.setInterval(checkMarketStatus, 60000)
+  await loadUserPreferences(true)
   
   if (authApi.isAuthenticated()) {
     try {

@@ -15,6 +15,7 @@ const locale = ref<Locale>(initial)
 const messages: Record<Locale, Record<string, string>> = {
   zh: {
     nav_dashboard: '仪表盘',
+    nav_workspace: '工作台',
     nav_stocks: '股票',
     nav_patterns: '形态',
     nav_backtest: '回测',
@@ -37,6 +38,7 @@ const messages: Record<Locale, Record<string, string>> = {
   },
   en: {
     nav_dashboard: 'Dashboard',
+    nav_workspace: 'Workspace',
     nav_stocks: 'Stocks',
     nav_patterns: 'Patterns',
     nav_backtest: 'Backtest',

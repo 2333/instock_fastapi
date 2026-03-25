@@ -102,6 +102,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { authApi } from '@/api'
+import { getPreferredHomePath, loadUserPreferences } from '@/composables/useUserPreferences'
 
 const router = useRouter()
 const route = useRoute()
@@ -125,8 +126,9 @@ const handleLogin = async () => {
   try {
     const response = await authApi.login(username.value, password.value)
     authApi.setToken(response.access_token, response.refresh_token)
+    await loadUserPreferences(true)
     
-    const redirect = route.query.redirect as string || '/'
+    const redirect = route.query.redirect as string || getPreferredHomePath()
     router.push(redirect)
   } catch (e: any) {
     error.value = e.response?.data?.detail || '登录失败，请检查用户名和密码'

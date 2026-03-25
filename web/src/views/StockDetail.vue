@@ -27,13 +27,46 @@
 
       <div class="content-grid">
         <div class="main-chart">
+          <div class="chart-mode-bar">
+            <div class="chart-mode-tabs">
+              <button
+                class="chart-mode-btn"
+                :class="{ active: activeChartMode === 'native' }"
+                @click="activeChartMode = 'native'"
+              >
+                业务图表
+              </button>
+              <button
+                class="chart-mode-btn"
+                :class="{ active: activeChartMode === 'tradingview' }"
+                @click="activeChartMode = 'tradingview'"
+              >
+                TradingView
+              </button>
+            </div>
+            <p class="chart-mode-copy">
+              {{
+                activeChartMode === 'native'
+                  ? '使用站内行情、复权与现有指标逻辑。'
+                  : '使用 TradingView 内置行情与指标，作为补充分析视图。'
+              }}
+            </p>
+          </div>
+
           <KLineChart
+            v-if="activeChartMode === 'native'"
             :title="stockInfo.name"
             :data="klineData"
             :loading="loading"
             :adjust="currentAdjust"
             :external-hint="chartHint"
             @adjustChange="handleAdjustChange"
+          />
+          <TradingViewWidget
+            v-else
+            :code="stockInfo.code"
+            :exchange="stockInfo.exchange"
+            theme="dark"
           />
         </div>
 
@@ -92,6 +125,9 @@
 
           <div class="panel-section">
             <h3>相关形态</h3>
+            <p v-if="activeChartMode === 'tradingview'" class="pattern-note">
+              列表仍来自站内形态识别；TradingView 视图不会直接显示这些业务标记。
+            </p>
             <div v-if="patterns.length > 0" class="pattern-list">
               <div 
                 v-for="pattern in patterns" 
@@ -126,6 +162,7 @@ import { ref, onMounted, computed, watch, inject } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { stockApi, patternApi, attentionApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
+import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
 
 interface KlineData {
   date: string
@@ -151,6 +188,7 @@ const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const inWatchlist = ref(false)
+const activeChartMode = ref<'native' | 'tradingview'>('native')
 
 const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
@@ -448,12 +486,58 @@ onMounted(() => {
   background: rgba(26, 26, 26, 0.5);
   border-radius: 12px;
   overflow: hidden;
+  min-width: 0;
+}
+
+.chart-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chart-mode-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.chart-mode-btn {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.24);
+  }
+
+  &.active {
+    background: rgba(41, 98, 255, 0.16);
+    color: #6ab0ff;
+    border-color: rgba(41, 98, 255, 0.42);
+  }
+}
+
+.chart-mode-copy {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: right;
 }
 
 .side-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
 .panel-section {
@@ -526,6 +610,12 @@ onMounted(() => {
   gap: 8px;
 }
 
+.pattern-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .pattern-item {
   display: flex;
   justify-content: space-between;
@@ -585,6 +675,8 @@ onMounted(() => {
 @media (max-width: 768px) {
   .stock-detail-page {
     padding: 16px;
+    height: auto;
+    min-height: calc(100vh - 60px);
   }
   
   .page-header {
@@ -593,6 +685,15 @@ onMounted(() => {
   }
   
   .price-info {
+    text-align: left;
+  }
+
+  .chart-mode-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .chart-mode-copy {
     text-align: left;
   }
   
