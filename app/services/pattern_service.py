@@ -21,15 +21,25 @@ class PatternService:
     async def get_patterns(
         self, code: str, start_date: Optional[str], end_date: Optional[str], limit: int
     ) -> List[dict]:
-        query = text("""
+        conditions = ["s.symbol = :code"]
+        params: dict = {"code": code, "limit": limit}
+
+        if start_date:
+            conditions.append("p.trade_date >= :start_date")
+            params["start_date"] = start_date
+        if end_date:
+            conditions.append("p.trade_date <= :end_date")
+            params["end_date"] = end_date
+
+        query = text(f"""
             SELECT p.*, s.name as stock_name, s.symbol as code
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
-            WHERE s.symbol = :code
-            ORDER BY p.trade_date DESC
+            WHERE {" AND ".join(conditions)}
+            ORDER BY p.trade_date DESC, p.confidence DESC
             LIMIT :limit
         """)
-        result = await self.db.execute(query, {"code": code, "limit": limit})
+        result = await self.db.execute(query, params)
         return [row._mapping for row in result.fetchall()]
 
     async def get_today_patterns(self, signal: Optional[str], limit: int) -> List[dict]:

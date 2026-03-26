@@ -1,7 +1,8 @@
 .PHONY: help install dev frontend-dev test lint clean setup init-db \
         docker-up docker-down docker-rebuild docker-status docker-logs \
         docker-clean docker-build docker-smoke format lint-check style-check style-fix \
-        test-cov sync ci-backend ci-frontend ci
+        test-cov sync ci-backend ci-frontend ci \
+        version-show version-check version-set docker-build-version docker-deploy-version
 
 UV ?= uv
 UV_CACHE_DIR ?= .uv-cache
@@ -40,6 +41,8 @@ help:
 	@echo "  make docker-up      - 启动所有容器"
 	@echo "  make docker-down    - 停止所有容器"
 	@echo "  make docker-rebuild - 重构并重启"
+	@echo "  make docker-build-version VERSION=x.y.z  - 构建带版本标签的镜像"
+	@echo "  make docker-deploy-version VERSION=x.y.z - 使用版本化镜像部署"
 	@echo ""
 	@echo "代码质量:"
 	@echo "  make lint-check     - 检查代码"
@@ -48,6 +51,9 @@ help:
 	@echo "  make format         - 格式化代码"
 	@echo "  make ci-backend     - 本地执行后端 CI 检查"
 	@echo "  make ci-frontend    - 本地执行前端 CI 检查"
+	@echo "  make version-show   - 显示当前仓库版本"
+	@echo "  make version-check  - 检查版本文件是否同步"
+	@echo "  make version-set VERSION=x.y.z - 更新仓库版本"
 	@echo ""
 	@echo "测试:"
 	@echo "  make test           - 运行测试"
@@ -103,6 +109,24 @@ docker-rebuild:
 docker-build:
 	@echo "Building images..."
 	$(DOCKER_COMPOSE) build --no-cache || echo "Build failed"
+
+version-show:
+	python3 scripts/release_version.py show
+
+version-check:
+	python3 scripts/release_version.py check
+
+version-set:
+	@test -n "$(VERSION)" || (echo "Usage: make version-set VERSION=x.y.z" && exit 1)
+	python3 scripts/release_version.py set $(VERSION)
+
+docker-build-version:
+	@test -n "$(VERSION)" || (echo "Usage: make docker-build-version VERSION=x.y.z" && exit 1)
+	VERSION=$(VERSION) sh scripts/build_release_images.sh
+
+docker-deploy-version:
+	@test -n "$(VERSION)" || (echo "Usage: make docker-deploy-version VERSION=x.y.z" && exit 1)
+	VERSION=$(VERSION) ENV_FILE=$(ENV_FILE) sh scripts/deploy_release.sh
 
 docker-smoke:
 	chmod +x scripts/docker_smoke.sh

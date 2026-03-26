@@ -216,6 +216,7 @@ class BaseCrawler(ABC):
                 timeout=timeout,
                 follow_redirects=True,
                 proxy=proxy_url,
+                trust_env=False,
             )
             self._proxy_clients[proxy_url] = client
             return client
@@ -234,6 +235,7 @@ class BaseCrawler(ABC):
                 headers=headers,
                 timeout=timeout,
                 follow_redirects=True,
+                trust_env=False,
             )
         return self._client
 

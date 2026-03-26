@@ -19,6 +19,7 @@
 - [项目架构](#项目架构)
 - [开发指南](#开发指南)
 - [部署指南](#部署指南)
+- [版本发布](#版本发布)
 - [API文档](#api文档)
 - [技术栈](#技术栈)
 
@@ -138,10 +139,39 @@ make docker-up       # 启动 Docker
 make docker-down     # 停止 Docker
 make docker-rebuild  # 重构并重启
 make docker-smoke    # 验证容器服务是否可用
+make docker-build-version VERSION=0.2.0
+make docker-deploy-version VERSION=0.2.0
 
 # 数据库
 make init-db         # 初始化数据库
 ```
+
+### 版本管理
+
+仓库现在使用根目录 [VERSION](/Users/zhangkai/projects/instock_fastapi/VERSION) 作为单一版本源，遵循语义化版本：
+
+```bash
+# 查看当前版本
+make version-show
+
+# 检查 VERSION / pyproject.toml / web/package.json / web/package-lock.json 是否一致
+make version-check
+
+# 发布前设置新版本
+make version-set VERSION=0.2.0
+```
+
+运行时版本会暴露在：
+
+- `GET /health`
+- `GET /api/v1/info`
+- 前端顶部版本徽标
+
+镜像构建会自动注入：
+
+- `APP_VERSION`
+- `APP_GIT_SHA`
+- OCI image labels
 
 ### 添加新依赖
 
@@ -171,6 +201,40 @@ make docker-up
 make docker-status
 make docker-smoke
 ```
+
+## 版本发布
+
+### 1. 同步版本号
+
+```bash
+make version-set VERSION=0.2.0
+make version-check
+```
+
+### 2. 生成版本化镜像
+
+```bash
+make docker-build-version VERSION=0.2.0
+```
+
+默认镜像标签：
+
+- `instock/instock-app:0.2.0`
+- `instock/instock-frontend:0.2.0`
+
+可通过 `IMAGE_NAMESPACE` 覆盖命名空间：
+
+```bash
+IMAGE_NAMESPACE=ghcr.io/2333 make docker-build-version VERSION=0.2.0
+```
+
+### 3. 使用版本化镜像部署
+
+```bash
+make docker-deploy-version VERSION=0.2.0
+```
+
+部署编排文件为 [docker-compose.deploy.yml](/Users/zhangkai/projects/instock_fastapi/docker-compose.deploy.yml)，它只消费镜像，不再挂载源码目录，更适合发布环境。
 
 ### 环境变量
 
