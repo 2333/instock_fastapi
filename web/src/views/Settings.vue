@@ -198,8 +198,10 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useLocale, type Locale } from '@/composables/useLocale'
 
 const activeSection = ref('general')
+const { locale, setLocale } = useLocale()
 
 const sections = [
   { id: 'general', label: '通用', icon: '⚙️' },
@@ -210,7 +212,7 @@ const sections = [
 
 const settings = reactive({
   darkMode: true,
-  language: 'zh',
+  language: locale.value as Locale,
   dateFormat: 'YYYY-MM-DD',
   autoRefresh: false,
   refreshInterval: '60',
@@ -227,10 +229,13 @@ const settings = reactive({
 })
 
 const saveSettings = () => {
+  setLocale(settings.language as Locale)
   console.log('Saving settings...')
 }
 
 const resetSettings = () => {
+  settings.language = 'zh'
+  setLocale('zh')
   console.log('Resetting settings...')
 }
 </script>

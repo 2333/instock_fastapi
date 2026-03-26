@@ -2,23 +2,23 @@
   <div class="stock-detail-page">
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>加载中...</p>
+      <p>{{ t('stock_loading') }}</p>
     </div>
 
     <template v-else-if="stockInfo">
       <div class="page-header">
         <div class="stock-info">
-          <h1>{{ stockInfo.name }}</h1>
-          <div class="stock-meta">
+          <div class="stock-title-row">
+            <h1>{{ stockInfo.name }}</h1>
             <span class="stock-code">{{ stockInfo.code }}</span>
             <span class="stock-market">{{ marketLabel }}</span>
           </div>
         </div>
-        <div class="price-info">
-          <div class="current-price" :class="change >= 0 ? 'price-up' : 'price-down'">
+        <div class="price-info" :class="change >= 0 ? 'price-up' : 'price-down'">
+          <div class="current-price">
             {{ latestBar?.close?.toFixed(2) || '-' }}
           </div>
-          <div class="price-change" :class="change >= 0 ? 'price-up' : 'price-down'">
+          <div class="price-change">
             {{ formatChange(change) }}
             <span class="change-value">({{ changeValue >= 0 ? '+' : '' }}{{ changeValue.toFixed(2) }})</span>
           </div>
@@ -27,21 +27,48 @@
 
       <div class="content-grid">
         <div class="main-chart">
-          <div class="chart-context-bar">
+          <div class="chart-mode-bar">
+            <div class="chart-mode-tabs">
+              <button
+                class="chart-mode-btn"
+                :class="{ active: activeChartMode === 'native' }"
+                @click="activeChartMode = 'native'"
+              >
+                {{ t('stock_chart_native') }}
+              </button>
+              <button
+                class="chart-mode-btn"
+                :class="{ active: activeChartMode === 'tradingview' }"
+                @click="activeChartMode = 'tradingview'"
+              >
+                {{ t('stock_chart_tv') }}
+              </button>
+            </div>
+            <p class="chart-mode-copy">
+              {{
+                activeChartMode === 'native'
+                  ? t('stock_chart_native_desc')
+                  : t('stock_chart_tv_desc')
+              }}
+            </p>
+          </div>
+
+          <div v-if="activeChartMode === 'native'" class="chart-context-bar">
             <div class="context-copy">
-              <span class="context-label">评估时间范围</span>
+              <span class="context-label">{{ t('stock_pattern_range_label') }}</span>
               <strong>{{ patternRangeLabel }}</strong>
             </div>
             <div class="context-actions">
               <button class="context-btn" :class="{ active: showPatternMarks }" @click="showPatternMarks = !showPatternMarks">
-                {{ showPatternMarks ? '隐藏形态标记' : '显示形态标记' }}
+                {{ showPatternMarks ? t('stock_pattern_marks_hide') : t('stock_pattern_marks_show') }}
               </button>
               <button class="context-btn" :disabled="!hasRequestedPatternRange" @click="focusRangeRequestId++">
-                聚焦评估区间
+                {{ t('stock_pattern_focus_range') }}
               </button>
             </div>
           </div>
           <KLineChart
+            v-if="activeChartMode === 'native'"
             :title="stockInfo.name"
             :data="klineData"
             :loading="loading"
@@ -54,66 +81,78 @@
             :focus-range-request-id="focusRangeRequestId"
             @adjustChange="handleAdjustChange"
           />
+          <TradingViewWidget
+            v-else
+            :code="stockInfo.code"
+            :exchange="stockInfo.exchange"
+            theme="dark"
+          />
         </div>
 
         <aside class="side-panel">
           <div class="panel-section">
-            <h3>股票概况</h3>
+            <h3>{{ t('stock_profile') }}</h3>
             <div class="profile-grid">
               <div class="profile-item">
-                <span class="label">开盘价</span>
+                <span class="label">{{ t('stock_open') }}</span>
                 <span class="value">{{ latestBar?.open?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">最高价</span>
+                <span class="label">{{ t('stock_high') }}</span>
                 <span class="value">{{ latestBar?.high?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">最低价</span>
+                <span class="label">{{ t('stock_low') }}</span>
                 <span class="value">{{ latestBar?.low?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">成交量</span>
+                <span class="label">{{ t('label_volume') }}</span>
                 <span class="value">{{ formatVolume(latestBar?.vol) }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">成交额</span>
+                <span class="label">{{ t('stock_turnover') }}</span>
                 <span class="value">{{ formatTurnover(latestBar?.amount) }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">所属行业</span>
+                <span class="label">{{ t('stock_industry') }}</span>
                 <span class="value">{{ stockInfo.industry || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">上市日期</span>
+                <span class="label">{{ t('stock_list_date') }}</span>
                 <span class="value">{{ stockInfo.list_date || '-' }}</span>
               </div>
             </div>
           </div>
 
           <div class="panel-section">
-            <h3>快速操作</h3>
+            <h3>{{ t('stock_actions') }}</h3>
             <div class="action-buttons">
               <button class="action-btn primary" @click="goBacktest">
-                <span>回测策略</span>
+                <span class="btn-icon">⚡</span>
+                <span>{{ t('stock_backtest') }}</span>
               </button>
               <button class="action-btn" @click="addToWatchlist">
-                <span>{{ inWatchlist ? '取消关注' : '添加到关注' }}</span>
+                <span class="btn-icon">⭐</span>
+                <span>{{ inWatchlist ? t('stock_watch_remove') : t('stock_watch_add') }}</span>
               </button>
               <button class="action-btn" @click="analyzePatterns">
-                <span>返回形态页</span>
+                <span class="btn-icon">🔍</span>
+                <span>{{ t('stock_analyze_patterns') }}</span>
               </button>
             </div>
           </div>
 
           <div class="panel-section">
             <div class="section-header">
-              <h3>相关形态</h3>
+              <h3>{{ t('stock_related_patterns') }}</h3>
               <span class="section-chip">{{ patternRangeLabel }}</span>
             </div>
+            <p v-if="activeChartMode === 'tradingview'" class="pattern-note">
+              {{ t('stock_tv_pattern_note') }}
+            </p>
             <div v-if="patterns.length > 0" class="pattern-list-meta">
-              <span>{{ patterns.length }} 条记录</span>
-              <span>悬浮或聚焦时会联动 K 线</span>
+              <span>{{ patterns.length }} {{ t('stock_pattern_records') }}</span>
+              <span>{{ t('stock_pattern_link_hint') }}</span>
             </div>
             <div v-if="patterns.length > 0" class="pattern-list">
               <button
@@ -140,7 +179,7 @@
               </button>
             </div>
             <div v-else class="empty-state">
-              当前区间内暂无形态数据
+              {{ t('stock_no_patterns') }}
             </div>
           </div>
         </aside>
@@ -148,7 +187,7 @@
     </template>
 
     <div v-else class="error-state">
-      <p>未找到股票信息</p>
+      <p>{{ t('stock_not_found') }}</p>
     </div>
   </div>
 </template>
@@ -158,6 +197,9 @@ import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { attentionApi, patternApi, stockApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
+import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
+import { useLocale } from '@/composables/useLocale'
+import { getPatternLabel as resolvePatternLabel } from '@/utils/patternLabels'
 
 interface KlineData {
   date: string
@@ -202,8 +244,10 @@ interface DateRange {
 
 const route = useRoute()
 const router = useRouter()
+const { locale, t } = useLocale()
 const loading = ref(false)
 const inWatchlist = ref(false)
+const activeChartMode = ref<'native' | 'tradingview'>('native')
 const showPatternMarks = ref(true)
 const activePatternKey = ref('')
 const focusRangeRequestId = ref(0)
@@ -212,15 +256,15 @@ const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
 const patterns = ref<PatternDetail[]>([])
 const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
-const chartHint = ref('')
+const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
 const marketLabel = computed(() => {
   const exchange = String(stockInfo.value?.exchange || '').toUpperCase()
-  if (exchange === 'SSE' || exchange === 'SH') return '上海'
-  if (exchange === 'SZSE' || exchange === 'SZ') return '深圳'
-  if (exchange === 'BSE' || exchange === 'BJ') return '北交所'
+  if (exchange === 'SSE' || exchange === 'SH') return t('stock_market_sh')
+  if (exchange === 'SZSE' || exchange === 'SZ') return t('stock_market_sz')
+  if (exchange === 'BSE' || exchange === 'BJ') return t('stock_market_bj')
   return exchange || '-'
 })
 
@@ -277,7 +321,7 @@ const hasRequestedPatternRange = computed(() => !!requestedPatternRange.value)
 
 const patternRangeLabel = computed(() => {
   if (!requestedPatternRange.value) {
-    return '当前K线窗口'
+    return t('stock_pattern_range_current')
   }
   return `${formatDisplayDate(requestedPatternRange.value.start)} 至 ${formatDisplayDate(requestedPatternRange.value.end)}`
 })
@@ -287,7 +331,7 @@ const chartPatternRange = computed(() =>
     ? {
         start: requestedPatternRange.value.start,
         end: requestedPatternRange.value.end,
-        label: '评估区间',
+        label: t('stock_pattern_range_focus'),
       }
     : null
 )
@@ -325,6 +369,10 @@ const changeValue = computed(() => {
   return ((Number(latestBar.value.close) - Number(latestBar.value.open)) / Number(latestBar.value.open)) * 100
 })
 
+const chartHint = computed(() => {
+  return adjustFallbackActive.value ? t('stock_adjust_fallback') : ''
+})
+
 const formatVolume = (volume: number | undefined) => {
   if (!volume) return '-'
   if (volume >= 1000000) return `${(volume / 1000000).toFixed(2)}M`
@@ -342,36 +390,7 @@ const formatTurnover = (turnover: number | undefined) => {
 const formatChange = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 
 const getPatternLabel = (name: string) => {
-  const labels: Record<string, string> = {
-    MORNING_STAR: '晨星',
-    EVENING_STAR: '夜星',
-    BREAKTHROUGH_HIGH: '突破高点',
-    BREAKDOWN_LOW: '跌破低点',
-    CONTINUOUS_RISE: '连续上涨',
-    CONTINUOUS_FALL: '连续下跌',
-    BULLISH_ENGULFING: '看涨吞没',
-    BEARISH_ENGULFING: '看跌吞没',
-    BULLISH_HARAMI: '看涨孕线',
-    BEARISH_HARAMI: '看跌孕线',
-    HAMMER: '锤子线',
-    INVERTED_HAMMER: '倒锤子',
-    DOJI: '十字星',
-    SPINNING_TOP: '纺锤线',
-    MARUBOZU: '光头光脚',
-    SHOOTING_STAR: '射击之星',
-    PIERCING: '穿刺',
-    DARK_CLOUD_COVER: '乌云盖顶',
-    HANGING_MAN: '吊人',
-    DRAGONFLY_DOJI: '龙爪',
-    GRAVESTONE_DOJI: '墓碑',
-    TRISTAR: '三星',
-    TAKURI: '探水杆',
-    THREE_WHITE_SOLDIERS: '红三兵',
-    THREE_BLACK_CROWS: '黑三鸦',
-    MA_GOLDEN_CROSS: 'MA金叉',
-    MA_DEATH_CROSS: 'MA死叉',
-  }
-  return labels[name] || name
+  return resolvePatternLabel(name, locale.value)
 }
 
 const getSignalType = (patternType?: string | null): 'BULLISH' | 'BEARISH' | 'NEUTRAL' => {
@@ -436,11 +455,7 @@ const fetchStockDetail = async (
     const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
 
     stockInfo.value = stockData
-    chartHint.value =
-      stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
-        ? '当前复权数据暂不可用，已自动回退为不复权数据'
-        : ''
-
+    adjustFallbackActive.value = stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
     patterns.value = (patternsData || [])
       .map((pattern: any, index: number) => ({
         ...pattern,
@@ -455,7 +470,6 @@ const fetchStockDetail = async (
       })
 
     activePatternKey.value = ''
-
     if (stockData?.bars) {
       klineData.value = stockData.bars.map((bar: any) => ({
         date: bar.trade_date,
@@ -537,10 +551,14 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .stock-detail-page {
-  display: flex;
-  flex-direction: column;
-  height: calc(100vh - 60px);
+  box-sizing: border-box;
   padding: 24px;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
 }
 
 .loading-state,
@@ -575,45 +593,65 @@ onMounted(() => {
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
+  align-items: center;
+  min-height: 0;
 }
 
 .stock-info {
+  min-width: 0;
+}
+
+.stock-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+
   h1 {
     margin: 0;
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 600;
+    line-height: 1.2;
   }
 }
 
-.stock-meta {
-  display: flex;
-  gap: 12px;
-  margin-top: 8px;
+.stock-code,
+.stock-market {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
 
-  .stock-code {
-    font-family: 'JetBrains Mono', monospace;
-    color: rgba(255, 255, 255, 0.72);
-  }
+.stock-code {
+  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.05);
+}
 
-  .stock-market {
-    color: rgba(255, 255, 255, 0.52);
-  }
+.stock-market {
+  color: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .price-info {
-  text-align: right;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
 
   .current-price {
-    font-size: 36px;
+    font-size: 24px;
     font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
   }
 
   .price-change {
-    margin-top: 4px;
-    font-size: 16px;
+    font-size: 13px;
+    white-space: nowrap;
   }
 }
 
@@ -632,16 +670,64 @@ onMounted(() => {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
-  gap: 24px;
-  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .main-chart {
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: rgba(26, 26, 26, 0.5);
   border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chart-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chart-mode-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.chart-mode-btn {
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.24);
+  }
+
+  &.active {
+    background: rgba(41, 98, 255, 0.16);
+    color: #6ab0ff;
+    border-color: rgba(41, 98, 255, 0.42);
+  }
+}
+
+.chart-mode-copy {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: right;
 }
 
 .chart-context-bar {
@@ -710,6 +796,9 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel-section {
@@ -811,6 +900,12 @@ onMounted(() => {
   overflow-y: auto;
 }
 
+.pattern-note {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .pattern-item {
   display: flex;
   align-items: center;
@@ -889,13 +984,21 @@ onMounted(() => {
 }
 
 @media (max-width: 1200px) {
+  .stock-detail-page {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .side-panel {
     flex-direction: row;
     flex-wrap: wrap;
+    overflow: visible;
   }
 
   .panel-section {
@@ -907,14 +1010,25 @@ onMounted(() => {
 @media (max-width: 768px) {
   .stock-detail-page {
     padding: 16px;
+    gap: 16px;
   }
 
   .page-header {
     flex-direction: column;
-    gap: 16px;
+    align-items: flex-start;
+    gap: 10px;
   }
 
   .price-info {
+    align-items: baseline;
+  }
+
+  .chart-mode-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .chart-mode-copy {
     text-align: left;
   }
 
@@ -937,6 +1051,24 @@ onMounted(() => {
 
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .stock-title-row h1 {
+    font-size: 18px;
+  }
+
+  .price-info {
+    gap: 8px;
+
+    .current-price {
+      font-size: 20px;
+    }
+
+    .price-change {
+      font-size: 12px;
+    }
   }
 }
 </style>
