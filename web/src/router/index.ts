@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { authApi } from '@/api'
+import { getPreferredHomePath } from '@/composables/useUserPreferences'
 
 const routes = [
   {
@@ -9,10 +10,22 @@ const routes = [
     meta: { title: '登录', public: true }
   },
   {
+    path: '/home',
+    name: 'Home',
+    redirect: () => getPreferredHomePath(),
+    meta: { title: '首页' }
+  },
+  {
     path: '/',
     name: 'Dashboard',
     component: () => import('@/views/Dashboard.vue'),
     meta: { title: '仪表盘' }
+  },
+  {
+    path: '/workspace',
+    name: 'Workspace',
+    component: () => import('@/views/Workspace.vue'),
+    meta: { title: 'TradingView 工作台', hideSidebar: true }
   },
   {
     path: '/stocks',
@@ -72,7 +85,7 @@ router.beforeEach((to, _from, next) => {
   if (!isPublic && !isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
   } else if (to.name === 'Login' && isAuthenticated) {
-    next({ name: 'Dashboard' })
+    next(getPreferredHomePath())
   } else {
     next()
   }

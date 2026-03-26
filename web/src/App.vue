@@ -4,9 +4,9 @@
       <AppHeader @refresh="handleRefresh" @settings="openSettings" />
 
       <div class="app-content">
-        <AppSidebar />
+        <AppSidebar v-if="showSidebar" />
 
-        <main class="main-viewport">
+        <main class="main-viewport" :class="{ 'workspace-viewport': !showSidebar }">
           <router-view v-slot="{ Component }">
             <transition name="fade" mode="out-in">
               <component :is="Component" />
@@ -32,6 +32,7 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 import LoadingOverlay from '@/components/common/LoadingOverlay.vue'
 import NotificationContainer from '@/components/common/NotificationContainer.vue'
 import { authApi } from '@/api'
+import { loadUserPreferences } from '@/composables/useUserPreferences'
 
 const router = useRouter()
 const route = useRoute()
@@ -41,6 +42,7 @@ const notificationRef = ref<InstanceType<typeof NotificationContainer> | null>(n
 
 const isAuthenticated = computed(() => authApi.isAuthenticated())
 const isLoginPage = computed(() => route.path === '/login')
+const showSidebar = computed(() => !route.meta.hideSidebar)
 
 const handleRefresh = () => {
   if (notificationRef.value) {
@@ -48,7 +50,9 @@ const handleRefresh = () => {
   }
 }
 
-const openSettings = () => {}
+const openSettings = () => {
+  router.push('/settings')
+}
 
 const handleLogout = () => {
   authApi.removeToken()
@@ -68,6 +72,7 @@ onMounted(async () => {
   if (authApi.isAuthenticated()) {
     try {
       await authApi.getMe()
+      await loadUserPreferences(true)
     } catch (e) {
       authApi.removeToken()
     }
@@ -77,19 +82,29 @@ onMounted(async () => {
 
 <style scoped lang="scss">
 .app-container {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   background: #0d0d0d;
+  overflow: hidden;
 }
 
 .app-content {
   display: flex;
-  min-height: calc(100vh - 60px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .main-viewport {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   background: #0d0d0d;
+}
+
+.workspace-viewport {
+  width: 100%;
 }
 
 .fade-enter-active,

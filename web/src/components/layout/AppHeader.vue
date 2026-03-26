@@ -1,7 +1,7 @@
 <template>
   <header class="app-header">
     <div class="header-left">
-      <router-link to="/" class="logo">
+      <router-link :to="preferences.defaultHome" class="logo">
         <svg class="logo-icon" viewBox="0 0 32 32" fill="none">
           <path
             d="M16 2L4 8V24L16 30L28 24V8L16 2Z"
@@ -32,6 +32,14 @@
         >
           <span class="nav-icon">📊</span>
           <span>{{ t("nav_dashboard") }}</span>
+        </router-link>
+        <router-link
+          to="/workspace"
+          class="nav-item"
+          :class="{ active: $route.path.startsWith('/workspace') }"
+        >
+          <span class="nav-icon">🖥️</span>
+          <span>{{ t('nav_workspace') }}</span>
         </router-link>
         <router-link
           to="/stocks"
@@ -161,6 +169,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import { useLocale } from "@/composables/useLocale";
 import { authApi } from "@/api";
+import { useUserPreferences } from "@/composables/useUserPreferences";
 
 const router = useRouter();
 const emit = defineEmits<{
@@ -172,6 +181,7 @@ const marketOpen = ref(false);
 const showUserMenu = ref(false);
 const { t, toggleLocale } = useLocale();
 const currentUser = ref<any>(null);
+const { preferences, loadUserPreferences } = useUserPreferences();
 const appVersion = __APP_VERSION__;
 const appGitSha = __APP_GIT_SHA__;
 
@@ -210,6 +220,7 @@ let intervalId: number | null = null;
 onMounted(async () => {
   checkMarketStatus();
   intervalId = window.setInterval(checkMarketStatus, 60000);
+  await loadUserPreferences(true);
 
   if (authApi.isAuthenticated()) {
     try {
