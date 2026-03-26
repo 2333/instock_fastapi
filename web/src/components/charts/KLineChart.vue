@@ -96,20 +96,20 @@ const activeIndicators = ref<string[]>([])
 const noDataText = ref('')
 const hintText = ref('')
 
-const periods = [
-  { label: '1分', value: '1min' },
-  { label: '5分', value: '5min' },
-  { label: '15分', value: '15min' },
-  { label: '日', value: 'day' },
-  { label: '周', value: 'week' },
-  { label: '月', value: 'month' },
-]
+const periods = computed(() => [
+  { label: t('period_1min'), value: '1min' },
+  { label: t('period_5min'), value: '5min' },
+  { label: t('period_15min'), value: '15min' },
+  { label: t('period_day'), value: 'day' },
+  { label: t('period_week'), value: 'week' },
+  { label: t('period_month'), value: 'month' },
+])
 
-const adjustTypes = [
-  { label: '不复权', value: 'bfq' },
-  { label: '前复权', value: 'qfq' },
-  { label: '后复权', value: 'hfq' },
-]
+const adjustTypes = computed(() => [
+  { label: t('adjust_bfq'), value: 'bfq' },
+  { label: t('adjust_qfq'), value: 'qfq' },
+  { label: t('adjust_hfq'), value: 'hfq' },
+])
 
 const availableIndicators = [
   { key: 'ma', label: 'MA' },
@@ -121,6 +121,9 @@ const availableIndicators = [
 ]
 
 const chartTitle = computed(() => props.title || t('kline_default_title'))
+const getPeriodLabel = (value: string) => {
+  return periods.value.find((period) => period.value === value)?.label || value
+}
 
 const currentPrice = computed(() => {
   if (!displayData.value || displayData.value.length === 0) return null
@@ -284,11 +287,11 @@ const displayData = computed(() => {
   const raw = props.data || []
   if (raw.length === 0) {
     const adjustLabelMap: Record<string, string> = {
-      bfq: '不复权',
-      qfq: '前复权',
-      hfq: '后复权',
+      bfq: t('adjust_bfq'),
+      qfq: t('adjust_qfq'),
+      hfq: t('adjust_hfq'),
     }
-    noDataText.value = `暂无${adjustLabelMap[selectedAdjust.value] || ''}K线数据`
+    noDataText.value = `${t('no_data_prefix')}${adjustLabelMap[selectedAdjust.value] || ''}${t('no_data_suffix')}`
     return []
   }
 
@@ -298,7 +301,7 @@ const displayData = computed(() => {
   if (selectedPeriod.value === 'week') return aggregateBars(raw, 'week')
   if (selectedPeriod.value === 'month') return aggregateBars(raw, 'month')
 
-  noDataText.value = `暂无${selectedPeriod.value}级别数据`
+  noDataText.value = `${t('no_data_prefix')} ${getPeriodLabel(selectedPeriod.value)} ${t('no_period_data_suffix')}`
   return []
 })
 
@@ -309,7 +312,7 @@ const unsupportedIndicators = computed(() =>
 watch([unsupportedIndicators, () => props.externalHint], () => {
   const hints: string[] = []
   if (unsupportedIndicators.value.length > 0) {
-    hints.push(`${unsupportedIndicators.value.map((x) => x.toUpperCase()).join('/')} 暂未接入`)
+    hints.push(`${unsupportedIndicators.value.map((x) => x.toUpperCase()).join('/')} ${t('hint_not_available')}`)
   }
   if (props.externalHint) {
     hints.push(props.externalHint)
@@ -554,14 +557,18 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .kline-chart {
   position: relative;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  min-height: 400px;
+  min-height: 0;
 }
 
 .chart-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   padding: 12px 16px;
   background: rgba(26, 26, 26, 0.5);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -570,7 +577,9 @@ onUnmounted(() => {
 .chart-title {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  min-width: 0;
 
   h3 {
     margin: 0;
@@ -597,13 +606,18 @@ onUnmounted(() => {
 .chart-controls {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 1;
+  flex-wrap: wrap;
   gap: 16px;
+  min-width: 0;
 }
 
 .period-selector,
 .adjust-selector,
 .indicator-toggles {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
@@ -637,8 +651,8 @@ onUnmounted(() => {
 }
 
 .chart-container {
-  height: calc(100% - 52px);
-  min-height: 348px;
+  flex: 1;
+  min-height: 260px;
 }
 
 .chart-hint {
@@ -683,5 +697,19 @@ onUnmounted(() => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 960px) {
+  .chart-controls {
+    justify-content: flex-start;
+  }
+
+  .current-price {
+    font-size: 18px;
+  }
+
+  .chart-container {
+    min-height: 220px;
+  }
 }
 </style>

@@ -2,23 +2,23 @@
   <div class="stock-detail-page">
     <div v-if="loading" class="loading-state">
       <div class="spinner"></div>
-      <p>加载中...</p>
+      <p>{{ t('stock_loading') }}</p>
     </div>
     
     <template v-else-if="stockInfo">
       <div class="page-header">
         <div class="stock-info">
-          <h1>{{ stockInfo.name }}</h1>
-          <div class="stock-meta">
+          <div class="stock-title-row">
+            <h1>{{ stockInfo.name }}</h1>
             <span class="stock-code">{{ stockInfo.code }}</span>
             <span class="stock-market">{{ marketLabel }}</span>
           </div>
         </div>
-        <div class="price-info">
-          <div class="current-price" :class="change >= 0 ? 'price-up' : 'price-down'">
+        <div class="price-info" :class="change >= 0 ? 'price-up' : 'price-down'">
+          <div class="current-price">
             {{ latestBar?.close?.toFixed(2) || '-' }}
           </div>
-          <div class="price-change" :class="change >= 0 ? 'price-up' : 'price-down'">
+          <div class="price-change">
             {{ formatChange(change) }}
             <span class="change-value">({{ changeValue >= 0 ? '+' : '' }}{{ changeValue.toFixed(2) }})</span>
           </div>
@@ -34,21 +34,21 @@
                 :class="{ active: activeChartMode === 'native' }"
                 @click="activeChartMode = 'native'"
               >
-                业务图表
+                {{ t('stock_chart_native') }}
               </button>
               <button
                 class="chart-mode-btn"
                 :class="{ active: activeChartMode === 'tradingview' }"
                 @click="activeChartMode = 'tradingview'"
               >
-                TradingView
+                {{ t('stock_chart_tv') }}
               </button>
             </div>
             <p class="chart-mode-copy">
               {{
                 activeChartMode === 'native'
-                  ? '使用站内行情、复权与现有指标逻辑。'
-                  : '使用 TradingView 内置行情与指标，作为补充分析视图。'
+                  ? t('stock_chart_native_desc')
+                  : t('stock_chart_tv_desc')
               }}
             </p>
           </div>
@@ -72,61 +72,61 @@
 
         <aside class="side-panel">
           <div class="panel-section">
-            <h3>股票概况</h3>
+            <h3>{{ t('stock_profile') }}</h3>
             <div class="profile-grid">
               <div class="profile-item">
-                <span class="label">开盘价</span>
+                <span class="label">{{ t('stock_open') }}</span>
                 <span class="value">{{ latestBar?.open?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">最高价</span>
+                <span class="label">{{ t('stock_high') }}</span>
                 <span class="value">{{ latestBar?.high?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">最低价</span>
+                <span class="label">{{ t('stock_low') }}</span>
                 <span class="value">{{ latestBar?.low?.toFixed(2) || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">成交量</span>
+                <span class="label">{{ t('label_volume') }}</span>
                 <span class="value">{{ formatVolume(latestBar?.vol) }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">成交额</span>
+                <span class="label">{{ t('stock_turnover') }}</span>
                 <span class="value">{{ formatTurnover(latestBar?.amount) }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">所属行业</span>
+                <span class="label">{{ t('stock_industry') }}</span>
                 <span class="value">{{ stockInfo.industry || '-' }}</span>
               </div>
               <div class="profile-item">
-                <span class="label">上市日期</span>
+                <span class="label">{{ t('stock_list_date') }}</span>
                 <span class="value">{{ stockInfo.list_date || '-' }}</span>
               </div>
             </div>
           </div>
 
           <div class="panel-section">
-            <h3>快速操作</h3>
+            <h3>{{ t('stock_actions') }}</h3>
             <div class="action-buttons">
               <button class="action-btn primary" @click="goBacktest">
                 <span class="btn-icon">⚡</span>
-                <span>回测策略</span>
+                <span>{{ t('stock_backtest') }}</span>
               </button>
               <button class="action-btn" @click="addToWatchlist">
                 <span class="btn-icon">⭐</span>
-                <span>{{ inWatchlist ? '取消关注' : '添加到关注' }}</span>
+                <span>{{ inWatchlist ? t('stock_watch_remove') : t('stock_watch_add') }}</span>
               </button>
               <button class="action-btn" @click="analyzePatterns">
                 <span class="btn-icon">🔍</span>
-                <span>分析形态</span>
+                <span>{{ t('stock_analyze_patterns') }}</span>
               </button>
             </div>
           </div>
 
           <div class="panel-section">
-            <h3>相关形态</h3>
+            <h3>{{ t('stock_related_patterns') }}</h3>
             <p v-if="activeChartMode === 'tradingview'" class="pattern-note">
-              列表仍来自站内形态识别；TradingView 视图不会直接显示这些业务标记。
+              {{ t('stock_tv_pattern_note') }}
             </p>
             <div v-if="patterns.length > 0" class="pattern-list">
               <div 
@@ -144,7 +144,7 @@
               </div>
             </div>
             <div v-else class="empty-state">
-              暂无形态数据
+              {{ t('stock_no_patterns') }}
             </div>
           </div>
         </aside>
@@ -152,7 +152,7 @@
     </template>
     
     <div v-else class="error-state">
-      <p>未找到股票信息</p>
+      <p>{{ t('stock_not_found') }}</p>
     </div>
   </div>
 </template>
@@ -163,6 +163,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { stockApi, patternApi, attentionApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
 import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
+import { useLocale } from '@/composables/useLocale'
+import { getPatternLabel as resolvePatternLabel } from '@/utils/patternLabels'
 
 interface KlineData {
   date: string
@@ -186,6 +188,7 @@ interface BarData {
 
 const route = useRoute()
 const router = useRouter()
+const { locale, t } = useLocale()
 const loading = ref(false)
 const inWatchlist = ref(false)
 const activeChartMode = ref<'native' | 'tradingview'>('native')
@@ -194,15 +197,15 @@ const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
 const patterns = ref<any[]>([])
 const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
-const chartHint = ref('')
+const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
 const marketLabel = computed(() => {
   const exchange = String(stockInfo.value?.exchange || '').toUpperCase()
-  if (exchange === 'SSE' || exchange === 'SH') return '上海'
-  if (exchange === 'SZSE' || exchange === 'SZ') return '深圳'
-  if (exchange === 'BSE' || exchange === 'BJ') return '北交所'
+  if (exchange === 'SSE' || exchange === 'SH') return t('stock_market_sh')
+  if (exchange === 'SZSE' || exchange === 'SZ') return t('stock_market_sz')
+  if (exchange === 'BSE' || exchange === 'BJ') return t('stock_market_bj')
   return exchange || '-'
 })
 
@@ -231,6 +234,10 @@ const changeValue = computed(() => {
   return ((Number(latestBar.value.close) - Number(latestBar.value.open)) / Number(latestBar.value.open)) * 100
 })
 
+const chartHint = computed(() => {
+  return adjustFallbackActive.value ? t('stock_adjust_fallback') : ''
+})
+
 const formatVolume = (volume: number | undefined) => {
   if (!volume) return '-'
   if (volume >= 1000000) return (volume / 1000000).toFixed(2) + 'M'
@@ -251,15 +258,7 @@ const formatChange = (val: number) => {
 }
 
 const getPatternLabel = (name: string) => {
-  const labels: Record<string, string> = {
-    'MORNING_STAR': '晨星',
-    'EVENING_STAR': '夜星',
-    'BREAKTHROUGH_HIGH': '突破高点',
-    'BREAKDOWN_LOW': '跌破低点',
-    'CONTINUOUS_RISE': '连续上涨',
-    'CONTINUOUS_FALL': '连续下跌',
-  }
-  return labels[name] || name
+  return resolvePatternLabel(name, locale.value)
 }
 
 const fetchStockDetail = async (
@@ -281,10 +280,7 @@ const fetchStockDetail = async (
     const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
     
     stockInfo.value = stockData
-    chartHint.value =
-      stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
-        ? '当前复权数据暂不可用，已自动回退为不复权数据'
-        : ''
+    adjustFallbackActive.value = stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
     
     patterns.value = (patternsData || []).map((p: any) => ({
       ...p,
@@ -383,10 +379,14 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .stock-detail-page {
+  box-sizing: border-box;
   padding: 24px;
-  height: calc(100vh - 60px);
-  display: flex;
-  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
 }
 
 .loading-state,
@@ -419,45 +419,65 @@ onMounted(() => {
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
+  align-items: center;
+  min-height: 0;
 }
 
 .stock-info {
+  min-width: 0;
+}
+
+.stock-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+
   h1 {
     margin: 0;
-    font-size: 28px;
+    font-size: 20px;
     font-weight: 600;
+    line-height: 1.2;
   }
 }
 
-.stock-meta {
-  display: flex;
-  gap: 12px;
-  margin-top: 8px;
-  
-  .stock-code {
-    font-family: 'JetBrains Mono', monospace;
-    color: rgba(255, 255, 255, 0.7);
-  }
-  
-  .stock-market {
-    color: rgba(255, 255, 255, 0.5);
-  }
+.stock-code,
+.stock-market {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.stock-code {
+  font-family: 'JetBrains Mono', monospace;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.stock-market {
+  color: rgba(255, 255, 255, 0.56);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .price-info {
-  text-align: right;
-  
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+
   .current-price {
-    font-size: 36px;
+    font-size: 24px;
     font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
   }
   
   .price-change {
-    font-size: 16px;
-    margin-top: 4px;
+    font-size: 13px;
+    white-space: nowrap;
   }
 }
 
@@ -476,17 +496,20 @@ onMounted(() => {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 1fr 320px;
-  gap: 24px;
-  flex: 1;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .main-chart {
+  display: flex;
+  flex-direction: column;
   background: rgba(26, 26, 26, 0.5);
   border-radius: 12px;
   overflow: hidden;
   min-width: 0;
+  min-height: 0;
 }
 
 .chart-mode-bar {
@@ -538,6 +561,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .panel-section {
@@ -657,13 +682,21 @@ onMounted(() => {
 }
 
 @media (max-width: 1200px) {
+  .stock-detail-page {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
   .content-grid {
     grid-template-columns: 1fr;
+    overflow: visible;
   }
   
   .side-panel {
     flex-direction: row;
     flex-wrap: wrap;
+    overflow: visible;
   }
   
   .panel-section {
@@ -675,17 +708,17 @@ onMounted(() => {
 @media (max-width: 768px) {
   .stock-detail-page {
     padding: 16px;
-    height: auto;
-    min-height: calc(100vh - 60px);
+    gap: 16px;
   }
   
   .page-header {
     flex-direction: column;
-    gap: 16px;
+    align-items: flex-start;
+    gap: 10px;
   }
   
   .price-info {
-    text-align: left;
+    align-items: baseline;
   }
 
   .chart-mode-bar {
@@ -719,21 +752,20 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
-  .page-header h1 {
-    font-size: 22px;
+  .stock-title-row h1 {
+    font-size: 18px;
   }
-  
-  .stock-meta {
-    flex-direction: column;
-    gap: 4px;
-  }
-  
-  .current-price {
-    font-size: 24px;
-  }
-  
-  .price-change {
-    font-size: 14px;
+
+  .price-info {
+    gap: 8px;
+
+    .current-price {
+      font-size: 20px;
+    }
+
+    .price-change {
+      font-size: 12px;
+    }
   }
 }
 </style>

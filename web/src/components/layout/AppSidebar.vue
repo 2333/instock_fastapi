@@ -10,7 +10,7 @@
 
     <nav class="sidebar-nav">
       <div class="nav-section">
-        <span v-if="!collapsed" class="nav-section-title">自选股</span>
+        <span v-if="!collapsed" class="nav-section-title">{{ t('sidebar_watchlist') }}</span>
         <ul class="nav-list">
           <li v-for="stock in watchlist" :key="stock.code" class="nav-item">
             <router-link :to="`/stock/${stock.code}`" class="nav-link">
@@ -20,12 +20,12 @@
               </div>
             </router-link>
           </li>
-          <li v-if="!watchlist.length && !collapsed" class="nav-item nav-empty">暂无关注股票</li>
+          <li v-if="!watchlist.length && !collapsed" class="nav-item nav-empty">{{ t('sidebar_watchlist_empty') }}</li>
         </ul>
       </div>
 
       <div class="nav-section">
-        <span v-if="!collapsed" class="nav-section-title">快捷操作</span>
+        <span v-if="!collapsed" class="nav-section-title">{{ t('sidebar_quick_actions') }}</span>
         <ul class="nav-list">
           <li class="nav-item">
             <button class="nav-btn" @click="showAddStock = true">
@@ -33,7 +33,7 @@
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              <span v-if="!collapsed">添加股票</span>
+              <span v-if="!collapsed">{{ t('sidebar_add_stock') }}</span>
             </button>
           </li>
           <li class="nav-item">
@@ -42,7 +42,7 @@
                 <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
                 <path d="M21 3v5h-5" />
               </svg>
-              <span v-if="!collapsed">刷新全部</span>
+              <span v-if="!collapsed">{{ t('sidebar_refresh_all') }}</span>
             </button>
           </li>
         </ul>
@@ -53,18 +53,18 @@
       <div v-if="showAddStock" class="modal-overlay" @click.self="showAddStock = false">
         <div class="modal">
           <div class="modal-header">
-            <h3>添加自选股</h3>
+            <h3>{{ t('sidebar_add_watchlist') }}</h3>
             <button class="close-btn" @click="showAddStock = false">×</button>
           </div>
           <div class="modal-body">
             <input 
               v-model="newStockCode" 
               type="text" 
-              placeholder="输入股票代码 (例如: 600519)"
+              :placeholder="t('sidebar_add_placeholder')"
               class="stock-input"
               @keyup.enter="addStock"
             />
-            <button class="btn btn-primary" @click="addStock">添加</button>
+            <button class="btn btn-primary" @click="addStock">{{ t('sidebar_add_submit') }}</button>
           </div>
         </div>
       </div>
@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { inject, onMounted, ref } from 'vue'
 import { attentionApi } from '@/api'
+import { useLocale } from '@/composables/useLocale'
 
 interface StockItem {
   code: string
@@ -86,6 +87,7 @@ const showAddStock = ref(false)
 const newStockCode = ref('')
 const watchlist = ref<StockItem[]>([])
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+const { t } = useLocale()
 
 const toggleCollapse = () => {
   collapsed.value = !collapsed.value
@@ -93,7 +95,7 @@ const toggleCollapse = () => {
 
 const refreshAll = async () => {
   await loadWatchlist()
-  showNotification?.('success', '关注列表已刷新')
+  showNotification?.('success', t('sidebar_watchlist_refreshed'))
 }
 
 const normalizeCode = (item: any): string => {
@@ -118,7 +120,7 @@ const loadWatchlist = async () => {
       .filter((x: StockItem) => !!x.code)
   } catch (e) {
     watchlist.value = []
-    showNotification?.('error', '加载关注列表失败')
+    showNotification?.('error', t('sidebar_load_failed'))
   }
 }
 
@@ -128,11 +130,11 @@ const addStock = async () => {
   try {
     await attentionApi.add(code)
     await loadWatchlist()
-    showNotification?.('success', `已添加 ${code} 到关注列表`)
+    showNotification?.('success', `${t('sidebar_added_prefix')} ${code} ${t('sidebar_added_suffix')}`)
     newStockCode.value = ''
     showAddStock.value = false
   } catch (e: any) {
-    showNotification?.('error', e?.message || '添加关注失败')
+    showNotification?.('error', e?.message || t('sidebar_add_failed'))
   }
 }
 
@@ -144,7 +146,8 @@ onMounted(() => {
 <style scoped lang="scss">
 .app-sidebar {
   width: 280px;
-  height: calc(100vh - 60px);
+  height: 100%;
+  min-height: 0;
   background: rgba(26, 26, 26, 0.98);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;

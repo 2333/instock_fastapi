@@ -2,12 +2,12 @@
   <div class="tradingview-widget-shell" :class="{ workspace: isWorkspace, compact: !isWorkspace }">
     <div v-if="tvSymbol" ref="widgetHost" class="widget-host"></div>
     <div v-else class="widget-empty">
-      当前股票暂未映射到 TradingView 代码，无法展示高级分析视图。
+      {{ t('tv_no_symbol') }}
     </div>
 
     <div v-if="showFooter" class="widget-footer">
       <span>
-        行情与内置指标由 TradingView 提供，和站内复权与形态识别独立。
+        {{ t('tv_footer_prefix') }}
         {{ dataLevelNote }}
       </span>
       <a
@@ -16,7 +16,7 @@
         target="_blank"
         rel="noopener noreferrer nofollow"
       >
-        打开完整图表
+        {{ t('tv_open_full_chart') }}
       </a>
     </div>
   </div>
@@ -24,6 +24,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useLocale } from '@/composables/useLocale'
 
 interface Props {
   code: string
@@ -42,6 +43,7 @@ const props = withDefaults(defineProps<Props>(), {
   showFooter: true,
 })
 
+const { locale, t } = useLocale()
 const widgetHost = ref<HTMLDivElement>()
 let widgetScript: HTMLScriptElement | null = null
 const isCompact = ref(false)
@@ -68,10 +70,10 @@ const symbolPageHref = computed(() => {
 
 const dataLevelNote = computed(() => {
   if (tradingViewExchange.value === 'SSE' || tradingViewExchange.value === 'SZSE') {
-    return '当前 A 股 widget 数据级别以日线为主，小时/分钟级别通常不可用。'
+    return t('tv_data_level_a_share')
   }
   if (tradingViewExchange.value === 'BSE') {
-    return '北交所符号在 TradingView widget 中的覆盖度需要逐个标的验证。'
+    return t('tv_data_level_bj')
   }
   return ''
 })
@@ -84,8 +86,7 @@ const refreshCompactMode = () => {
     isCompact.value = false
     return
   }
-  const width = widgetHost.value?.clientWidth ?? window.innerWidth
-  isCompact.value = width < 960
+  isCompact.value = window.innerWidth < 1200
 }
 
 const cleanupWidget = () => {
@@ -144,11 +145,11 @@ const mountWidget = () => {
     timezone: 'Asia/Shanghai',
     theme: props.theme,
     style: '1',
-    locale: 'zh_CN',
+    locale: locale.value === 'en' ? 'en' : 'zh_CN',
     allow_symbol_change: isWorkspace.value,
     withdateranges: isWorkspace.value,
     details: isWorkspace.value,
-    hide_side_toolbar: !isWorkspace.value || isCompact.value,
+    hide_side_toolbar: isCompact.value,
     hide_top_toolbar: !isWorkspace.value,
     calendar: false,
     support_host: 'https://www.tradingview.com',
@@ -161,7 +162,7 @@ const mountWidget = () => {
 }
 
 watch(
-  () => [tvSymbol.value, props.theme, props.interval, props.mode, isCompact.value],
+  () => [tvSymbol.value, props.theme, props.interval, props.mode, isCompact.value, locale.value],
   () => {
     mountWidget()
   }
@@ -184,12 +185,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-height: 400px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .widget-host {
   flex: 1;
-  min-height: min(520px, calc(100vh - 280px));
+  min-height: 0;
   width: 100%;
   min-width: 0;
 }
@@ -199,7 +201,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   flex: 1;
-  min-height: min(520px, calc(100vh - 280px));
+  min-height: 0;
   padding: 24px;
   color: rgba(255, 255, 255, 0.52);
   text-align: center;
@@ -237,11 +239,6 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .widget-host,
-  .widget-empty {
-    min-height: min(440px, calc(100vh - 240px));
-  }
-
   .widget-footer {
     flex-direction: column;
   }

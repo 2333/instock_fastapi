@@ -82,17 +82,23 @@ onMounted(async () => {
 
 <style scoped lang="scss">
 .app-container {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   background: #0d0d0d;
+  overflow: hidden;
 }
 
 .app-content {
   display: flex;
-  min-height: calc(100vh - 60px);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .main-viewport {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   background: #0d0d0d;
 }
