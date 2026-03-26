@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
+from app.jobs.market_calendar import is_trading_day, should_skip_market_task
 from app.models.stock_model import DailyBar, Indicator
 
 logger = logging.getLogger(__name__)
@@ -253,6 +254,8 @@ async def run():
     logger.info(f"执行指标计算任务: {datetime.now()}")
 
     try:
+        if should_skip_market_task("指标计算任务", today_is_trading_day=await is_trading_day()):
+            return
         async with async_session_factory() as session:
             result = await session.execute(
                 select(DailyBar.trade_date)

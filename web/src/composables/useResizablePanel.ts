@@ -3,7 +3,8 @@ import { onBeforeUnmount, ref, type Ref } from 'vue'
 interface UseResizablePanelOptions {
   panelRef: Ref<HTMLElement | null>
   storageKey: string
-  defaultWidth: number
+  defaultWidth?: number
+  initialWidth?: number
   minWidth: number
   maxWidth: number
   disabledBreakpoint?: number
@@ -11,33 +12,37 @@ interface UseResizablePanelOptions {
 
 type ResizeEvent = MouseEvent | TouchEvent
 
+const clampWidth = (width: number, minWidth: number, maxWidth: number) =>
+  Math.min(maxWidth, Math.max(minWidth, width))
+
 export const useResizablePanel = ({
   panelRef,
   storageKey,
   defaultWidth,
+  initialWidth,
   minWidth,
   maxWidth,
   disabledBreakpoint = 1200,
 }: UseResizablePanelOptions) => {
-  const panelWidth = ref(defaultWidth)
+  const panelWidth = ref(defaultWidth ?? initialWidth ?? minWidth)
   let cleanupResize: (() => void) | null = null
 
-  const clampWidth = (width: number) => Math.min(maxWidth, Math.max(minWidth, width))
-
   const persistWidth = (width = panelWidth.value) => {
-    const normalized = clampWidth(width)
+    if (typeof window === 'undefined') return
+    const normalized = clampWidth(width, minWidth, maxWidth)
     panelWidth.value = normalized
     window.localStorage.setItem(storageKey, String(normalized))
   }
 
   const hydrateWidth = () => {
+    if (typeof window === 'undefined') return
     const savedWidth = Number(window.localStorage.getItem(storageKey) || 0)
     if (Number.isFinite(savedWidth) && savedWidth >= minWidth && savedWidth <= maxWidth) {
       panelWidth.value = savedWidth
     }
   }
 
-  const isResizeDisabled = () => window.innerWidth <= disabledBreakpoint
+  const isResizeDisabled = () => typeof window !== 'undefined' && window.innerWidth <= disabledBreakpoint
 
   const readClientX = (event: ResizeEvent) => {
     if ('touches' in event) {
@@ -52,7 +57,7 @@ export const useResizablePanel = ({
   }
 
   const startResize = (event: ResizeEvent) => {
-    if (isResizeDisabled() || !panelRef.value) return
+    if (typeof window === 'undefined' || isResizeDisabled() || !panelRef.value) return
 
     event.preventDefault()
     stopResize()
@@ -63,7 +68,7 @@ export const useResizablePanel = ({
     const previousUserSelect = body.style.userSelect
 
     const updateWidth = (clientX: number) => {
-      panelWidth.value = clampWidth(clientX - panelLeft)
+      panelWidth.value = clampWidth(clientX - panelLeft, minWidth, maxWidth)
     }
 
     const handleMove = (moveEvent: ResizeEvent) => {

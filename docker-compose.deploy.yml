@@ -37,11 +37,6 @@ services:
 
   app:
     image: ${IMAGE_NAMESPACE:-instock}/instock-app:${APP_VERSION:-dev}
-    build:
-      context: .
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
-        APP_GIT_SHA: ${APP_GIT_SHA:-local}
     container_name: instock_app
     env_file:
       - ${ENV_FILE:-.env}
@@ -66,10 +61,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./app:/app/app
-      - ./core:/app/core
-      - ./scripts:/app/scripts
-      - ./config:/app/config
       - app_logs:/app/logs
     restart: unless-stopped
     networks:
@@ -83,15 +74,7 @@ services:
 
   frontend:
     image: ${IMAGE_NAMESPACE:-instock}/instock-frontend:${APP_VERSION:-dev}
-    build:
-      context: ./web
-      dockerfile: Dockerfile
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
-        APP_GIT_SHA: ${APP_GIT_SHA:-local}
     container_name: instock_frontend
-    environment:
-      - VITE_API_URL=http://localhost:8000
     ports:
       - "3001:80"
     depends_on:

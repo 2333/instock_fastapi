@@ -10,8 +10,8 @@
       </div>
       <div class="chart-controls">
         <div class="period-selector">
-          <button 
-            v-for="period in periods" 
+          <button
+            v-for="period in periods"
             :key="period.value"
             class="period-btn"
             :class="{ active: selectedPeriod === period.value }"
@@ -21,8 +21,8 @@
           </button>
         </div>
         <div class="adjust-selector">
-          <button 
-            v-for="adjust in adjustTypes" 
+          <button
+            v-for="adjust in adjustTypes"
             :key="adjust.value"
             class="adjust-btn"
             :class="{ active: selectedAdjust === adjust.value }"
@@ -32,7 +32,7 @@
           </button>
         </div>
         <div class="indicator-toggles">
-          <button 
+          <button
             v-for="indicator in availableIndicators"
             :key="indicator.key"
             class="indicator-btn"
@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, shallowRef } from 'vue'
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import { useLocale } from '@/composables/useLocale'
 
@@ -68,6 +68,20 @@ interface KlineData {
   amount?: number
 }
 
+interface PatternMark {
+  key: string
+  name: string
+  date: string
+  confidence?: number
+  signal?: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
+}
+
+interface HighlightRange {
+  start: string
+  end: string
+  label?: string
+}
+
 interface Props {
   title?: string
   data?: KlineData[]
@@ -76,6 +90,10 @@ interface Props {
   showPatternMarks?: boolean
   adjust?: 'bfq' | 'qfq' | 'hfq'
   externalHint?: string
+  patternMarks?: PatternMark[]
+  highlightedPatternKey?: string
+  highlightRange?: HighlightRange | null
+  focusRangeRequestId?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -85,7 +103,18 @@ const props = withDefaults(defineProps<Props>(), {
   showPatternMarks: true,
   adjust: 'bfq',
   externalHint: '',
+  patternMarks: () => [],
+  highlightedPatternKey: '',
+  highlightRange: null,
+  focusRangeRequestId: 0,
 })
+
+const emit = defineEmits<{
+  (e: 'periodChange', value: string): void
+  (e: 'adjustChange', value: string): void
+  (e: 'click', data: KlineData): void
+}>()
+
 const { t } = useLocale()
 
 const chartRef = ref<HTMLDivElement>()
@@ -120,22 +149,298 @@ const availableIndicators = [
   { key: 'boll', label: 'BOLL' },
 ]
 
+const parseDateValue = (value?: string | null): Date => {
+  if (!value) return new Date(NaN)
+  if (value.includes('-')) return new Date(`${value}T00:00:00`)
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(4, 6)) - 1
+  const day = Number(value.slice(6, 8))
+  return new Date(year, month, day)
+}
+
+const formatDate = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const formatAxisDate = (value: string) => {
+  if (!value) return ''
+  const normalized = value.includes('-') ? value : formatDate(parseDateValue(value))
+  return normalized.slice(5)
+}
+
+const getWeekKey = (date: Date) => {
+  const copy = new Date(date)
+  const day = copy.getDay() || 7
+  copy.setDate(copy.getDate() + 4 - day)
+  const yearStart = new Date(copy.getFullYear(), 0, 1)
+  const week = Math.ceil((((copy.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+  return `${copy.getFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+const aggregateBars = (data: KlineData[], mode: 'week' | 'month') => {
+  const groups = new Map<string, KlineData[]>()
+  for (const item of data) {
+    const date = parseDateValue(item.date)
+    if (Number.isNaN(date.getTime())) continue
+    const key = mode === 'week'
+      ? getWeekKey(date)
+      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+
+  const result: KlineData[] = []
+  for (const [, items] of groups) {
+    if (items.length === 0) continue
+    const sorted = [...items].sort((a, b) => parseDateValue(a.date).getTime() - parseDateValue(b.date).getTime())
+    const first = sorted[0]
+    const last = sorted[sorted.length - 1]
+    result.push({
+      date: formatDate(parseDateValue(last.date)),
+      open: first.open,
+      high: Math.max(...sorted.map((item) => item.high)),
+      low: Math.min(...sorted.map((item) => item.low)),
+      close: last.close,
+      volume: sorted.reduce((sum, item) => sum + (item.volume || 0), 0),
+      amount: sorted.reduce((sum, item) => sum + (item.amount || 0), 0),
+    })
+  }
+  return result.sort((a, b) => parseDateValue(a.date).getTime() - parseDateValue(b.date).getTime())
+}
+
+const normalizedRawData = computed(() =>
+  (props.data || []).map((item) => ({
+    ...item,
+    date: formatDate(parseDateValue(item.date)),
+  }))
+)
+
+const displayData = computed(() => {
+  const raw = normalizedRawData.value
+  if (raw.length === 0) {
+    const adjustLabelMap: Record<string, string> = {
+      bfq: t('adjust_bfq'),
+      qfq: t('adjust_qfq'),
+      hfq: t('adjust_hfq'),
+    }
+    noDataText.value = `${t('no_data_prefix')}${adjustLabelMap[selectedAdjust.value] || ''}${t('no_data_suffix')}`
+    return []
+  }
+
+  noDataText.value = ''
+
+  if (selectedPeriod.value === 'day') return raw
+  if (selectedPeriod.value === 'week') return aggregateBars(raw, 'week')
+  if (selectedPeriod.value === 'month') return aggregateBars(raw, 'month')
+
+  noDataText.value = `${t('no_data_prefix')} ${getPeriodLabel(selectedPeriod.value)} ${t('no_period_data_suffix')}`
+  return []
+})
+
 const chartTitle = computed(() => props.title || t('kline_default_title'))
 const getPeriodLabel = (value: string) => {
   return periods.value.find((period) => period.value === value)?.label || value
 }
 
 const currentPrice = computed(() => {
-  if (!displayData.value || displayData.value.length === 0) return null
+  if (displayData.value.length === 0) return null
   return displayData.value[displayData.value.length - 1].close
 })
 
 const priceChange = computed(() => {
-  if (!displayData.value || displayData.value.length < 2) return 0
+  if (displayData.value.length < 2) return 0
   const current = displayData.value[displayData.value.length - 1].close
   const previous = displayData.value[displayData.value.length - 2].close
   return ((current - previous) / previous) * 100
 })
+
+const unsupportedIndicators = computed(() =>
+  activeIndicators.value.filter((key) => ['macd', 'kdj', 'rsi'].includes(key))
+)
+
+const effectiveIndicatorSet = computed(() =>
+  activeIndicators.value.filter((key) => !unsupportedIndicators.value.includes(key))
+)
+
+const resolvePatternDataIndex = (patternDate: string, data: KlineData[]) => {
+  const target = formatDate(parseDateValue(patternDate))
+  if (!target) return -1
+
+  if (selectedPeriod.value === 'day') {
+    return data.findIndex((item) => item.date === target)
+  }
+
+  const targetDate = parseDateValue(target)
+  const key = selectedPeriod.value === 'week'
+    ? getWeekKey(targetDate)
+    : `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`
+
+  return data.findIndex((item) => {
+    const itemDate = parseDateValue(item.date)
+    const itemKey = selectedPeriod.value === 'week'
+      ? getWeekKey(itemDate)
+      : `${itemDate.getFullYear()}-${String(itemDate.getMonth() + 1).padStart(2, '0')}`
+    return itemKey === key
+  })
+}
+
+const resolvedPatternMarks = computed(() => {
+  const signalColors: Record<string, string> = {
+    BULLISH: '#00C853',
+    BEARISH: '#FF1744',
+    NEUTRAL: '#FFD54F',
+  }
+
+  return (props.patternMarks || [])
+    .map((pattern) => {
+      const dataIndex = resolvePatternDataIndex(pattern.date, displayData.value)
+      if (dataIndex < 0) return null
+      const candle = displayData.value[dataIndex]
+      const isActive = pattern.key === props.highlightedPatternKey
+      return {
+        key: pattern.key,
+        dataIndex,
+        markPoint: {
+          coord: [candle.date, candle.high * 1.02],
+          value: pattern.name,
+          name: pattern.name,
+          itemStyle: {
+            color: isActive ? '#FFE082' : signalColors[pattern.signal || 'NEUTRAL'],
+            borderColor: isActive ? '#FFE082' : signalColors[pattern.signal || 'NEUTRAL'],
+          },
+          label: { show: false },
+          symbol: isActive ? 'diamond' : 'pin',
+          symbolSize: isActive ? 24 : 18,
+        },
+        meta: pattern,
+      }
+    })
+    .filter(Boolean) as Array<{
+      key: string
+      dataIndex: number
+      markPoint: Record<string, unknown>
+      meta: PatternMark
+    }>
+})
+
+const patternTooltipMap = computed(() => {
+  const map = new Map<string, PatternMark[]>()
+  for (const item of resolvedPatternMarks.value) {
+    const key = displayData.value[item.dataIndex]?.date
+    if (!key) continue
+    if (!map.has(key)) map.set(key, [])
+    map.get(key)!.push(item.meta)
+  }
+  return map
+})
+
+const getHighlightRangeBounds = () => {
+  if (!props.highlightRange || displayData.value.length === 0) return null
+
+  const startDate = parseDateValue(props.highlightRange.start)
+  const endDate = parseDateValue(props.highlightRange.end)
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null
+
+  let startIndex = -1
+  let endIndex = -1
+
+  displayData.value.forEach((item, index) => {
+    const itemDate = parseDateValue(item.date)
+    if (startIndex === -1 && itemDate.getTime() >= startDate.getTime()) {
+      startIndex = index
+    }
+    if (itemDate.getTime() <= endDate.getTime()) {
+      endIndex = index
+    }
+  })
+
+  if (startIndex === -1) startIndex = 0
+  if (endIndex === -1) endIndex = displayData.value.length - 1
+  if (endIndex < startIndex) endIndex = startIndex
+
+  return {
+    startIndex,
+    endIndex,
+    startLabel: displayData.value[startIndex]?.date,
+    endLabel: displayData.value[endIndex]?.date,
+  }
+}
+
+const calculateMA = (data: KlineData[], period: number): Array<number | null> => {
+  const result: Array<number | null> = []
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      result.push(null)
+    } else {
+      let sum = 0
+      for (let j = 0; j < period; j++) {
+        sum += data[i - j].close
+      }
+      result.push(sum / period)
+    }
+  }
+  return result
+}
+
+const calculateEMA = (data: KlineData[], period: number): Array<number | null> => {
+  const result: Array<number | null> = []
+  if (data.length === 0) return result
+
+  const multiplier = 2 / (period + 1)
+  let previousEma: number | null = null
+
+  for (let i = 0; i < data.length; i++) {
+    const close = data[i].close
+    if (i < period - 1) {
+      result.push(null)
+      continue
+    }
+    if (previousEma === null) {
+      const base = data.slice(i - period + 1, i + 1).reduce((sum, item) => sum + item.close, 0) / period
+      previousEma = base
+      result.push(base)
+      continue
+    }
+    const emaValue: number = (close - previousEma) * multiplier + previousEma
+    previousEma = emaValue
+    result.push(emaValue)
+  }
+
+  return result
+}
+
+const calculateBOLL = (
+  data: KlineData[],
+  period = 20,
+  stdMult = 2
+): { upper: Array<number | null>, mid: Array<number | null>, lower: Array<number | null> } => {
+  const upper: Array<number | null> = []
+  const mid: Array<number | null> = []
+  const lower: Array<number | null> = []
+
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      upper.push(null)
+      mid.push(null)
+      lower.push(null)
+    } else {
+      const sliced = data.slice(i - period + 1, i + 1)
+      const closes = sliced.map((item) => item.close)
+      const midValue = closes.reduce((sum, value) => sum + value, 0) / period
+      mid.push(midValue)
+
+      const variance = closes.reduce((sum, value) => sum + Math.pow(value - midValue, 2), 0) / period
+      const std = Math.sqrt(variance)
+      upper.push(midValue + stdMult * std)
+      lower.push(midValue - stdMult * std)
+    }
+  }
+
+  return { upper, mid, lower }
+}
 
 const setPeriod = (period: string) => {
   selectedPeriod.value = period
@@ -159,176 +464,37 @@ const toggleIndicator = (indicator: string) => {
   updateChart()
 }
 
-const calculateMA = (data: KlineData[], period: number): (number | null)[] => {
-  const result: (number | null)[] = []
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      result.push(null)
-    } else {
-      let sum = 0
-      for (let j = 0; j < period; j++) {
-        sum += data[i - j].close
-      }
-      result.push(sum / period)
-    }
+const syncHighlightTip = () => {
+  if (!chartInstance.value) return
+  if (!props.highlightedPatternKey) {
+    chartInstance.value.dispatchAction({ type: 'hideTip' })
+    return
   }
-  return result
+  const active = resolvedPatternMarks.value.find((item) => item.key === props.highlightedPatternKey)
+  if (!active) return
+  chartInstance.value.dispatchAction({
+    type: 'showTip',
+    seriesIndex: 0,
+    dataIndex: active.dataIndex,
+  })
 }
 
-const calculateEMA = (data: KlineData[], period: number): (number | null)[] => {
-  const result: (number | null)[] = []
-  if (data.length === 0) return result
-  const multiplier = 2 / (period + 1)
-  let prevEma: number | null = null
-
-  for (let i = 0; i < data.length; i++) {
-    const close = data[i].close
-    if (i < period - 1) {
-      result.push(null)
-      continue
-    }
-    if (prevEma === null) {
-      const base = data.slice(i - period + 1, i + 1).reduce((sum, item) => sum + item.close, 0) / period
-      prevEma = base
-      result.push(base)
-      continue
-    }
-    const emaValue: number = (close - prevEma) * multiplier + prevEma
-    prevEma = emaValue
-    result.push(emaValue)
-  }
-
-  return result
+const focusRange = () => {
+  if (!chartInstance.value) return
+  const bounds = getHighlightRangeBounds()
+  if (!bounds) return
+  const startIndex = Math.max(bounds.startIndex - 5, 0)
+  const endIndex = Math.min(bounds.endIndex + 5, displayData.value.length - 1)
+  chartInstance.value.dispatchAction({
+    type: 'dataZoom',
+    startValue: displayData.value[startIndex]?.date,
+    endValue: displayData.value[endIndex]?.date,
+  })
 }
-
-const calculateBOLL = (data: KlineData[], period = 20, stdMult = 2): { upper: (number | null)[], mid: (number | null)[], lower: (number | null)[] } => {
-  const upper: (number | null)[] = []
-  const mid: (number | null)[] = []
-  const lower: (number | null)[] = []
-  
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) {
-      upper.push(null)
-      mid.push(null)
-      lower.push(null)
-    } else {
-      const sliced = data.slice(i - period + 1, i + 1)
-      const closes = sliced.map(d => d.close)
-      const midValue = closes.reduce((a, b) => a + b, 0) / period
-      mid.push(midValue)
-      
-      const variance = closes.reduce((sum, val) => sum + Math.pow(val - midValue, 2), 0) / period
-      const std = Math.sqrt(variance)
-      
-      upper.push(midValue + stdMult * std)
-      lower.push(midValue - stdMult * std)
-    }
-  }
-  return { upper, mid, lower }
-}
-
-const parseDate = (value: string) => {
-  if (!value) return new Date(NaN)
-  if (value.includes('-')) return new Date(value)
-  const y = Number(value.slice(0, 4))
-  const m = Number(value.slice(4, 6)) - 1
-  const d = Number(value.slice(6, 8))
-  return new Date(y, m, d)
-}
-
-const formatDate = (date: Date) => {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
-const getWeekKey = (date: Date) => {
-  const copy = new Date(date)
-  const day = copy.getDay() || 7
-  copy.setDate(copy.getDate() + 4 - day)
-  const yearStart = new Date(copy.getFullYear(), 0, 1)
-  const week = Math.ceil((((copy.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
-  return `${copy.getFullYear()}-W${String(week).padStart(2, '0')}`
-}
-
-const aggregateBars = (data: KlineData[], mode: 'week' | 'month') => {
-  const groups = new Map<string, KlineData[]>()
-  for (const item of data) {
-    const dt = parseDate(item.date)
-    if (Number.isNaN(dt.getTime())) continue
-    const key = mode === 'week'
-      ? getWeekKey(dt)
-      : `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(item)
-  }
-
-  const result: KlineData[] = []
-  for (const [, items] of groups) {
-    if (items.length === 0) continue
-    const sorted = [...items].sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime())
-    const first = sorted[0]
-    const last = sorted[sorted.length - 1]
-    result.push({
-      date: formatDate(parseDate(last.date)),
-      open: first.open,
-      high: Math.max(...sorted.map((x) => x.high)),
-      low: Math.min(...sorted.map((x) => x.low)),
-      close: last.close,
-      volume: sorted.reduce((sum, x) => sum + (x.volume || 0), 0),
-      amount: sorted.reduce((sum, x) => sum + (x.amount || 0), 0),
-    })
-  }
-  return result.sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime())
-}
-
-const displayData = computed(() => {
-  const raw = props.data || []
-  if (raw.length === 0) {
-    const adjustLabelMap: Record<string, string> = {
-      bfq: t('adjust_bfq'),
-      qfq: t('adjust_qfq'),
-      hfq: t('adjust_hfq'),
-    }
-    noDataText.value = `${t('no_data_prefix')}${adjustLabelMap[selectedAdjust.value] || ''}${t('no_data_suffix')}`
-    return []
-  }
-
-  noDataText.value = ''
-
-  if (selectedPeriod.value === 'day') return raw
-  if (selectedPeriod.value === 'week') return aggregateBars(raw, 'week')
-  if (selectedPeriod.value === 'month') return aggregateBars(raw, 'month')
-
-  noDataText.value = `${t('no_data_prefix')} ${getPeriodLabel(selectedPeriod.value)} ${t('no_period_data_suffix')}`
-  return []
-})
-
-const unsupportedIndicators = computed(() =>
-  activeIndicators.value.filter((key) => ['macd', 'kdj', 'rsi'].includes(key))
-)
-
-watch([unsupportedIndicators, () => props.externalHint], () => {
-  const hints: string[] = []
-  if (unsupportedIndicators.value.length > 0) {
-    hints.push(`${unsupportedIndicators.value.map((x) => x.toUpperCase()).join('/')} ${t('hint_not_available')}`)
-  }
-  if (props.externalHint) {
-    hints.push(props.externalHint)
-  }
-  hintText.value = hints.join('；')
-}, { immediate: true })
-
-const effectiveIndicatorSet = computed(() =>
-  activeIndicators.value.filter((key) => !unsupportedIndicators.value.includes(key))
-)
-
 const initChart = async () => {
   if (!chartRef.value) return
 
   const echarts = await import('echarts')
-  
   chartInstance.value = echarts.init(chartRef.value, 'dark', {
     renderer: 'canvas',
     useDirtyRect: true,
@@ -349,21 +515,15 @@ const updateChart = () => {
     chartInstance.value.clear()
     return
   }
-  const dates = data.map(d => d.date)
-  const opens = data.map(d => d.open)
-  const closes = data.map(d => d.close)
-  const lows = data.map(d => d.low)
-  const highs = data.map(d => d.high)
-  const volumes = data.map(d => d.volume)
 
-  const isUp = closes.map((close, i) => close >= opens[i])
-
-  const candlestickData = data.map((d) => [
-    d.open,
-    d.close,
-    d.low,
-    d.high,
-  ])
+  const dates = data.map((item) => item.date)
+  const opens = data.map((item) => item.open)
+  const closes = data.map((item) => item.close)
+  const lows = data.map((item) => item.low)
+  const highs = data.map((item) => item.high)
+  const volumes = data.map((item) => item.volume)
+  const isUp = closes.map((close, index) => close >= opens[index])
+  const candlestickData = data.map((item) => [item.open, item.close, item.low, item.high])
 
   const series: any[] = [
     {
@@ -415,14 +575,71 @@ const updateChart = () => {
     )
   }
 
+  if (props.showPatternMarks && resolvedPatternMarks.value.length > 0) {
+    const bounds = getHighlightRangeBounds()
+    const candleSeries = series[0]
+    candleSeries.markPoint = {
+      symbolKeepAspect: true,
+      animation: false,
+      data: resolvedPatternMarks.value.map((item) => item.markPoint),
+    }
+    if (bounds?.startLabel && bounds?.endLabel) {
+      candleSeries.markArea = {
+        silent: true,
+        animation: false,
+        label: {
+          show: true,
+          color: 'rgba(255, 255, 255, 0.72)',
+          fontSize: 11,
+          formatter: props.highlightRange?.label || '评估区间',
+        },
+        itemStyle: {
+          color: 'rgba(41, 98, 255, 0.08)',
+          borderColor: 'rgba(41, 98, 255, 0.28)',
+          borderWidth: 1,
+        },
+        data: [
+          [
+            { xAxis: bounds.startLabel, name: props.highlightRange?.label || '评估区间' },
+            { xAxis: bounds.endLabel },
+          ],
+        ],
+      }
+    }
+  } else if (props.highlightRange) {
+    const bounds = getHighlightRangeBounds()
+    if (bounds?.startLabel && bounds?.endLabel) {
+      series[0].markArea = {
+        silent: true,
+        animation: false,
+        label: {
+          show: true,
+          color: 'rgba(255, 255, 255, 0.72)',
+          fontSize: 11,
+          formatter: props.highlightRange.label || '评估区间',
+        },
+        itemStyle: {
+          color: 'rgba(41, 98, 255, 0.08)',
+          borderColor: 'rgba(41, 98, 255, 0.28)',
+          borderWidth: 1,
+        },
+        data: [
+          [
+            { xAxis: bounds.startLabel, name: props.highlightRange.label || '评估区间' },
+            { xAxis: bounds.endLabel },
+          ],
+        ],
+      }
+    }
+  }
+
   if (props.showVolume) {
-    const volumeData = volumes
     series.push({
       type: 'bar',
       name: 'Volume',
       xAxisIndex: 1,
       yAxisIndex: 1,
-      data: volumeData,
+      data: volumes,
       itemStyle: {
         color: (params: any) => (isUp[params.dataIndex] ? 'rgba(0, 200, 83, 0.6)' : 'rgba(255, 23, 68, 0.6)'),
       },
@@ -449,13 +666,27 @@ const updateChart = () => {
       formatter: (params: any) => {
         if (!Array.isArray(params)) return ''
         const dataIndex = params[0].dataIndex
-        const kline = data[dataIndex]
-        let html = `<div style="font-weight: 600; margin-bottom: 8px;">${kline.date}</div>`
+        const candle = data[dataIndex]
+        let html = `<div style="font-weight: 600; margin-bottom: 8px;">${candle.date}</div>`
         html += `<div>${t('label_open')}: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${opens[dataIndex].toFixed(2)}</span></div>`
         html += `<div>${t('label_high')}: <span style="color: #FF9800">${highs[dataIndex].toFixed(2)}</span></div>`
         html += `<div>${t('label_low')}: <span style="color: #2196F3">${lows[dataIndex].toFixed(2)}</span></div>`
         html += `<div>${t('label_close')}: <span style="color: ${opens[dataIndex] <= closes[dataIndex] ? '#00C853' : '#FF1744'}">${closes[dataIndex].toFixed(2)}</span></div>`
         html += `<div>${t('label_volume')}: <span style="color: #E91E63">${(volumes[dataIndex] / 10000).toFixed(2)}万</span></div>`
+
+        const patternItems = patternTooltipMap.value.get(candle.date) || []
+        if (patternItems.length > 0) {
+          html += '<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.12);">'
+          html += '<div style="margin-bottom: 4px; color: rgba(255,255,255,0.72);">形态标记</div>'
+          html += patternItems
+            .slice(0, 4)
+            .map((item) => `<div>${item.name} · ${Math.round(Number(item.confidence || 0))}%</div>`)
+            .join('')
+          if (patternItems.length > 4) {
+            html += `<div>还有 ${patternItems.length - 4} 个形态</div>`
+          }
+          html += '</div>'
+        }
         return html
       },
     },
@@ -469,7 +700,11 @@ const updateChart = () => {
         data: dates,
         boundaryGap: true,
         axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
-        axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 },
+        axisLabel: {
+          color: 'rgba(255, 255, 255, 0.5)',
+          fontSize: 10,
+          formatter: (value: string) => formatAxisDate(value),
+        },
         splitLine: { show: false },
       },
       {
@@ -500,19 +735,35 @@ const updateChart = () => {
     ],
     dataZoom: [
       { type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 },
-      { type: 'slider', xAxisIndex: [0, 1], start: 50, end: 100, height: 20, bottom: 0, borderColor: 'rgba(255, 255, 255, 0.1)', fillerColor: 'rgba(41, 98, 255, 0.2)', handleStyle: { color: '#2962FF' } },
+      {
+        type: 'slider',
+        xAxisIndex: [0, 1],
+        start: 50,
+        end: 100,
+        height: 20,
+        bottom: 0,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        fillerColor: 'rgba(41, 98, 255, 0.2)',
+        handleStyle: { color: '#2962FF' },
+      },
     ],
     series,
   }
 
-  chartInstance.value.setOption(option)
+  chartInstance.value.setOption(option, true)
+  syncHighlightTip()
 }
 
-const emit = defineEmits<{
-  (e: 'periodChange', value: string): void
-  (e: 'adjustChange', value: string): void
-  (e: 'click', data: KlineData): void
-}>()
+watch([unsupportedIndicators, () => props.externalHint], () => {
+  const hints: string[] = []
+  if (unsupportedIndicators.value.length > 0) {
+    hints.push(`${unsupportedIndicators.value.map((item) => item.toUpperCase()).join('/')} ${t('hint_not_available')}`)
+  }
+  if (props.externalHint) {
+    hints.push(props.externalHint)
+  }
+  hintText.value = hints.join('；')
+}, { immediate: true })
 
 watch(() => props.data, () => {
   updateChart()
@@ -543,6 +794,22 @@ watch(
     selectedAdjust.value = adjust
   },
   { immediate: true }
+)
+
+watch(
+  () => [props.patternMarks, props.showPatternMarks, props.highlightRange, props.highlightedPatternKey],
+  () => {
+    updateChart()
+  },
+  { deep: true }
+)
+
+watch(
+  () => props.focusRangeRequestId,
+  (next, previous) => {
+    if (!next || next === previous) return
+    focusRange()
+  }
 )
 
 onMounted(() => {
@@ -657,12 +924,12 @@ onUnmounted(() => {
 
 .chart-hint {
   position: absolute;
+  top: 60px;
   left: 16px;
   right: 16px;
-  top: 60px;
   z-index: 3;
-  color: rgba(255, 196, 0, 0.92);
   font-size: 12px;
+  color: rgba(255, 196, 0, 0.92);
   pointer-events: none;
 }
 
@@ -672,8 +939,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.6);
   font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
   pointer-events: none;
 }
 
@@ -696,7 +963,9 @@ onUnmounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 960px) {

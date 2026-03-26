@@ -4,7 +4,7 @@
       <div class="spinner"></div>
       <p>{{ t('stock_loading') }}</p>
     </div>
-    
+
     <template v-else-if="stockInfo">
       <div class="page-header">
         <div class="stock-info">
@@ -53,6 +53,20 @@
             </p>
           </div>
 
+          <div v-if="activeChartMode === 'native'" class="chart-context-bar">
+            <div class="context-copy">
+              <span class="context-label">{{ t('stock_pattern_range_label') }}</span>
+              <strong>{{ patternRangeLabel }}</strong>
+            </div>
+            <div class="context-actions">
+              <button class="context-btn" :class="{ active: showPatternMarks }" @click="showPatternMarks = !showPatternMarks">
+                {{ showPatternMarks ? t('stock_pattern_marks_hide') : t('stock_pattern_marks_show') }}
+              </button>
+              <button class="context-btn" :disabled="!hasRequestedPatternRange" @click="focusRangeRequestId++">
+                {{ t('stock_pattern_focus_range') }}
+              </button>
+            </div>
+          </div>
           <KLineChart
             v-if="activeChartMode === 'native'"
             :title="stockInfo.name"
@@ -60,6 +74,11 @@
             :loading="loading"
             :adjust="currentAdjust"
             :external-hint="chartHint"
+            :show-pattern-marks="showPatternMarks"
+            :pattern-marks="chartPatternMarks"
+            :highlight-range="chartPatternRange"
+            :highlighted-pattern-key="activePatternKey"
+            :focus-range-request-id="focusRangeRequestId"
             @adjustChange="handleAdjustChange"
           />
           <TradingViewWidget
@@ -124,24 +143,40 @@
           </div>
 
           <div class="panel-section">
-            <h3>{{ t('stock_related_patterns') }}</h3>
+            <div class="section-header">
+              <h3>{{ t('stock_related_patterns') }}</h3>
+              <span class="section-chip">{{ patternRangeLabel }}</span>
+            </div>
             <p v-if="activeChartMode === 'tradingview'" class="pattern-note">
               {{ t('stock_tv_pattern_note') }}
             </p>
+            <div v-if="patterns.length > 0" class="pattern-list-meta">
+              <span>{{ patterns.length }} {{ t('stock_pattern_records') }}</span>
+              <span>{{ t('stock_pattern_link_hint') }}</span>
+            </div>
             <div v-if="patterns.length > 0" class="pattern-list">
-              <div 
-                v-for="pattern in patterns" 
-                :key="pattern.pattern_name"
+              <button
+                v-for="pattern in patterns"
+                :key="pattern.pattern_key"
                 class="pattern-item"
+                :class="{ active: activePatternKey === pattern.pattern_key }"
+                @mouseenter="activePatternKey = pattern.pattern_key"
+                @mouseleave="activePatternKey = ''"
+                @focus="activePatternKey = pattern.pattern_key"
+                @blur="activePatternKey = ''"
+                @click="activePatternKey = pattern.pattern_key"
               >
                 <div class="pattern-info">
                   <span class="pattern-name">{{ getPatternLabel(pattern.pattern_name) }}</span>
-                  <span class="pattern-date">{{ pattern.trade_date }}</span>
+                  <span class="pattern-date">{{ formatDisplayDate(pattern.trade_date) }}</span>
                 </div>
-                <div class="pattern-badge" :class="pattern.pattern_type">
-                  {{ pattern.confidence }}%
+                <div class="pattern-meta">
+                  <span class="pattern-signal" :class="getSignalClass(pattern.pattern_type)">
+                    {{ getSignalText(pattern.pattern_type) }}
+                  </span>
+                  <span class="pattern-badge">{{ pattern.confidence }}%</span>
                 </div>
-              </div>
+              </button>
             </div>
             <div v-else class="empty-state">
               {{ t('stock_no_patterns') }}
@@ -150,7 +185,7 @@
         </aside>
       </div>
     </template>
-    
+
     <div v-else class="error-state">
       <p>{{ t('stock_not_found') }}</p>
     </div>
@@ -158,9 +193,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, inject } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { stockApi, patternApi, attentionApi } from '@/api'
+import { attentionApi, patternApi, stockApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
 import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
 import { useLocale } from '@/composables/useLocale'
@@ -183,7 +218,28 @@ interface BarData {
   close?: number
   vol?: number
   amount?: number
-  trade_date?: string
+}
+
+interface PatternDetail {
+  id?: number
+  pattern_key: string
+  pattern_name: string
+  pattern_type: string
+  trade_date: string
+  confidence: number
+}
+
+interface ChartPatternMark {
+  key: string
+  name: string
+  date: string
+  confidence: number
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
+}
+
+interface DateRange {
+  start: string
+  end: string
 }
 
 const route = useRoute()
@@ -192,10 +248,13 @@ const { locale, t } = useLocale()
 const loading = ref(false)
 const inWatchlist = ref(false)
 const activeChartMode = ref<'native' | 'tradingview'>('native')
+const showPatternMarks = ref(true)
+const activePatternKey = ref('')
+const focusRangeRequestId = ref(0)
 
 const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
-const patterns = ref<any[]>([])
+const patterns = ref<PatternDetail[]>([])
 const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
 const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
@@ -209,19 +268,95 @@ const marketLabel = computed(() => {
   return exchange || '-'
 })
 
-const latestBar = computed<BarData | null>(() => {
-  if (klineData.value.length > 0) {
-    const last = klineData.value[klineData.value.length - 1]
-    return {
-      open: last.open,
-      high: last.high,
-      low: last.low,
-      close: last.close,
-      vol: last.volume,
-      amount: last.amount,
-    }
+const parseDateValue = (value?: string | null): Date => {
+  if (!value) return new Date(NaN)
+  if (value.includes('-')) return new Date(`${value}T00:00:00`)
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(4, 6)) - 1
+  const day = Number(value.slice(6, 8))
+  return new Date(year, month, day)
+}
+
+const formatCompactDate = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}${month}${day}`
+}
+
+const shiftCompactDate = (value: string, days: number) => {
+  const date = parseDateValue(value)
+  if (Number.isNaN(date.getTime())) return value
+  date.setDate(date.getDate() + days)
+  return formatCompactDate(date)
+}
+
+const formatDisplayDate = (value?: string | null) => {
+  if (!value) return '-'
+  if (value.includes('-')) return value
+  if (value.length !== 8) return value
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+}
+
+const toQueryDate = (value: unknown) => {
+  if (Array.isArray(value)) return String(value[0] || '').trim()
+  return String(value || '').trim()
+}
+
+const requestedPatternRange = computed<DateRange | null>(() => {
+  const start = toQueryDate(route.query.pattern_start)
+  const end = toQueryDate(route.query.pattern_end)
+
+  if (!start && !end) return null
+  const normalizedStart = start || end
+  const normalizedEnd = end || start
+  if (!normalizedStart || !normalizedEnd) return null
+
+  return normalizedStart <= normalizedEnd
+    ? { start: normalizedStart, end: normalizedEnd }
+    : { start: normalizedEnd, end: normalizedStart }
+})
+
+const hasRequestedPatternRange = computed(() => !!requestedPatternRange.value)
+
+const patternRangeLabel = computed(() => {
+  if (!requestedPatternRange.value) {
+    return t('stock_pattern_range_current')
   }
-  return null
+  return `${formatDisplayDate(requestedPatternRange.value.start)} 至 ${formatDisplayDate(requestedPatternRange.value.end)}`
+})
+
+const chartPatternRange = computed(() =>
+  requestedPatternRange.value
+    ? {
+        start: requestedPatternRange.value.start,
+        end: requestedPatternRange.value.end,
+        label: t('stock_pattern_range_focus'),
+      }
+    : null
+)
+
+const chartPatternMarks = computed<ChartPatternMark[]>(() =>
+  patterns.value.map((pattern) => ({
+    key: pattern.pattern_key,
+    name: getPatternLabel(pattern.pattern_name),
+    date: pattern.trade_date,
+    confidence: pattern.confidence,
+    signal: getSignalType(pattern.pattern_type),
+  }))
+)
+
+const latestBar = computed<BarData | null>(() => {
+  if (klineData.value.length === 0) return null
+  const last = klineData.value[klineData.value.length - 1]
+  return {
+    open: last.open,
+    high: last.high,
+    low: last.low,
+    close: last.close,
+    vol: last.volume,
+    amount: last.amount,
+  }
 })
 
 const change = computed(() => {
@@ -240,25 +375,56 @@ const chartHint = computed(() => {
 
 const formatVolume = (volume: number | undefined) => {
   if (!volume) return '-'
-  if (volume >= 1000000) return (volume / 1000000).toFixed(2) + 'M'
-  if (volume >= 1000) return (volume / 1000).toFixed(2) + 'K'
+  if (volume >= 1000000) return `${(volume / 1000000).toFixed(2)}M`
+  if (volume >= 1000) return `${(volume / 1000).toFixed(2)}K`
   return volume.toString()
 }
 
 const formatTurnover = (turnover: number | undefined) => {
   if (!turnover) return '-'
-  if (turnover >= 1000000000) return (turnover / 1000000000).toFixed(2) + 'B'
-  if (turnover >= 1000000) return (turnover / 1000000).toFixed(2) + 'M'
-  return (turnover / 1000).toFixed(2) + 'K'
+  if (turnover >= 1000000000) return `${(turnover / 1000000000).toFixed(2)}B`
+  if (turnover >= 1000000) return `${(turnover / 1000000).toFixed(2)}M`
+  return `${(turnover / 1000).toFixed(2)}K`
 }
 
-const formatChange = (val: number) => {
-  const prefix = val >= 0 ? '+' : ''
-  return `${prefix}${val.toFixed(2)}%`
-}
+const formatChange = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
 
 const getPatternLabel = (name: string) => {
   return resolvePatternLabel(name, locale.value)
+}
+
+const getSignalType = (patternType?: string | null): 'BULLISH' | 'BEARISH' | 'NEUTRAL' => {
+  const normalized = String(patternType || '').toLowerCase()
+  if (normalized === 'reversal' || normalized === 'breakout') return 'BULLISH'
+  if (normalized === 'breakdown') return 'BEARISH'
+  return 'NEUTRAL'
+}
+
+const getSignalText = (patternType?: string | null) => {
+  const signal = getSignalType(patternType)
+  if (signal === 'BULLISH') return '看涨'
+  if (signal === 'BEARISH') return '看跌'
+  return '中性'
+}
+
+const getSignalClass = (patternType?: string | null) => getSignalType(patternType).toLowerCase()
+
+const getLatestTradeDate = () => formatCompactDate(new Date())
+
+const getDefaultStartDate = () => shiftCompactDate(getLatestTradeDate(), -180)
+
+const getChartWindow = () => {
+  if (!requestedPatternRange.value) {
+    return {
+      start: getDefaultStartDate(),
+      end: getLatestTradeDate(),
+    }
+  }
+
+  return {
+    start: shiftCompactDate(requestedPatternRange.value.start, -90),
+    end: shiftCompactDate(requestedPatternRange.value.end, 45),
+  }
 }
 
 const fetchStockDetail = async (
@@ -267,27 +433,43 @@ const fetchStockDetail = async (
 ) => {
   loading.value = true
   try {
-    const endDate = getLatestTradeDate()
-    const startDate = getStartDate(180)
-    
-    const stockPromise = stockApi.getStockDetail(code.value, { start_date: startDate, end_date: endDate, adjust })
+    const chartWindow = getChartWindow()
+    const patternWindow = requestedPatternRange.value || chartWindow
+
+    const stockPromise = stockApi.getStockDetail(code.value, {
+      start_date: chartWindow.start,
+      end_date: chartWindow.end,
+      adjust,
+    })
     const patternPromise = refreshPatterns
-      ? patternApi.getPatterns(code.value, { limit: 10 }).catch((e: any) => {
-          console.error('获取形态数据失败:', e)
+      ? patternApi.getPatterns(code.value, {
+          start_date: patternWindow.start,
+          end_date: patternWindow.end,
+          limit: 200,
+        }).catch((error: any) => {
+          console.error('获取形态数据失败:', error)
           return []
         })
       : Promise.resolve(patterns.value)
+
     const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
-    
+
     stockInfo.value = stockData
     adjustFallbackActive.value = stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
-    
-    patterns.value = (patternsData || []).map((p: any) => ({
-      ...p,
-      trade_date: p.trade_date || '',
-      confidence: p.confidence ? Math.round(p.confidence) : 0,
-    }))
-    
+    patterns.value = (patternsData || [])
+      .map((pattern: any, index: number) => ({
+        ...pattern,
+        trade_date: pattern.trade_date || '',
+        confidence: pattern.confidence ? Math.round(Number(pattern.confidence)) : 0,
+        pattern_key: `${pattern.pattern_name}-${pattern.trade_date}-${pattern.id || index}`,
+      }))
+      .sort((a: PatternDetail, b: PatternDetail) => {
+        const dateDiff = (b.trade_date || '').localeCompare(a.trade_date || '')
+        if (dateDiff !== 0) return dateDiff
+        return (b.confidence || 0) - (a.confidence || 0)
+      })
+
+    activePatternKey.value = ''
     if (stockData?.bars) {
       klineData.value = stockData.bars.map((bar: any) => ({
         date: bar.trade_date,
@@ -298,30 +480,16 @@ const fetchStockDetail = async (
         volume: Number(bar.vol),
         amount: Number(bar.amount),
       }))
+    } else {
+      klineData.value = []
     }
+
     await syncWatchlistStatus()
-  } catch (e) {
-    console.error('Failed to fetch stock detail:', e)
+  } catch (error) {
+    console.error('Failed to fetch stock detail:', error)
   } finally {
     loading.value = false
   }
-}
-
-const getLatestTradeDate = () => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}${month}${day}`
-}
-
-const getStartDate = (daysBack: number) => {
-  const date = new Date()
-  date.setDate(date.getDate() - daysBack)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}${month}${day}`
 }
 
 const handleAdjustChange = (adjust: string) => {
@@ -340,14 +508,17 @@ const addToWatchlist = async () => {
     }
     inWatchlist.value = !inWatchlist.value
     showNotification?.('success', inWatchlist.value ? '已添加到关注列表' : '已取消关注')
-  } catch (e) {
-    console.error('Failed to update watchlist:', e)
+  } catch (error) {
+    console.error('Failed to update watchlist:', error)
     showNotification?.('error', '更新关注状态失败')
   }
 }
 
 const analyzePatterns = () => {
-  router.push({ path: '/patterns', query: { code: code.value } })
+  router.push({
+    path: '/patterns',
+    query: { code: code.value },
+  })
 }
 
 const goBacktest = () => {
@@ -357,20 +528,21 @@ const goBacktest = () => {
 const syncWatchlistStatus = async () => {
   try {
     const list = await attentionApi.getList()
-    const target = code.value
     inWatchlist.value = (list || []).some((item: any) => {
       const raw = item.code || item.symbol || item.ts_code?.split('.')?.[0]
-      return raw === target
+      return raw === code.value
     })
   } catch {
     inWatchlist.value = false
   }
 }
 
-// 监听路由参数变化，切换股票时重新加载
-watch(code, () => {
-  fetchStockDetail(currentAdjust.value, true)
-})
+watch(
+  () => [code.value, route.query.pattern_start, route.query.pattern_end],
+  () => {
+    fetchStockDetail(currentAdjust.value, true)
+  }
+)
 
 onMounted(() => {
   fetchStockDetail(currentAdjust.value, true)
@@ -396,7 +568,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  
+
   p {
     margin-top: 16px;
     color: rgba(255, 255, 255, 0.6);
@@ -413,7 +585,9 @@ onMounted(() => {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .page-header {
@@ -474,7 +648,7 @@ onMounted(() => {
     font-family: 'JetBrains Mono', monospace;
     line-height: 1;
   }
-  
+
   .price-change {
     font-size: 13px;
     white-space: nowrap;
@@ -491,7 +665,7 @@ onMounted(() => {
 
 .change-value {
   font-size: 14px;
-  opacity: 0.7;
+  opacity: 0.72;
 }
 
 .content-grid {
@@ -556,6 +730,68 @@ onMounted(() => {
   text-align: right;
 }
 
+.chart-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(90deg, rgba(41, 98, 255, 0.16), transparent 42%),
+    rgba(8, 13, 24, 0.72);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.context-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  strong {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.92);
+  }
+}
+
+.context-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.context-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.context-btn {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover:not(:disabled) {
+    border-color: rgba(41, 98, 255, 0.52);
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  &.active {
+    background: rgba(41, 98, 255, 0.14);
+    border-color: rgba(41, 98, 255, 0.72);
+    color: #a9c0ff;
+  }
+
+  &:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+}
+
 .side-panel {
   display: flex;
   flex-direction: column;
@@ -566,15 +802,32 @@ onMounted(() => {
 }
 
 .panel-section {
+  padding: 20px;
   background: rgba(26, 26, 26, 0.5);
   border-radius: 12px;
-  padding: 20px;
-  
+
   h3 {
     margin: 0 0 16px;
     font-size: 16px;
     font-weight: 600;
   }
+}
+
+.section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.section-chip {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(41, 98, 255, 0.14);
+  color: #a9c0ff;
+  font-size: 12px;
 }
 
 .profile-grid {
@@ -587,12 +840,12 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  
+
   .label {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
   }
-  
+
   .value {
     font-size: 14px;
     font-weight: 500;
@@ -608,31 +861,43 @@ onMounted(() => {
 .action-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.82);
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
-  
+
   &:hover {
     background: rgba(255, 255, 255, 0.05);
   }
-  
+
   &.primary {
     background: rgba(41, 98, 255, 0.15);
     border-color: #2962FF;
-    color: #2962FF;
+    color: #8fb0ff;
   }
+}
+
+.pattern-list-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.46);
 }
 
 .pattern-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .pattern-note {
@@ -643,41 +908,78 @@ onMounted(() => {
 
 .pattern-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover,
+  &.active {
+    background: rgba(41, 98, 255, 0.08);
+    border-color: rgba(41, 98, 255, 0.34);
+  }
 }
 
 .pattern-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  
-  .pattern-name {
-    font-size: 13px;
-    font-weight: 500;
+  gap: 4px;
+}
+
+.pattern-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pattern-date {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.44);
+}
+
+.pattern-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.pattern-signal {
+  font-size: 11px;
+  font-weight: 600;
+
+  &.bullish {
+    color: #00C853;
   }
-  
-  .pattern-date {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
+
+  &.bearish {
+    color: #FF1744;
+  }
+
+  &.neutral {
+    color: rgba(255, 255, 255, 0.62);
   }
 }
 
 .pattern-badge {
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
   font-size: 12px;
   font-weight: 600;
-  background: rgba(0, 200, 83, 0.15);
-  color: #00C853;
 }
 
 .empty-state {
-  text-align: center;
   padding: 20px;
+  text-align: center;
   color: rgba(255, 255, 255, 0.4);
 }
 
@@ -692,13 +994,13 @@ onMounted(() => {
     grid-template-columns: 1fr;
     overflow: visible;
   }
-  
+
   .side-panel {
     flex-direction: row;
     flex-wrap: wrap;
     overflow: visible;
   }
-  
+
   .panel-section {
     flex: 1;
     min-width: 280px;
@@ -710,13 +1012,13 @@ onMounted(() => {
     padding: 16px;
     gap: 16px;
   }
-  
+
   .page-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 10px;
   }
-  
+
   .price-info {
     align-items: baseline;
   }
@@ -729,25 +1031,26 @@ onMounted(() => {
   .chart-mode-copy {
     text-align: left;
   }
-  
-  .current-price {
-    font-size: 28px;
+
+  .chart-context-bar {
+    flex-direction: column;
+    align-items: flex-start;
   }
-  
+
+  .context-actions {
+    flex-wrap: wrap;
+  }
+
   .side-panel {
     flex-direction: column;
   }
-  
+
   .panel-section {
     min-width: auto;
   }
-  
+
   .profile-grid {
     grid-template-columns: 1fr;
-  }
-  
-  .action-buttons {
-    flex-direction: column;
   }
 }
 
