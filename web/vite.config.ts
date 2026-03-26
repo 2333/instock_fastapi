@@ -1,28 +1,70 @@
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'
+import { existsSync, readFileSync } from "fs";
+import { defineConfig, loadEnv } from "vite";
+import vue from "@vitejs/plugin-vue";
+import { resolve } from "path";
 
-export default defineConfig({
-  plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
+function readVersionFile() {
+  const candidates = [
+    resolve(__dirname, "..", "VERSION"),
+    resolve(__dirname, "VERSION"),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return readFileSync(candidate, "utf-8").trim();
+    }
+  }
+
+  return null;
+}
+
+function readPackageVersion() {
+  const packageJsonPath = resolve(__dirname, "package.json");
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf-8")) as {
+    version?: string;
+  };
+
+  return packageJson.version || "dev";
+}
+
+const fileVersion = readVersionFile();
+const packageVersion = readPackageVersion();
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, __dirname, "");
+  const appVersion =
+    env.VITE_APP_VERSION ||
+    process.env.APP_VERSION ||
+    fileVersion ||
+    packageVersion;
+  const appGitSha = env.VITE_APP_GIT_SHA || process.env.APP_GIT_SHA || "local";
+
+  return {
+    plugins: [vue()],
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_GIT_SHA__: JSON.stringify(appGitSha),
     },
-  },
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
+    resolve: {
+      alias: {
+        "@": resolve(__dirname, "src"),
       },
     },
-  },
-  css: {
-    preprocessorOptions: {
-      scss: {
-        additionalData: `@import "@/styles/variables.scss";`,
+    server: {
+      port: 3000,
+      proxy: {
+        "/api": {
+          target: "http://localhost:8000",
+          changeOrigin: true,
+        },
       },
     },
-  },
-})
+    css: {
+      preprocessorOptions: {
+        scss: {
+          additionalData: `@import "@/styles/variables.scss";`,
+        },
+      },
+    },
+  };
+});

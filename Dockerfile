@@ -1,7 +1,14 @@
 FROM python:3.11-slim
 
+ARG APP_VERSION=dev
+ARG APP_GIT_SHA=local
+
 LABEL maintainer="instock"
 LABEL description="InStock FastAPI - Stock Analysis System"
+LABEL org.opencontainers.image.title="instock-fastapi"
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.revision="${APP_GIT_SHA}"
+LABEL org.opencontainers.image.source="https://github.com/2333/instock_fastapi"
 
 WORKDIR /app
 
@@ -11,6 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
+    APP_VERSION=${APP_VERSION} \
+    APP_GIT_SHA=${APP_GIT_SHA} \
     PATH="/app/.venv/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -7,26 +7,37 @@ class MarketDataService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _resolve_trade_date(self, target_date: Optional[str]) -> Optional[str]:
+    async def _resolve_trade_date(self, target_date: Optional[str], table_name: str = "daily_bars") -> Optional[str]:
+        if table_name not in {
+            "daily_bars",
+            "fund_flows",
+            "stock_block_trades",
+            "stock_tops",
+            "north_bound_funds",
+        }:
+            raise ValueError(f"unsupported trade date table: {table_name}")
+
         if target_date:
             result = await self.db.execute(
-                text("""
+                text(
+                    f"""
                     SELECT MAX(trade_date) as resolved_date
-                    FROM daily_bars
+                    FROM {table_name}
                     WHERE trade_date <= :target_date
-                """),
+                    """
+                ),
                 {"target_date": target_date},
             )
         else:
             result = await self.db.execute(
-                text("SELECT MAX(trade_date) as resolved_date FROM daily_bars")
+                text(f"SELECT MAX(trade_date) as resolved_date FROM {table_name}")
             )
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
     async def get_fund_flow_rank(self, date: Optional[str], limit: int = 50) -> List[dict]:
         """获取资金流排行"""
-        date = await self._resolve_trade_date(date)
+        date = await self._resolve_trade_date(date, "fund_flows")
         if not date:
             return []
 
@@ -53,7 +64,7 @@ class MarketDataService:
 
     async def get_block_trades(self, date: Optional[str], limit: int = 50) -> List[dict]:
         """获取大宗交易数据"""
-        date = await self._resolve_trade_date(date)
+        date = await self._resolve_trade_date(date, "stock_block_trades")
         if not date:
             return []
 
@@ -77,7 +88,7 @@ class MarketDataService:
 
     async def get_lhb(self, date: Optional[str], limit: int = 50) -> List[dict]:
         """获取龙虎榜数据"""
-        date = await self._resolve_trade_date(date)
+        date = await self._resolve_trade_date(date, "stock_tops")
         if not date:
             return []
 
@@ -104,7 +115,7 @@ class MarketDataService:
 
     async def get_north_bound_funds(self, date: Optional[str], limit: int = 50) -> List[dict]:
         """获取北向资金数据"""
-        date = await self._resolve_trade_date(date)
+        date = await self._resolve_trade_date(date, "north_bound_funds")
         if not date:
             return []
 

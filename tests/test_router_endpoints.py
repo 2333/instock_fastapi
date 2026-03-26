@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from app.build_info import get_build_info
 from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.main import app
@@ -188,6 +189,21 @@ async def test_pattern_endpoints_cover_latest_trade_date_branch(client):
     assert patterns.status_code == 200
     assert patterns.json()[0]["pattern_name"] == "HAMMER"
     assert today.json()[0]["pattern_name"] == "HAMMER"
+
+
+@pytest.mark.asyncio
+async def test_health_and_info_include_build_metadata(client):
+    build_info = get_build_info()
+
+    health = await client.get("/health")
+    info = await client.get("/api/v1/info")
+
+    assert health.status_code == 200
+    assert health.json()["version"] == build_info.version
+    assert health.json()["git_sha"] == build_info.git_sha
+    assert info.status_code == 200
+    assert info.json()["version"] == build_info.version
+    assert info.json()["git_sha"] == build_info.git_sha
 
 
 @pytest.mark.asyncio

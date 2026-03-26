@@ -10,6 +10,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import async_session_factory
+from app.jobs.market_calendar import (
+    current_market_date,
+    format_trade_date,
+    is_trading_day,
+    should_skip_market_task,
+)
 from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
 from app.models.stock_model import FundFlow, SectorFundFlow
 from app.utils.stock_codes import normalize_ts_code
@@ -61,8 +67,13 @@ def _trade_date_to_date(trade_date: str):
     return datetime.strptime(trade_date, "%Y%m%d").date()
 
 
-async def _resolve_candidate_trade_dates(session: AsyncSession, limit: int = 5) -> List[str]:
-    today = datetime.now().strftime("%Y%m%d")
+async def _resolve_candidate_trade_dates(
+    session: AsyncSession,
+    limit: int = 5,
+    *,
+    include_today: bool = True,
+) -> List[str]:
+    today = format_trade_date(current_market_date())
     result = await session.execute(
         text(
             """
@@ -75,7 +86,7 @@ async def _resolve_candidate_trade_dates(session: AsyncSession, limit: int = 5) 
         {"limit": limit},
     )
     dates = [row[0] for row in result.fetchall() if row[0]]
-    if today not in dates:
+    if include_today and today not in dates:
         dates.insert(0, today)
     return dates
 
@@ -317,8 +328,15 @@ async def run():
     tushare_provider = TushareProvider()
 
     try:
+        today_is_trading_day = await is_trading_day(crawler=crawler)
+        if should_skip_market_task("资金流向抓取任务", today_is_trading_day=today_is_trading_day):
+            return
+
         async with async_session_factory() as session:
-            trade_dates = await _resolve_candidate_trade_dates(session)
+            trade_dates = await _resolve_candidate_trade_dates(
+                session,
+                include_today=today_is_trading_day,
+            )
             logger.info("资金流任务候选交易日: %s", trade_dates)
 
             stock_source = _get_stock_fund_flow_source()
