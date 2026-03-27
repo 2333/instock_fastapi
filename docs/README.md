@@ -4,7 +4,8 @@
 
 ## 文档清单
 
-- [PRD.md](./PRD.md)：产品需求、功能范围和验收口径。
+- [PRD.md](./PRD.md)：最新版产品需求文档，定义产品定位、第一性原理、功能边界和长期目标。
+- [ROADMAP.md](./ROADMAP.md)：产品与架构演进路线图，说明阶段目标、优先级和迭代校验方式。
 - [architecture/system_architecture.md](./architecture/system_architecture.md)：后端、任务调度、数据流和部署架构。
 - [design/class_diagram.md](./design/class_diagram.md)：核心数据模型和模块关系说明。
 - [api/api_document.md](./api/api_document.md)：当前 API 说明与调用示例。
