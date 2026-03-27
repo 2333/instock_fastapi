@@ -1,13 +1,14 @@
-from typing import Any, Optional, Dict, List
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class APIResponse(BaseModel):
     success: bool = True
     code: str = "SUCCESS"
     message: str = "OK"
-    data: Optional[Any] = None
+    data: Any | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
     class Config:
@@ -15,7 +16,7 @@ class APIResponse(BaseModel):
 
 
 class PaginatedData(BaseModel):
-    items: List[Any] = Field(default_factory=list)
+    items: list[Any] = Field(default_factory=list)
     total: int = 0
     page: int = 1
     page_size: int = 20
@@ -43,7 +44,7 @@ def error(code: str, message: str, data: Any = None) -> dict:
 
 
 def paginated(
-    items: List[Any],
+    items: list[Any],
     total: int,
     page: int,
     page_size: int,

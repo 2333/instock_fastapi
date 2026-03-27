@@ -1,17 +1,19 @@
-from fastapi import APIRouter, Depends, Body
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, Dict, Any
-from app.database import get_db
-from app.services.backtest_service import BacktestService
+
 from app.core.dependencies import get_current_user
+from app.database import get_db
 from app.models.stock_model import User
+from app.services.backtest_service import BacktestService
 
 router = APIRouter()
 
 
 @router.post("/backtest")
 async def run_backtest(
-    params: Dict[str, Any] = Body(...),
+    params: dict[str, Any] = Body(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

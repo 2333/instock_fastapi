@@ -29,7 +29,7 @@ check_docker() {
         log_error "Docker is not installed"
         exit 1
     fi
-    if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+    if ! docker compose version &> /dev/null; then
         log_error "Docker Compose is not installed"
         exit 1
     fi
@@ -48,7 +48,7 @@ check_ports() {
 
 stop_existing() {
     log_info "Stopping existing containers..."
-    docker-compose down --remove-orphans 2>/dev/null || true
+    docker compose down --remove-orphans 2>/dev/null || true
 }
 
 clean_old_images() {
@@ -142,17 +142,18 @@ show_access_info() {
     echo -e "${GREEN}   Services Started Successfully!${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "  ${BLUE}API URL:${NC}        http://localhost:8000"
-    echo -e "  ${BLUE}Swagger Docs:${NC}   http://localhost:8000/docs"
-    echo -e "  ${BLUE}ReDoc:${NC}          http://localhost:8000/redoc"
-    echo -e "  ${BLUE}Health Check:${NC}   http://localhost:8000/health"
+    echo -e "  ${BLUE}Home:${NC}          http://localhost:8000/"
+    echo -e "  ${BLUE}API Docs:${NC}      http://localhost:8000/docs"
+    echo -e "  ${BLUE}ReDoc:${NC}         http://localhost:8000/redoc"
+    echo -e "  ${BLUE}Health Check:${NC}  http://localhost:8000/health"
+    echo -e "  ${BLUE}Frontend:${NC}      http://localhost:3001/"
     echo ""
     echo -e "  ${BLUE}PostgreSQL:${NC}     localhost:5432"
     echo ""
     echo -e "${YELLOW}Useful Commands:${NC}"
     echo -e "  View logs:    ${GREEN}docker compose logs -f app${NC}"
     echo -e "  Stop:         ${GREEN}docker compose down${NC}"
-    echo -e "  Full restart: ${GREEN}make docker-full-restart${NC}"
+    echo -e "  Full restart: ${GREEN}make docker-rebuild${NC}"
     echo ""
 }
 

@@ -1,6 +1,7 @@
-from fastapi import Request, APIRouter
+from collections.abc import Callable
+
+from fastapi import APIRouter, Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from typing import Callable
 
 router = APIRouter()
 
@@ -18,14 +19,13 @@ class APIVersioningMiddleware(BaseHTTPMiddleware):
                 request.state.api_version = "unknown"
 
             if request.state.api_version == "unknown":
-                from app.exceptions import error_response
                 from fastapi.responses import JSONResponse
+
+                from app.exceptions import error_response
 
                 return JSONResponse(
                     status_code=404,
-                    content=error_response(
-                        "API_VERSION_NOT_FOUND", "API version not supported"
-                    ),
+                    content=error_response("API_VERSION_NOT_FOUND", "API version not supported"),
                 )
 
         response = await call_next(request)

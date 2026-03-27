@@ -5,9 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 
-
-CREATE_FETCH_AUDIT_TABLE_SQL = text(
-    """
+CREATE_FETCH_AUDIT_TABLE_SQL = text("""
     CREATE TABLE IF NOT EXISTS data_fetch_audit (
       task_name VARCHAR(64) NOT NULL,
       entity_type VARCHAR(64) NOT NULL,
@@ -19,8 +17,7 @@ CREATE_FETCH_AUDIT_TABLE_SQL = text(
       updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
       PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
     )
-    """
-)
+    """)
 
 
 async def ensure_fetch_audit_table(session: AsyncSession) -> None:
@@ -40,8 +37,7 @@ async def upsert_fetch_audit(
 ) -> None:
     await ensure_fetch_audit_table(session)
     await session.execute(
-        text(
-            """
+        text("""
             INSERT INTO data_fetch_audit (
               task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
             )
@@ -54,8 +50,7 @@ async def upsert_fetch_audit(
               source = EXCLUDED.source,
               note = EXCLUDED.note,
               updated_at = NOW()
-            """
-        ),
+            """),
         {
             "task_name": task_name,
             "entity_type": entity_type,

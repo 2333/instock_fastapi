@@ -1,4 +1,4 @@
-.PHONY: help install dev frontend-dev test lint clean setup init-db \
+.PHONY: help install install-dev sync dev frontend-dev test lint clean setup init-db \
         docker-up docker-down docker-rebuild docker-status docker-logs \
         docker-clean docker-build docker-smoke format lint-check style-check style-fix \
         test-cov sync ci-backend ci-frontend ci \
@@ -29,28 +29,34 @@ STYLE_PATHS = \
 help:
 	@echo "InStock FastAPI - 智能股票分析平台"
 	@echo ""
-	@echo "快速开始:"
-	@echo "  make setup          - 初始化开发环境（推荐）"
-	@echo "  make docker-up      - 启动 Docker 服务"
+	@echo "依赖与环境:"
+	@echo "  make install        - 安装生产依赖"
+	@echo "  make install-dev    - 安装开发依赖"
+	@echo "  make sync           - 同步本地开发环境"
+	@echo "  make setup          - 同步依赖并初始化数据库"
 	@echo ""
 	@echo "开发命令:"
-	@echo "  make dev            - 启动后端开发服务器"
-	@echo "  make frontend-dev   - 启动前端开发服务器"
+	@echo "  make dev            - 启动后端开发服务器 (:8000)"
+	@echo "  make frontend-dev   - 启动前端开发服务器 (:3000)"
 	@echo ""
 	@echo "Docker 命令:"
-	@echo "  make docker-up      - 启动所有容器"
+	@echo "  make docker-up      - 启动 Docker 全栈服务"
 	@echo "  make docker-down    - 停止所有容器"
-	@echo "  make docker-rebuild - 重构并重启"
+	@echo "  make docker-status  - 查看容器状态和访问入口"
+	@echo "  make docker-smoke   - 执行 Docker 健康检查"
+	@echo "  make docker-rebuild - 重建并重启 Docker 全栈"
 	@echo "  make docker-build-version VERSION=x.y.z  - 构建带版本标签的镜像"
 	@echo "  make docker-deploy-version VERSION=x.y.z - 使用版本化镜像部署"
 	@echo ""
 	@echo "代码质量:"
-	@echo "  make lint-check     - 检查代码"
+	@echo "  make lint           - 运行基础静态检查"
+	@echo "  make lint-check     - 运行后端基础错误检查"
 	@echo "  make style-check    - 检查增量严格规范"
 	@echo "  make style-fix      - 修复增量严格规范"
 	@echo "  make format         - 格式化代码"
 	@echo "  make ci-backend     - 本地执行后端 CI 检查"
 	@echo "  make ci-frontend    - 本地执行前端 CI 检查"
+	@echo "  make ci             - 运行完整 CI"
 	@echo "  make version-show   - 显示当前仓库版本"
 	@echo "  make version-check  - 检查版本文件是否同步"
 	@echo "  make version-set VERSION=x.y.z - 更新仓库版本"
@@ -58,6 +64,9 @@ help:
 	@echo "测试:"
 	@echo "  make test           - 运行测试"
 	@echo "  make test-cov       - 运行测试并生成覆盖率"
+	@echo ""
+	@echo "清理:"
+	@echo "  make clean          - 清理缓存文件"
 
 # ============ 安装依赖 ============
 
@@ -137,9 +146,11 @@ docker-status:
 	@$(DOCKER_COMPOSE) ps
 	@echo ""
 	@echo "=== Endpoints ==="
-	@echo "Backend:  http://localhost:8000"
-	@echo "Frontend: http://localhost:3001"
+	@echo "Home:     http://localhost:8000/"
+	@echo "Docs:     http://localhost:8000/docs"
+	@echo "ReDoc:    http://localhost:8000/redoc"
 	@echo "Health:   http://localhost:8000/health"
+	@echo "Frontend: http://localhost:3001/"
 
 docker-logs:
 	$(DOCKER_COMPOSE) logs -f app
@@ -169,6 +180,8 @@ lint-check:
 	@echo "Running ruff..."
 	$(UV_RUN) ruff check app/ tests/ --select E9,F63,F7,F82
 
+lint: lint-check
+
 style-check:
 	@echo "Running incremental style checks..."
 	$(UV_RUN) black --check $(STYLE_PATHS)
@@ -183,7 +196,6 @@ format:
 	@echo "Formatting code..."
 	$(UV_RUN) black app/ tests/
 	$(UV_RUN) isort app/ tests/
-	$(UV_RUN) ruff check --fix app/ tests/
 	@echo "Done!"
 
 ci-backend:

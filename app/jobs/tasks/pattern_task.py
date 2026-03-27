@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List
 
 try:
     import numpy as np
@@ -15,7 +14,6 @@ except ImportError:
     tl = None
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import async_session_factory
@@ -47,7 +45,7 @@ PATTERN_MAP = {
 }
 
 
-def detect_patterns(bars: List[DailyBar]) -> List[dict]:
+def detect_patterns(bars: list[DailyBar]) -> list[dict]:
     """基于TA-Lib的形态识别"""
     patterns = []
 
@@ -62,8 +60,6 @@ def detect_patterns(bars: List[DailyBar]) -> List[dict]:
     highs = np.array([float(bar.high) for bar in bars], dtype=np.float64)
     lows = np.array([float(bar.low) for bar in bars], dtype=np.float64)
     closes = np.array([float(bar.close) for bar in bars], dtype=np.float64)
-
-    recent_date = bars[-1].trade_date
 
     pattern_functions = [
         ("CDLHAMMER", tl.CDLHAMMER),
@@ -187,10 +183,8 @@ async def run():
         if should_skip_market_task("形态识别任务", today_is_trading_day=await is_trading_day()):
             return
         async with async_session_factory() as session:
-            result = await session.execute(
-                text(
-                    """
-                    SELECT DISTINCT db.ts_code 
+            result = await session.execute(text("""
+                    SELECT DISTINCT db.ts_code
                     FROM daily_bars db
                     JOIN stocks s ON s.ts_code = db.ts_code
                     WHERE db.trade_date >= (
@@ -204,9 +198,7 @@ async def run():
                     )
                     AND s.is_etf = false
                     AND s.list_status = 'L'
-                    """
-                )
-            )
+                    """))
             ts_codes = [row[0] for row in result.fetchall()]
             logger.info(f"开始识别形态，共 {len(ts_codes)} 只股票")
 

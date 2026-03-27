@@ -1,11 +1,11 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 import logging
 import os
 from datetime import datetime, time
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text
 
 from app.database import async_session_factory
@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover - non-POSIX fallback
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Shanghai"))
-_scheduler_lock_handle: Optional[object] = None
+_scheduler_lock_handle: object | None = None
 
 
 MarketJobRunner = Callable[[], Awaitable[None]]

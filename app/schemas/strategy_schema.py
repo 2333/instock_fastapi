@@ -1,20 +1,19 @@
 from pydantic import BaseModel
-from typing import Optional, List
 
 
 class StrategyResponse(BaseModel):
     name: str
     display_name: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class StrategyResultResponse(BaseModel):
     id: int
-    date: Optional[str] = None
-    strategy_name: Optional[str] = None
-    code: Optional[str] = None
-    name: Optional[str] = None
-    score: Optional[float] = None
-    signal: Optional[str] = None
-    new_price: Optional[float] = None
-    change_rate: Optional[float] = None
+    date: str | None = None
+    strategy_name: str | None = None
+    code: str | None = None
+    name: str | None = None
+    score: float | None = None
+    signal: str | None = None
+    new_price: float | None = None
+    change_rate: float | None = None

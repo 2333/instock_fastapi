@@ -1,13 +1,12 @@
 import logging
-from typing import List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
-from core.crawling.base import AdjustType
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.base import AdjustType
 from core.crawling.eastmoney import EastMoneyCrawler
 
 settings = get_settings()
@@ -22,7 +21,7 @@ class StockService:
     def _normalize_row_mapping(row: dict) -> dict:
         return normalize_stock_payload(dict(row))
 
-    async def _resolve_trade_date(self, target_date: Optional[str]) -> Optional[str]:
+    async def _resolve_trade_date(self, target_date: str | None) -> str | None:
         if target_date:
             result = await self.db.execute(
                 text("""
@@ -39,7 +38,7 @@ class StockService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def get_stocks(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_stocks(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
         date = await self._resolve_trade_date(date)
 
@@ -94,8 +93,8 @@ class StockService:
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
     async def get_stocks_with_total(
-        self, date: Optional[str], page: int, page_size: int
-    ) -> tuple[List[dict], int]:
+        self, date: str | None, page: int, page_size: int
+    ) -> tuple[list[dict], int]:
         """获取股票列表和总数"""
         date = await self._resolve_trade_date(date)
 
@@ -123,7 +122,7 @@ class StockService:
         return data, total
 
     @staticmethod
-    def _normalize_date(value: Optional[str]) -> Optional[str]:
+    def _normalize_date(value: str | None) -> str | None:
         if not value:
             return None
         v = value.strip()
@@ -132,7 +131,7 @@ class StockService:
         return v.replace("/", "-")
 
     @staticmethod
-    def _parse_adjust(value: Optional[str]) -> AdjustType:
+    def _parse_adjust(value: str | None) -> AdjustType:
         mapping = {
             "bfq": AdjustType.NO_ADJUST,
             "qfq": AdjustType.FORWARD,
@@ -143,13 +142,13 @@ class StockService:
     async def _fetch_adjusted_bars(
         self,
         symbol: str,
-        start_date: Optional[str],
-        end_date: Optional[str],
+        start_date: str | None,
+        end_date: str | None,
         adjust: AdjustType,
-    ) -> List[dict]:
+    ) -> list[dict]:
         baostock_provider = BaoStockProvider()
         eastmoney_crawler = EastMoneyCrawler()
-        bars: List[dict] = []
+        bars: list[dict] = []
 
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
@@ -176,7 +175,7 @@ class StockService:
             )
         await eastmoney_crawler.close()
 
-        normalized: List[dict] = []
+        normalized: list[dict] = []
         for row in bars or []:
             date_raw = str(row.get("date", "")).strip()
             trade_date = date_raw.replace("-", "")
@@ -197,8 +196,8 @@ class StockService:
         return normalized
 
     async def _query_bars_from_db(
-        self, ts_code: str, start_date: Optional[str], end_date: Optional[str]
-    ) -> List[dict]:
+        self, ts_code: str, start_date: str | None, end_date: str | None
+    ) -> list[dict]:
         if not (start_date and end_date):
             return []
         bars_query = text("""
@@ -213,8 +212,8 @@ class StockService:
         return [dict(row._mapping) for row in bars_result.fetchall()]
 
     async def get_stock_detail(
-        self, code: str, start_date: Optional[str], end_date: Optional[str], adjust: str = "bfq"
-    ) -> Optional[dict]:
+        self, code: str, start_date: str | None, end_date: str | None, adjust: str = "bfq"
+    ) -> dict | None:
         candidates = build_code_variants(code)
         symbol = extract_symbol(code)
         stock_query = text("""
@@ -283,7 +282,7 @@ class StockService:
 
         return normalize_stock_payload(stock)
 
-    async def get_etf_list(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_etf_list(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
 
         if date:
@@ -336,7 +335,7 @@ class StockService:
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
-    async def get_etf_detail(self, code: str) -> Optional[dict]:
+    async def get_etf_detail(self, code: str) -> dict | None:
         candidates = build_code_variants(code)
         symbol = extract_symbol(code)
         query = text("""

@@ -3,8 +3,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.jobs import market_calendar
 from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
@@ -150,8 +149,14 @@ async def test_save_stocks_migrates_legacy_ts_code_without_duplicates():
         )
 
         stocks = (
-            await session.execute(select(Stock).where(Stock.symbol == "000001").order_by(Stock.ts_code))
-        ).scalars().all()
+            (
+                await session.execute(
+                    select(Stock).where(Stock.symbol == "000001").order_by(Stock.ts_code)
+                )
+            )
+            .scalars()
+            .all()
+        )
         bars = (await session.execute(select(DailyBar.ts_code))).scalars().all()
 
     assert count == 1
@@ -171,14 +176,10 @@ async def test_ensure_backfill_state_table_creates_table():
 
     async with async_session_factory_test() as session:
         await _ensure_backfill_state_table(session)
-        await session.execute(
-            text(
-                """
+        await session.execute(text("""
             INSERT INTO backfill_daily_state (ts_code, status)
             VALUES ('000001.SZ', 'needs_fallback')
-            """
-            )
-        )
+            """))
         await session.commit()
 
         result = await session.execute(text("SELECT COUNT(*) FROM backfill_daily_state"))
