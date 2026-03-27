@@ -2,15 +2,14 @@ import asyncio
 import logging
 from datetime import datetime
 from decimal import Decimal
-from uuid import uuid4
 
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import is_trading_day, should_skip_market_task
-from app.models.stock_model import Stock, DailyBar, Pattern, Indicator, Strategy, StrategyResult
+from app.models.stock_model import DailyBar, Pattern, Stock, Strategy, StrategyResult
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +111,7 @@ async def run():
         if should_skip_market_task("策略选股任务", today_is_trading_day=await is_trading_day()):
             return
         async with async_session_factory() as session:
-            result = await session.execute(select(Strategy).where(Strategy.is_active == True))
+            result = await session.execute(select(Strategy).where(Strategy.is_active.is_(True)))
             strategies = result.scalars().all()
 
             if not strategies:
@@ -128,7 +127,7 @@ async def run():
             result = await session.execute(
                 select(Stock.ts_code).where(
                     Stock.list_status == "L",
-                    Stock.is_etf == False,
+                    Stock.is_etf.is_(False),
                 )
             )
             ts_codes = [row[0] for row in result.fetchall()]
@@ -138,8 +137,6 @@ async def run():
                 logger.info(f"运行策略: {strategy.name}")
 
                 results = await run_strategy(session, strategy.name, ts_codes)
-
-                selection_id = str(uuid4())
 
                 for res in results:
                     stmt = insert(StrategyResult).values(

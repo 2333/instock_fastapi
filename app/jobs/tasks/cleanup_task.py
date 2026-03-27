@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 
 from app.database import async_session_factory, sync_engine
-from app.models.stock_model import DailyBar, Indicator, Pattern, FundFlow
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
+
 from app.database import get_db
 from app.schemas.pattern_schema import PatternResponse
 from app.services.pattern_service import PatternService
@@ -8,11 +8,11 @@ from app.services.pattern_service import PatternService
 router = APIRouter()
 
 
-@router.get("/patterns", response_model=List[PatternResponse])
+@router.get("/patterns", response_model=list[PatternResponse])
 async def get_patterns(
     code: str = Query(..., description="股票代码"),
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = Query(100, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
 ):
@@ -22,17 +22,17 @@ async def get_patterns(
 
 @router.get("/patterns/today")
 async def get_today_patterns(
-    signal: Optional[str] = Query(None, description="信号类型: buy/sell/hold"),
-    start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
-    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD"),
+    signal: str | None = Query(None, description="信号类型: buy/sell/hold"),
+    start_date: str | None = Query(None, description="开始日期 YYYYMMDD"),
+    end_date: str | None = Query(None, description="结束日期 YYYYMMDD"),
     min_confidence: float = Query(0, ge=0, le=100),
-    pattern_names: Optional[str] = Query(None, description="形态名，逗号分隔"),
+    pattern_names: str | None = Query(None, description="形态名，逗号分隔"),
     ema_fast: int = Query(12, ge=2, le=120),
     ema_slow: int = Query(26, ge=3, le=250),
     boll_period: int = Query(20, ge=5, le=120),
     boll_std: float = Query(2.0, ge=0.5, le=5.0),
-    ema_signal: Optional[str] = Query(None, description="bullish/bearish/neutral"),
-    boll_signal: Optional[str] = Query(None, description="breakout/breakdown/inside"),
+    ema_signal: str | None = Query(None, description="bullish/bearish/neutral"),
+    boll_signal: str | None = Query(None, description="breakout/breakdown/inside"),
     indicator_mode: str = Query("all", pattern="^(all|any)$"),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),

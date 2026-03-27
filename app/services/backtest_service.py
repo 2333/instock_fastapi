@@ -1,8 +1,9 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, insert
-from typing import Dict, Any, Optional
-from math import sqrt
 from decimal import Decimal
+from math import sqrt
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import BacktestResult
 
@@ -12,8 +13,8 @@ class BacktestService:
         self.db = db
 
     async def run_backtest(
-        self, params: Dict[str, Any], user_id: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, params: dict[str, Any], user_id: int | None = None
+    ) -> dict[str, Any]:
         code = str(params.get("stock_code") or params.get("code") or "").strip()
         start_date = str(params.get("start_date") or "").strip()
         end_date = str(params.get("end_date") or "").strip()
@@ -27,27 +28,23 @@ class BacktestService:
                 "debug_user_id": user_id,
             }
 
-        stock_sql = text(
-            """
+        stock_sql = text("""
             SELECT ts_code, symbol, name
             FROM stocks
             WHERE symbol = :code OR ts_code = :code
             LIMIT 1
-            """
-        )
+            """)
         stock_row = (await self.db.execute(stock_sql, {"code": code})).mappings().first()
         if not stock_row:
             return {"backtest_id": None, "status": "failed", "error": "stock_not_found"}
 
-        bars_sql = text(
-            """
+        bars_sql = text("""
             SELECT trade_date, close
             FROM daily_bars
             WHERE ts_code = :ts_code
             AND trade_date BETWEEN :start_date AND :end_date
             ORDER BY trade_date ASC
-            """
-        )
+            """)
         bars = (
             (
                 await self.db.execute(
@@ -238,7 +235,7 @@ class BacktestService:
 
         return result
 
-    async def get_result(self, backtest_id: str, user_id: Optional[int] = None) -> Dict[str, Any]:
+    async def get_result(self, backtest_id: str, user_id: int | None = None) -> dict[str, Any]:
         if user_id:
             query = text("""
                 SELECT * FROM backtest_results

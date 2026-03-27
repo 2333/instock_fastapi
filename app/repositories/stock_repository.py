@@ -1,9 +1,8 @@
-from typing import List, Optional
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import Stock as StockModel
-from app.schemas.stock_schema import StockResponse, StockListResponse
+from app.schemas.stock_schema import StockListResponse, StockResponse
 from app.utils.stock_codes import normalize_exchange_name
 
 
@@ -15,10 +14,10 @@ class StockRepository:
         self,
         page: int = 1,
         page_size: int = 20,
-        exchange: Optional[str] = None,
-        market: Optional[str] = None,
-        industry: Optional[str] = None,
-        is_etf: Optional[bool] = None,
+        exchange: str | None = None,
+        market: str | None = None,
+        industry: str | None = None,
+        is_etf: bool | None = None,
     ) -> StockListResponse:
         query = select(StockModel)
 
@@ -46,19 +45,15 @@ class StockRepository:
             page_size=page_size,
         )
 
-    async def get_by_ts_code(self, ts_code: str) -> Optional[StockModel]:
-        result = await self.session.execute(
-            select(StockModel).where(StockModel.ts_code == ts_code)
-        )
+    async def get_by_ts_code(self, ts_code: str) -> StockModel | None:
+        result = await self.session.execute(select(StockModel).where(StockModel.ts_code == ts_code))
         return result.scalar_one_or_none()
 
-    async def get_by_symbol(self, symbol: str) -> Optional[StockModel]:
-        result = await self.session.execute(
-            select(StockModel).where(StockModel.symbol == symbol)
-        )
+    async def get_by_symbol(self, symbol: str) -> StockModel | None:
+        result = await self.session.execute(select(StockModel).where(StockModel.symbol == symbol))
         return result.scalar_one_or_none()
 
-    async def search_by_name(self, name: str, limit: int = 20) -> List[StockModel]:
+    async def search_by_name(self, name: str, limit: int = 20) -> list[StockModel]:
         result = await self.session.execute(
             select(StockModel).where(StockModel.name.like(f"%{name}%")).limit(limit)
         )
@@ -70,7 +65,7 @@ class StockRepository:
         await self.session.refresh(stock)
         return stock
 
-    async def bulk_create(self, stocks: List[StockModel]) -> List[StockModel]:
+    async def bulk_create(self, stocks: list[StockModel]) -> list[StockModel]:
         self.session.add_all(stocks)
         await self.session.flush()
         return stocks

@@ -1,26 +1,26 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from typing import List, Optional, Tuple
 import math
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class PatternService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_latest_trade_date(self) -> Optional[str]:
+    async def get_latest_trade_date(self) -> str | None:
         query = text("""
-            SELECT MAX(trade_date) as latest_date 
-            FROM daily_bars 
+            SELECT MAX(trade_date) as latest_date
+            FROM daily_bars
             WHERE trade_date <= TO_CHAR(CURRENT_DATE, 'YYYYMMDD')
-        """)
+            """)
         result = await self.db.execute(query)
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
     async def get_patterns(
-        self, code: str, start_date: Optional[str], end_date: Optional[str], limit: int
-    ) -> List[dict]:
+        self, code: str, start_date: str | None, end_date: str | None, limit: int
+    ) -> list[dict]:
         conditions = ["s.symbol = :code"]
         params: dict = {"code": code, "limit": limit}
 
@@ -42,33 +42,33 @@ class PatternService:
         result = await self.db.execute(query, params)
         return [row._mapping for row in result.fetchall()]
 
-    async def get_today_patterns(self, signal: Optional[str], limit: int) -> List[dict]:
+    async def get_today_patterns(self, signal: str | None, limit: int) -> list[dict]:
         query = text("""
             SELECT p.*, s.name as stock_name, s.symbol as code
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
             ORDER BY p.trade_date DESC, p.confidence DESC
             LIMIT :limit
-        """)
+            """)
         result = await self.db.execute(query, {"limit": limit})
         return [row._mapping for row in result.fetchall()]
 
     async def get_composite_patterns(
         self,
-        signal: Optional[str],
+        signal: str | None,
         limit: int,
-        start_date: Optional[str],
-        end_date: Optional[str],
+        start_date: str | None,
+        end_date: str | None,
         min_confidence: float,
-        pattern_names: Optional[List[str]],
+        pattern_names: list[str] | None,
         ema_fast: int,
         ema_slow: int,
         boll_period: int,
         boll_std: float,
-        ema_signal: Optional[str],
-        boll_signal: Optional[str],
+        ema_signal: str | None,
+        boll_signal: str | None,
         indicator_mode: str,
-    ) -> List[dict]:
+    ) -> list[dict]:
         conditions = ["1=1"]
         params: dict = {"limit": limit, "min_confidence": min_confidence}
 
@@ -88,20 +88,18 @@ class PatternService:
                 params[key] = name
             conditions.append(f"p.pattern_name IN ({', '.join(placeholders)})")
 
-        query = text(
-            f"""
+        query = text(f"""
             SELECT p.*, s.name as stock_name, s.symbol as code
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
             WHERE {" AND ".join(conditions)}
             ORDER BY p.trade_date DESC, p.confidence DESC
             LIMIT :limit
-            """
-        )
+            """)
         result = await self.db.execute(query, params)
         rows = [dict(row._mapping) for row in result.fetchall()]
 
-        enriched: List[dict] = []
+        enriched: list[dict] = []
         for row in rows:
             if signal:
                 if self._pattern_signal(row.get("pattern_type")) != signal.upper():
@@ -148,15 +146,13 @@ class PatternService:
         boll_std: float,
     ) -> dict:
         max_period = max(ema_fast, ema_slow, boll_period)
-        bars_query = text(
-            """
+        bars_query = text("""
             SELECT trade_date, close
             FROM daily_bars
             WHERE ts_code = :ts_code AND trade_date <= :trade_date
             ORDER BY trade_date DESC
             LIMIT :limit
-            """
-        )
+            """)
         bars_result = await self.db.execute(
             bars_query, {"ts_code": ts_code, "trade_date": trade_date, "limit": max_period + 30}
         )
@@ -208,7 +204,7 @@ class PatternService:
             "boll_signal": boll_state,
         }
 
-    def _pattern_signal(self, pattern_type: Optional[str]) -> str:
+    def _pattern_signal(self, pattern_type: str | None) -> str:
         t = (pattern_type or "").lower()
         if t in {"reversal", "breakout"}:
             return "BULLISH"
@@ -216,7 +212,7 @@ class PatternService:
             return "BEARISH"
         return "NEUTRAL"
 
-    def _calc_ema(self, values: List[float], period: int) -> Optional[float]:
+    def _calc_ema(self, values: list[float], period: int) -> float | None:
         if period <= 1 or len(values) < period:
             return None
         multiplier = 2 / (period + 1)
@@ -227,8 +223,8 @@ class PatternService:
         return ema
 
     def _calc_boll(
-        self, values: List[float], period: int, std_mult: float
-    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        self, values: list[float], period: int, std_mult: float
+    ) -> tuple[float | None, float | None, float | None]:
         if period <= 1 or len(values) < period:
             return (None, None, None)
         window = values[-period:]
