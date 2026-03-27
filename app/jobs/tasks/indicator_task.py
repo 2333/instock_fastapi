@@ -2,14 +2,13 @@ import asyncio
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import List
 
 import numpy as np
 import talib as tl
-from sqlalchemy import select, and_, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import is_trading_day, should_skip_market_task
@@ -24,7 +23,7 @@ def _resolve_trade_date_dt(bar: DailyBar):
     return datetime.strptime(bar.trade_date, "%Y%m%d").date()
 
 
-async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates: List[str]):
+async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates: list[str]):
     """Calculate technical indicators for given ts_code and trade_dates."""
     result = await session.execute(
         select(DailyBar)
@@ -40,9 +39,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     closes = np.array([float(bar.close) for bar in bars], dtype=np.float64)
     highs = np.array([float(bar.high) for bar in bars], dtype=np.float64)
     lows = np.array([float(bar.low) for bar in bars], dtype=np.float64)
-    volumes = np.array([float(bar.vol) for bar in bars], dtype=np.float64)
-
-    indicators_data: List[dict] = []
+    indicators_data: list[dict] = []
 
     for i, bar in enumerate(bars):
         trade_date_dt = _resolve_trade_date_dt(bar)
@@ -269,14 +266,12 @@ async def run():
                 logger.warning("没有找到K线数据")
                 return
 
-            result = await session.execute(
-                text("""
-                    SELECT DISTINCT db.ts_code 
+            result = await session.execute(text("""
+                    SELECT DISTINCT db.ts_code
                     FROM daily_bars db
                     JOIN stocks s ON s.ts_code = db.ts_code
                     WHERE s.is_etf = false AND s.list_status = 'L'
-                """)
-            )
+                    """))
             ts_codes = [row[0] for row in result.fetchall()]
             logger.info(f"开始计算指标，共 {len(ts_codes)} 只股票")
 

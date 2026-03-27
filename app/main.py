@@ -1,28 +1,31 @@
 import asyncio
-import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.build_info import get_build_info
-from app.config import get_settings
-from app.api.routers import stock_router, etf_router, indicator_router, strategy_router
 from app.api.routers import (
-    pattern_router,
-    backtest_router,
-    selection_router,
-    fund_flow_router,
     attention_router,
     auth_router,
+    backtest_router,
+    etf_router,
+    fund_flow_router,
+    indicator_router,
     market_router,
+    pattern_router,
+    selection_router,
+    stock_router,
+    strategy_router,
 )
+from app.config import get_settings
+from app.database import close_db, init_db
 from app.jobs.scheduler import recover_missed_market_jobs, start_scheduler, stop_scheduler
-from app.database import init_db, close_db
 from app.logging_config import logger
 
 settings = get_settings()

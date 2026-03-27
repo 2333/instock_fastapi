@@ -1,16 +1,17 @@
 from fastapi import APIRouter
+
 from app.api.routers import (
-    stock_router,
-    etf_router,
-    indicator_router,
-    strategy_router,
-    pattern_router,
-    backtest_router,
-    selection_router,
-    fund_flow_router,
     attention_router,
     auth_router,
+    backtest_router,
+    etf_router,
+    fund_flow_router,
+    indicator_router,
     market_router,
+    pattern_router,
+    selection_router,
+    stock_router,
+    strategy_router,
 )
 
 router = APIRouter()

@@ -1,21 +1,22 @@
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class SelectionService:
-    def __init__(self, db: Optional[AsyncSession] = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
 
     @staticmethod
-    def get_conditions() -> Dict[str, Any]:
+    def get_conditions() -> dict[str, Any]:
         return {
             "markets": ["沪市", "深市", "创业板", "科创板"],
             "indicators": ["macd", "kdj", "boll", "rsi"],
             "strategies": ["放量上涨", "均线多头", "停机坪"],
         }
 
-    async def _resolve_trade_date(self, date: Optional[str]) -> Optional[str]:
+    async def _resolve_trade_date(self, date: str | None) -> str | None:
         if not self.db:
             return None
         if date:
@@ -34,7 +35,7 @@ class SelectionService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def run_selection(self, conditions: Dict[str, Any], date: Optional[str]) -> List[dict]:
+    async def run_selection(self, conditions: dict[str, Any], date: str | None) -> list[dict]:
         if not self.db:
             return []
 
@@ -53,7 +54,7 @@ class SelectionService:
             "s.is_etf = false",
             "db.trade_date = :trade_date",
         ]
-        params: Dict[str, Any] = {"trade_date": trade_date}
+        params: dict[str, Any] = {"trade_date": trade_date}
 
         if price_min is not None:
             where_sql.append("db.close >= :price_min")
@@ -90,7 +91,7 @@ class SelectionService:
             """)
         rows = (await self.db.execute(sql, params)).mappings().all()
 
-        results: List[dict] = []
+        results: list[dict] = []
         for row in rows:
             pct = float(row["pct_chg"] or 0)
             amt = float(row["amount"] or 0)
@@ -116,11 +117,11 @@ class SelectionService:
             )
         return results
 
-    async def get_history(self, date: Optional[str], limit: int) -> List[dict]:
+    async def get_history(self, date: str | None, limit: int) -> list[dict]:
         if not self.db:
             return []
         where = []
-        params: Dict[str, Any] = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
         if date:
             where.append("sr.trade_date = :trade_date")
             params["trade_date"] = date

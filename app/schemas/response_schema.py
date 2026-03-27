@@ -1,6 +1,7 @@
-from typing import Generic, Optional, TypeVar, List, Any
-from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Any, Generic, TypeVar
+
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
@@ -13,11 +14,11 @@ class ResponseBase(BaseModel):
 
 
 class DataResponse(ResponseBase, Generic[T]):
-    data: Optional[T] = None
+    data: T | None = None
 
 
 class PaginatedResponse(ResponseBase, Generic[T]):
-    data: List[T] = Field(default_factory=list)
+    data: list[T] = Field(default_factory=list)
     total: int = 0
     page: int = 1
     page_size: int = 20
@@ -45,7 +46,7 @@ def error_response(code: str, message: str, data: Any = None) -> dict:
 
 
 def paginated_response(
-    data: List[Any],
+    data: list[Any],
     total: int,
     page: int,
     page_size: int,

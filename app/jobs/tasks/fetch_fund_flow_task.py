@@ -2,12 +2,12 @@ import asyncio
 import logging
 import os
 from datetime import datetime
-from typing import List, Any
+from typing import Any
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import (
@@ -19,8 +19,8 @@ from app.jobs.market_calendar import (
 from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
 from app.models.stock_model import FundFlow, SectorFundFlow
 from app.utils.stock_codes import normalize_ts_code
-from core.crawling.base import ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.base import ProxyPool
 from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.tushare_provider import TushareProvider
 
@@ -72,17 +72,15 @@ async def _resolve_candidate_trade_dates(
     limit: int = 5,
     *,
     include_today: bool = True,
-) -> List[str]:
+) -> list[str]:
     today = format_trade_date(current_market_date())
     result = await session.execute(
-        text(
-            """
+        text("""
             SELECT DISTINCT trade_date
             FROM daily_bars
             ORDER BY trade_date DESC
             LIMIT :limit
-            """
-        ),
+            """),
         {"limit": limit},
     )
     dates = [row[0] for row in result.fetchall() if row[0]]
@@ -95,10 +93,10 @@ async def _fetch_rank_with_fallback(
     tushare_provider: Any,
     baostock_provider: Any,
     crawler: EastMoneyCrawler,
-    trade_dates: List[str],
-) -> tuple[List[dict], str]:
+    trade_dates: list[str],
+) -> tuple[list[dict], str]:
     for trade_date in trade_dates:
-        data: List[dict] = []
+        data: list[dict] = []
         if hasattr(tushare_provider, "fetch_fund_flow_rank"):
             data = await tushare_provider.fetch_fund_flow_rank(trade_date=trade_date)  # type: ignore
         if not data and hasattr(baostock_provider, "fetch_fund_flow_rank"):
@@ -108,7 +106,7 @@ async def _fetch_rank_with_fallback(
 
     fallback_date = trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")
     fetch_fallback = getattr(crawler, "fetch_fund_flow_rank", None)
-    fallback_data: List[dict] = []
+    fallback_data: list[dict] = []
     if callable(fetch_fallback):
         result = await fetch_fallback(indicator=0)  # type: ignore[call-arg]
         if isinstance(result, list):
@@ -119,9 +117,9 @@ async def _fetch_rank_with_fallback(
 async def _fetch_rank_by_source(
     tushare_provider: Any,
     crawler: EastMoneyCrawler,
-    trade_dates: List[str],
+    trade_dates: list[str],
     source: str,
-) -> tuple[List[dict], str, str]:
+) -> tuple[list[dict], str, str]:
     for trade_date in trade_dates:
         if source == "tushare":
             data = await tushare_provider.fetch_fund_flow_rank(trade_date=trade_date)
@@ -140,10 +138,10 @@ async def _fetch_sector_with_fallback(
     baostock_provider: Any,
     crawler: EastMoneyCrawler,
     sector_type: str,
-    trade_dates: List[str],
-) -> tuple[List[dict], str]:
+    trade_dates: list[str],
+) -> tuple[list[dict], str]:
     for trade_date in trade_dates:
-        data: List[dict] = []
+        data: list[dict] = []
         if hasattr(tushare_provider, "fetch_sector_fund_flow"):
             data = await tushare_provider.fetch_sector_fund_flow(
                 sector_type=sector_type, trade_date=trade_date
@@ -157,7 +155,7 @@ async def _fetch_sector_with_fallback(
 
     fallback_date = trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")
     fetch_fallback_sector = getattr(crawler, "fetch_sector_fund_flow", None)
-    fallback_sector: List[dict] = []
+    fallback_sector: list[dict] = []
     if callable(fetch_fallback_sector):
         result = await fetch_fallback_sector(sector_type=sector_type, trade_date=fallback_date)  # type: ignore[call-arg]
         if isinstance(result, list):
@@ -169,9 +167,9 @@ async def _fetch_sector_by_source(
     tushare_provider: Any,
     crawler: EastMoneyCrawler,
     sector_type: str,
-    trade_dates: List[str],
+    trade_dates: list[str],
     source: str,
-) -> tuple[List[dict], str, str]:
+) -> tuple[list[dict], str, str]:
     for trade_date in trade_dates:
         if source == "tushare":
             data = await tushare_provider.fetch_sector_fund_flow(
@@ -192,10 +190,10 @@ async def _fetch_sector_data(
     baostock_provider: Any,
     crawler: EastMoneyCrawler,
     sector_type: str,
-    trade_dates: List[str],
+    trade_dates: list[str],
     source: str,
     primary_only: bool,
-) -> tuple[List[dict], str, str]:
+) -> tuple[list[dict], str, str]:
     if source == "fallback":
         if primary_only:
             return (
@@ -221,7 +219,7 @@ async def _fetch_sector_data(
     )
 
 
-async def save_fund_flows(session: AsyncSession, data: List[dict], trade_date: str) -> int:
+async def save_fund_flows(session: AsyncSession, data: list[dict], trade_date: str) -> int:
     """保存资金流向数据"""
     count = 0
     for item in data:
@@ -282,16 +280,14 @@ async def save_fund_flows(session: AsyncSession, data: List[dict], trade_date: s
 
 
 async def save_sector_fund_flows(
-    session: AsyncSession, data: List[dict], trade_date: str, sector_type: str
+    session: AsyncSession, data: list[dict], trade_date: str, sector_type: str
 ) -> int:
     """保存板块资金流向数据"""
     await session.execute(
-        text(
-            """
+        text("""
             DELETE FROM sector_fund_flows
             WHERE trade_date = :trade_date AND sector_type = :sector_type
-            """
-        ),
+            """),
         {"trade_date": trade_date, "sector_type": sector_type},
     )
     count = 0
@@ -381,7 +377,9 @@ async def run():
                         task_name="fetch_fund_flow",
                         entity_type="stock_fund_flow",
                         entity_key="ALL",
-                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        trade_date=(
+                            trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")
+                        ),
                         status="needs_fallback",
                         source=stock_source,
                         note="primary source returned empty",
@@ -441,7 +439,9 @@ async def run():
                         task_name="fetch_fund_flow",
                         entity_type="sector_fund_flow",
                         entity_key="industry",
-                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        trade_date=(
+                            trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")
+                        ),
                         status="needs_fallback",
                         source=sector_source,
                         note="primary source returned empty",
@@ -501,7 +501,9 @@ async def run():
                         task_name="fetch_fund_flow",
                         entity_type="sector_fund_flow",
                         entity_key="concept",
-                        trade_date=trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d"),
+                        trade_date=(
+                            trade_dates[0] if trade_dates else datetime.now().strftime("%Y%m%d")
+                        ),
                         status="needs_fallback",
                         source=sector_source,
                         note="primary source returned empty",

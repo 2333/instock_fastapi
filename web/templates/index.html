@@ -3,84 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InStock API - 股票分析系统</title>
+    <title>InStock FastAPI - 智能股票分析平台</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <header class="header">
-        <div class="container">
-            <h1>InStock API</h1>
-            <nav class="nav">
-                <a href="/docs">API 文档</a>
-                <a href="/redoc">ReDoc</a>
-                <a href="/health">健康检查</a>
-            </nav>
-        </div>
-    </header>
-
-    <main class="container">
-        <div class="card">
-            <h2>系统信息</h2>
-            <p>欢迎使用 InStock 股票分析系统 API</p>
-            <p>版本: {{ version }}</p>
-            <p>构建: {{ git_sha }}</p>
-        </div>
-
-        <div class="card">
-            <h2>可用 API 端点</h2>
-            <div class="api-list">
-                <div class="api-item">
-                    <h3>股票接口</h3>
-                    <code>GET /api/v1/stocks</code>
-                    <p>获取股票列表</p>
-                    <code>GET /api/v1/stocks/{code}</code>
-                    <p>获取股票详情</p>
-                </div>
-                <div class="api-item">
-                    <h3>ETF 接口</h3>
-                    <code>GET /api/v1/etf</code>
-                    <p>获取 ETF 列表</p>
-                </div>
-                <div class="api-item">
-                    <h3>技术指标</h3>
-                    <code>GET /api/v1/indicators</code>
-                    <p>获取技术指标</p>
-                </div>
-                <div class="api-item">
-                    <h3>策略选股</h3>
-                    <code>GET /api/v1/strategies</code>
-                    <p>获取策略列表</p>
-                    <code>POST /api/v1/strategies/run</code>
-                    <p>运行策略</p>
-                </div>
-                <div class="api-item">
-                    <h3>形态识别</h3>
-                    <code>GET /api/v1/patterns</code>
-                    <p>获取形态识别结果</p>
-                </div>
-                <div class="api-item">
-                    <h3>回测</h3>
-                    <code>POST /api/v1/backtest</code>
-                    <p>运行回测</p>
-                </div>
-                <div class="api-item">
-                    <h3>资金流向</h3>
-                    <code>GET /api/v1/fund-flow/{code}</code>
-                    <p>获取资金流向</p>
-                </div>
-                <div class="api-item">
-                    <h3>自选股</h3>
-                    <code>GET /api/v1/attention</code>
-                    <p>获取自选股列表</p>
-                    <code>POST /api/v1/attention</code>
-                    <p>添加自选股</p>
+    <div class="page-shell">
+        <header class="hero">
+            <div class="hero__copy">
+                <p class="eyebrow">FastAPI + Vue 3 + TimescaleDB</p>
+                <h1>InStock FastAPI</h1>
+                <p class="lead">
+                    面向股票分析场景的全栈项目。后端提供数据接口、任务调度和静态首页，
+                    前端工程位于 <code>web/</code>，用于独立开发与交互展示。
+                </p>
+                <div class="hero__actions">
+                    <a class="button button--primary" href="/docs">查看 API 文档</a>
+                    <a class="button button--ghost" href="/health">健康检查</a>
                 </div>
             </div>
-        </div>
-    </main>
+            <aside class="hero__panel">
+                <div class="panel-card">
+                    <span class="panel-card__label">系统信息</span>
+                    <strong>版本 {{ version }}</strong>
+                    <p>构建标识：<code>{{ git_sha }}</code></p>
+                </div>
+                <div class="stats">
+                    <div>
+                        <span>后端</span>
+                        <strong>FastAPI</strong>
+                    </div>
+                    <div>
+                        <span>前端</span>
+                        <strong>Vue 3</strong>
+                    </div>
+                    <div>
+                        <span>部署</span>
+                        <strong>Docker</strong>
+                    </div>
+                </div>
+            </aside>
+        </header>
 
-    <footer class="footer">
-        <p>InStock API - 股票分析系统</p>
-    </footer>
+        <main class="content-grid">
+            <section class="card">
+                <h2>入口说明</h2>
+                <div class="link-list">
+                    <a href="/docs">
+                        <span>接口文档</span>
+                        <small>查看当前可用 API 和参数说明</small>
+                    </a>
+                    <a href="/redoc">
+                        <span>ReDoc</span>
+                        <small>浏览 OpenAPI 的另一种文档视图</small>
+                    </a>
+                    <a href="/health">
+                        <span>健康检查</span>
+                        <small>检查服务状态和运行时间戳</small>
+                    </a>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>常用 API</h2>
+                <div class="feature-grid">
+                    <article>
+                        <h3>股票</h3>
+                        <p><code>GET /api/v1/stocks</code></p>
+                        <p><code>GET /api/v1/stocks/{code}</code></p>
+                    </article>
+                    <article>
+                        <h3>ETF / 指标</h3>
+                        <p><code>GET /api/v1/etf</code></p>
+                        <p><code>GET /api/v1/indicators</code></p>
+                    </article>
+                    <article>
+                        <h3>形态 / 回测</h3>
+                        <p><code>GET /api/v1/patterns</code></p>
+                        <p><code>POST /api/v1/backtest</code></p>
+                    </article>
+                    <article>
+                        <h3>策略 / 资金流</h3>
+                        <p><code>GET /api/v1/strategies</code></p>
+                        <p><code>GET /api/v1/fund-flow/{code}</code></p>
+                    </article>
+                </div>
+            </section>
+        </main>
+    </div>
 </body>
 </html>
