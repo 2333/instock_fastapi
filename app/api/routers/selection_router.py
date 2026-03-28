@@ -1,40 +1,25 @@
-from typing import Any
-
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
+from app.schemas.selection_schema import (
+    SelectionConditionCreate,
+    SelectionConditionResponse,
+    SelectionConditionsMetaResponse,
+    SelectionHistoryResponse,
+    SelectionRequest,
+    SelectionResponse,
+)
 from app.services.selection_service import SelectionService
 
 router = APIRouter()
 
 
-class SelectionConditionCreate(BaseModel):
-    name: str
-    category: str
-    description: str | None = None
-    params: dict[str, Any] | None = None
-    is_active: bool = True
-
-
-class SelectionConditionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    user_id: int
-    name: str
-    category: str
-    description: str | None
-    params: dict[str, Any] | None
-    is_active: bool
-
-
-@router.get("/selection/conditions")
-async def get_selection_conditions():
+@router.get("/selection/conditions", response_model=SelectionConditionsMetaResponse)
+async def get_selection_conditions() -> SelectionConditionsMetaResponse:
     return SelectionService.get_conditions()
 
 
@@ -121,23 +106,31 @@ async def delete_condition(
     return {"status": "success", "message": "条件已删除"}
 
 
-@router.post("/selection")
+@router.post("/selection", response_model=SelectionResponse)
 async def run_selection(
-    conditions: dict[str, Any] = Body(...),
+    request: SelectionRequest = Body(...),
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SelectionResponse:
+    """Run stock selection with typed request/response contract."""
     service = SelectionService(db)
-    return await service.run_selection(conditions, date)
+    conditions = (
+        request.conditions
+        if isinstance(request.conditions, dict)
+        else request.conditions.model_dump(by_alias=True)
+    )
+    items = await service.run_selection(conditions, date)
+    return SelectionResponse(data=items)
 
 
-@router.get("/selection/history")
+@router.get("/selection/history", response_model=SelectionHistoryResponse)
 async def get_selection_history(
     date: str | None = None,
     limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SelectionHistoryResponse:
     service = SelectionService(db)
-    return await service.get_history(date, limit)
+    items = await service.get_history(date, limit)
+    return SelectionHistoryResponse(data=items)
