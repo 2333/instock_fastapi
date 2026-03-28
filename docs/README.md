@@ -6,6 +6,7 @@
 
 - [PRD.md](./PRD.md)：最新版产品需求文档，定义产品定位、第一性原理、功能边界和长期目标。
 - [ROADMAP.md](./ROADMAP.md)：产品与架构演进路线图，说明阶段目标、优先级和迭代校验方式。
+- [EXECUTION_PLAN.md](./EXECUTION_PLAN.md)：Phase 0 / Phase 1 的可执行任务拆解，面向实际开发落地。
 - [architecture/system_architecture.md](./architecture/system_architecture.md)：后端、任务调度、数据流和部署架构。
 - [design/class_diagram.md](./design/class_diagram.md)：核心数据模型和模块关系说明。
 - [api/api_document.md](./api/api_document.md)：当前 API 说明与调用示例。
