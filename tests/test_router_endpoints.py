@@ -265,7 +265,31 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
                             "amount": 300000000.0,
                             "score": 15.5,
                             "signal": "buy",
-                            "reason": None,
+                            "reason_summary": "Change >= 1.50%; Market = sz",
+                            "reason": {
+                                "summary": "Change >= 1.50%; Market = sz",
+                                "matched": [
+                                    {
+                                        "field": "change_rate",
+                                        "operator": ">=",
+                                        "value": 1.5,
+                                        "summary": "Change >= 1.50%",
+                                    },
+                                    {
+                                        "field": "market",
+                                        "operator": "=",
+                                        "value": "sz",
+                                        "summary": "Market = sz",
+                                    },
+                                ],
+                                "evidence": [
+                                    {
+                                        "metric": "change_rate",
+                                        "value": 2.5,
+                                        "summary": "Daily change 2.50%",
+                                    }
+                                ],
+                            },
                         }
                     ]
                 ),
@@ -283,12 +307,14 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
                             "date": "20240102",
                             "score": 15.5,
                             "signal": "hold",
+                            "reason_summary": "Historical screening record sel-1",
                         }
                     ]
                 ),
             ),
         ):
             conditions = await client.get("/api/v1/selection/conditions")
+            screening_metadata = await client.get("/api/v1/screening/metadata")
             my_conditions = await client.get("/api/v1/selection/my-conditions")
             create_response = await client.post(
                 "/api/v1/selection/my-conditions",
@@ -302,11 +328,17 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
             run_response = await client.post(
                 "/api/v1/selection", json={"conditions": {"changeMin": 1.5, "market": "sz"}}
             )
+            screening_run_response = await client.post(
+                "/api/v1/screening/run",
+                json={"filters": {"changeMin": 1.5}, "scope": {"market": "sz", "limit": 50}},
+            )
             history_response = await client.get("/api/v1/selection/history")
+            screening_history_response = await client.get("/api/v1/screening/history")
     finally:
         app.dependency_overrides.pop(get_db, None)
 
     assert conditions.json()["markets"] == ["沪市", "深市", "创业板", "科创板"]
+    assert screening_metadata.json()["data"]["filter_fields"][0]["key"] == "priceMin"
     assert my_conditions.json()[0]["name"] == "低回撤"
     assert create_response.status_code == 200
     assert update_response.json()["name"] == "低回撤2"
@@ -314,9 +346,17 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
     assert run_response.json()["success"] is True
     assert run_response.json()["data"][0]["code"] == "000001"
     assert run_response.json()["data"][0]["signal"] == "buy"
+    assert run_response.json()["data"][0]["reason_summary"] == "Change >= 1.50%; Market = sz"
+    assert screening_run_response.json()["success"] is True
+    assert screening_run_response.json()["data"]["total"] == 1
+    assert screening_run_response.json()["data"]["query"]["scope"]["limit"] == 50
+    assert screening_run_response.json()["data"]["items"][0]["reason"]["matched"][0]["field"] == "change_rate"
     assert history_response.json()["success"] is True
     assert history_response.json()["data"][0]["code"] == "000001"
     assert history_response.json()["data"][0]["signal"] == "hold"
+    assert history_response.json()["data"][0]["reason_summary"] == "Historical screening record sel-1"
+    assert screening_history_response.json()["data"]["total"] == 1
+    assert screening_history_response.json()["data"]["items"][0]["code"] == "000001"
 
 
 @pytest.mark.asyncio

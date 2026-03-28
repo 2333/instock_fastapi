@@ -19,10 +19,12 @@ def make_result(*, row=None, rows=None):
 @pytest.mark.asyncio
 async def test_selection_service_get_conditions_returns_static_payload():
     payload = SelectionService.get_conditions()
+    metadata = SelectionService.get_screening_metadata()
 
     assert "markets" in payload
     assert "indicators" in payload
     assert "strategies" in payload
+    assert metadata["filter_fields"][0]["key"] == "priceMin"
 
 
 @pytest.mark.asyncio
@@ -77,6 +79,9 @@ async def test_selection_service_run_selection_scores_and_labels_rows():
     assert results[0]["signal"] == "buy"
     assert results[1]["signal"] == "sell"
     assert results[0]["date"] == "20240102"
+    assert results[0]["reason_summary"] == "Close >= 5.00; Close <= 20.00; Change >= -5.00%"
+    assert results[0]["reason"]["matched"][-1]["summary"] == "Market = sz"
+    assert results[0]["reason"]["evidence"][1]["summary"] == "Daily change 2.50%"
 
 
 @pytest.mark.asyncio
@@ -110,6 +115,7 @@ async def test_selection_service_get_history_formats_rows():
             "date": "20240102",
             "score": 12.34,
             "signal": "hold",
+            "reason_summary": "Historical screening record sel-1",
         }
     ]
 
