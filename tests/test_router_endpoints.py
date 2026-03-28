@@ -244,15 +244,48 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         with (
             patch(
                 "app.api.routers.selection_router.SelectionService.get_conditions",
-                return_value=[{"name": "low_atr"}],
+                return_value={
+                    "markets": ["沪市", "深市", "创业板", "科创板"],
+                    "indicators": ["macd", "kdj", "boll", "rsi"],
+                    "strategies": ["放量上涨", "均线多头", "停机坪"],
+                },
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.run_selection",
-                new=AsyncMock(return_value=[{"code": "000001"}]),
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "ts_code": "000001.SZ",
+                            "code": "000001",
+                            "stock_name": "平安银行",
+                            "trade_date": "20240102",
+                            "date": "20240102",
+                            "close": 10.6,
+                            "change_rate": 2.5,
+                            "amount": 300000000.0,
+                            "score": 15.5,
+                            "signal": "buy",
+                            "reason": None,
+                        }
+                    ]
+                ),
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.get_history",
-                new=AsyncMock(return_value=[{"code": "000001"}]),
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "selection_id": "sel-1",
+                            "ts_code": "000001.SZ",
+                            "code": "000001",
+                            "stock_name": "平安银行",
+                            "trade_date": "20240102",
+                            "date": "20240102",
+                            "score": 15.5,
+                            "signal": "hold",
+                        }
+                    ]
+                ),
             ),
         ):
             conditions = await client.get("/api/v1/selection/conditions")
@@ -266,18 +299,24 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
                 json={"name": "低回撤2", "category": "technical", "description": "desc"},
             )
             delete_response = await client.delete("/api/v1/selection/my-conditions/1")
-            run_response = await client.post("/api/v1/selection", json={"rsi": 30})
+            run_response = await client.post(
+                "/api/v1/selection", json={"conditions": {"changeMin": 1.5, "market": "sz"}}
+            )
             history_response = await client.get("/api/v1/selection/history")
     finally:
         app.dependency_overrides.pop(get_db, None)
 
-    assert conditions.json()[0]["name"] == "low_atr"
+    assert conditions.json()["markets"] == ["沪市", "深市", "创业板", "科创板"]
     assert my_conditions.json()[0]["name"] == "低回撤"
     assert create_response.status_code == 200
     assert update_response.json()["name"] == "低回撤2"
     assert delete_response.json()["status"] == "success"
-    assert run_response.json()[0]["code"] == "000001"
-    assert history_response.json()[0]["code"] == "000001"
+    assert run_response.json()["success"] is True
+    assert run_response.json()["data"][0]["code"] == "000001"
+    assert run_response.json()["data"][0]["signal"] == "buy"
+    assert history_response.json()["success"] is True
+    assert history_response.json()["data"][0]["code"] == "000001"
+    assert history_response.json()["data"][0]["signal"] == "hold"
 
 
 @pytest.mark.asyncio
