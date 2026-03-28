@@ -101,9 +101,40 @@ async def test_get_stock_detail_returns_not_found_payload():
 async def test_get_stock_detail_uses_db_bars_for_bfq():
     db = Mock()
     db.execute = AsyncMock(
-        return_value=make_result(
-            row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")
-        )
+        side_effect=[
+            make_result(row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")),
+            make_result(
+                row=make_mapping_row(
+                    trade_date="20240102",
+                    open=10.5,
+                    high=10.8,
+                    low=10.3,
+                    close=10.6,
+                    pre_close=10.4,
+                    change=0.2,
+                    pct_chg=1.92,
+                    vol=5000,
+                    amount=52000,
+                )
+            ),
+            make_result(row=("20240102",)),
+            make_result(
+                rows=[
+                    make_mapping_row(indicator_name="RSI", indicator_value=56.78),
+                    make_mapping_row(indicator_name="MACD", indicator_value=0.12),
+                ]
+            ),
+            make_result(
+                rows=[
+                    make_mapping_row(
+                        trade_date="20240102",
+                        pattern_name="HAMMER",
+                        pattern_type="reversal",
+                        confidence=0.91,
+                    )
+                ]
+            ),
+        ]
     )
     service = StockService(db)
     service._query_bars_from_db = AsyncMock(return_value=[{"trade_date": "20240102"}])
@@ -113,15 +144,40 @@ async def test_get_stock_detail_uses_db_bars_for_bfq():
     assert result["adjust_requested"] == "bfq"
     assert result["adjust_applied"] == "bfq"
     assert result["bars"] == [{"trade_date": "20240102"}]
+    assert result["latest_trade_date"] == "20240102"
+    assert result["latest_bar"]["change_rate"] == 1.92
+    assert result["latest_indicator_snapshot"]["trade_date"] == "20240102"
+    assert result["latest_indicator_snapshot"]["values"]["rsi"] == 56.78
+    assert result["data_freshness"]["indicator_current"] is True
+    assert result["recent_patterns"]["latest_hits"][0]["pattern_name"] == "HAMMER"
+    assert result["validation_context"]["screening_metrics"][0]["metric"] == "close"
+    assert result["validation_context"]["pattern_annotations"][0]["context"]["signal"] == "bullish"
 
 
 @pytest.mark.asyncio
 async def test_get_stock_detail_falls_back_to_bfq_when_adjusted_bars_missing():
     db = Mock()
     db.execute = AsyncMock(
-        return_value=make_result(
-            row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")
-        )
+        side_effect=[
+            make_result(row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")),
+            make_result(
+                row=make_mapping_row(
+                    trade_date="20240103",
+                    open=10.5,
+                    high=10.8,
+                    low=10.3,
+                    close=10.6,
+                    pre_close=10.4,
+                    change=0.2,
+                    pct_chg=1.92,
+                    vol=5000,
+                    amount=52000,
+                )
+            ),
+            make_result(row=("20240102",)),
+            make_result(rows=[]),
+            make_result(rows=[]),
+        ]
     )
     service = StockService(db)
     service._fetch_adjusted_bars = AsyncMock(return_value=[])
@@ -133,6 +189,9 @@ async def test_get_stock_detail_falls_back_to_bfq_when_adjusted_bars_missing():
     assert result["adjust_applied"] == "bfq"
     assert result["adjust_note"] == "requested_adjust_data_unavailable_fallback_to_bfq"
     assert result["bars"] == [{"trade_date": "20240102"}]
+    assert result["data_freshness"]["price_current"] is True
+    assert result["data_freshness"]["indicator_current"] is False
+    assert result["data_freshness"]["pattern_current"] is False
 
 
 @pytest.mark.asyncio

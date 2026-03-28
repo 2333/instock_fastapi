@@ -15,6 +15,12 @@ class TestStocksAPI:
         data = response.json()
         assert data["ts_code"] == "000001.SZ"
         assert len(data["bars"]) == 1
+        assert data["latest_trade_date"] == "20240102"
+        assert data["latest_bar"]["close"] == 10.6
+        assert data["data_freshness"]["indicator_current"] is True
+        assert data["latest_indicator_snapshot"]["values"]["rsi"] == 56.78
+        assert data["recent_patterns"]["latest_hits"][0]["pattern_name"] == "HAMMER"
+        assert data["validation_context"]["pattern_annotations"][0]["context"]["signal"] == "bullish"
 
 
 class TestDailyBarsAPI:
