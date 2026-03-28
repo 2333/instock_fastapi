@@ -16,6 +16,43 @@ class SelectionService:
             "strategies": ["放量上涨", "均线多头", "停机坪"],
         }
 
+    @classmethod
+    def get_screening_metadata(cls) -> dict[str, Any]:
+        payload = cls.get_conditions()
+        payload["filter_fields"] = [
+            {
+                "key": "priceMin",
+                "label": "最低价格",
+                "value_type": "number",
+                "operators": [">="],
+            },
+            {
+                "key": "priceMax",
+                "label": "最高价格",
+                "value_type": "number",
+                "operators": ["<="],
+            },
+            {
+                "key": "changeMin",
+                "label": "最小涨跌幅",
+                "value_type": "number",
+                "operators": [">="],
+            },
+            {
+                "key": "changeMax",
+                "label": "最大涨跌幅",
+                "value_type": "number",
+                "operators": ["<="],
+            },
+            {
+                "key": "market",
+                "label": "市场范围",
+                "value_type": "enum",
+                "operators": ["="],
+            },
+        ]
+        return payload
+
     async def _resolve_trade_date(self, date: str | None) -> str | None:
         if not self.db:
             return None
@@ -35,7 +72,86 @@ class SelectionService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def run_selection(self, conditions: dict[str, Any], date: str | None) -> list[dict]:
+    def _build_reason(self, conditions: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+        matched: list[dict[str, Any]] = []
+
+        if conditions.get("priceMin") is not None:
+            value = float(conditions["priceMin"])
+            matched.append(
+                {
+                    "field": "close",
+                    "operator": ">=",
+                    "value": value,
+                    "summary": f"Close >= {value:.2f}",
+                }
+            )
+        if conditions.get("priceMax") is not None:
+            value = float(conditions["priceMax"])
+            matched.append(
+                {
+                    "field": "close",
+                    "operator": "<=",
+                    "value": value,
+                    "summary": f"Close <= {value:.2f}",
+                }
+            )
+        if conditions.get("changeMin") is not None:
+            value = float(conditions["changeMin"])
+            matched.append(
+                {
+                    "field": "change_rate",
+                    "operator": ">=",
+                    "value": value,
+                    "summary": f"Change >= {value:.2f}%",
+                }
+            )
+        if conditions.get("changeMax") is not None:
+            value = float(conditions["changeMax"])
+            matched.append(
+                {
+                    "field": "change_rate",
+                    "operator": "<=",
+                    "value": value,
+                    "summary": f"Change <= {value:.2f}%",
+                }
+            )
+        if conditions.get("market"):
+            matched.append(
+                {
+                    "field": "market",
+                    "operator": "=",
+                    "value": str(conditions["market"]),
+                    "summary": f"Market = {conditions['market']}",
+                }
+            )
+
+        pct = float(row["pct_chg"] or 0)
+        amount = float(row["amount"] or 0)
+        close = float(row["close"] or 0)
+        evidence = [
+            {"metric": "close", "value": round(close, 4), "summary": f"Latest close {close:.2f}"},
+            {
+                "metric": "change_rate",
+                "value": round(pct, 4),
+                "summary": f"Daily change {pct:.2f}%",
+            },
+            {
+                "metric": "amount",
+                "value": round(amount, 4),
+                "summary": f"Turnover {amount:.0f}",
+            },
+        ]
+
+        if matched:
+            summary = "; ".join(item["summary"] for item in matched[:3])
+        else:
+            summary = f"Included in latest screening universe with daily change {pct:.2f}%"
+
+        return {"summary": summary, "matched": matched, "evidence": evidence}
+
+    async def run_selection(
+        self, conditions: dict[str, Any], date: str | None, limit: int = 300
+    ) -> list[dict]:
         if not self.db:
             return []
 
@@ -87,8 +203,9 @@ class SelectionService:
             JOIN daily_bars db ON s.ts_code = db.ts_code
             WHERE {" AND ".join(where_sql)}
             ORDER BY db.pct_chg DESC NULLS LAST
-            LIMIT 300
+            LIMIT :limit
             """)
+        params["limit"] = limit
         rows = (await self.db.execute(sql, params)).mappings().all()
 
         results: list[dict] = []
@@ -101,6 +218,7 @@ class SelectionService:
                 signal = "buy"
             elif pct <= -2:
                 signal = "sell"
+            reason = self._build_reason(conditions, row)
             results.append(
                 {
                     "ts_code": row["ts_code"],
@@ -113,6 +231,8 @@ class SelectionService:
                     "close": float(row["close"] or 0),
                     "change_rate": pct,
                     "amount": amt,
+                    "reason_summary": reason["summary"],
+                    "reason": reason,
                 }
             )
         return results
@@ -152,6 +272,7 @@ class SelectionService:
                 "date": row["trade_date"],
                 "score": float(row["score"] or 0),
                 "signal": "hold",
+                "reason_summary": f"Historical screening record {row['selection_id']}",
             }
             for row in rows
         ]

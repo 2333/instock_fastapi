@@ -6,6 +6,13 @@ from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
 from app.schemas.selection_schema import (
+    ScreeningHistoryData,
+    ScreeningHistoryResponse,
+    ScreeningMetadataResponse,
+    ScreeningQuery,
+    ScreeningRequest,
+    ScreeningRunData,
+    ScreeningRunResponse,
     SelectionConditionCreate,
     SelectionConditionResponse,
     SelectionConditionsMetaResponse,
@@ -21,6 +28,11 @@ router = APIRouter()
 @router.get("/selection/conditions", response_model=SelectionConditionsMetaResponse)
 async def get_selection_conditions() -> SelectionConditionsMetaResponse:
     return SelectionService.get_conditions()
+
+
+@router.get("/screening/metadata", response_model=ScreeningMetadataResponse)
+async def get_screening_metadata() -> ScreeningMetadataResponse:
+    return ScreeningMetadataResponse(data=SelectionService.get_screening_metadata())
 
 
 @router.get("/selection/my-conditions", response_model=list[SelectionConditionResponse])
@@ -113,15 +125,39 @@ async def run_selection(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SelectionResponse:
-    """Run stock selection with typed request/response contract."""
+    """Backward-compatible selection entrypoint."""
     service = SelectionService(db)
-    conditions = (
-        request.conditions
-        if isinstance(request.conditions, dict)
-        else request.conditions.model_dump(by_alias=True)
-    )
-    items = await service.run_selection(conditions, date)
+    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
+    if request.scope.market and "market" not in conditions:
+        conditions["market"] = request.scope.market
+    items = await service.run_selection(conditions, date, limit=request.scope.limit)
     return SelectionResponse(data=items)
+
+
+@router.post("/screening/run", response_model=ScreeningRunResponse)
+async def run_screening(
+    request: ScreeningRequest = Body(...),
+    date: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningRunResponse:
+    service = SelectionService(db)
+    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
+    if request.scope.market and "market" not in conditions:
+        conditions["market"] = request.scope.market
+    items = await service.run_selection(conditions, date, limit=request.scope.limit)
+    resolved_trade_date = items[0]["trade_date"] if items else await service._resolve_trade_date(date)
+    return ScreeningRunResponse(
+        data=ScreeningRunData(
+            query=ScreeningQuery(
+                filters=request.filters,
+                scope=request.scope,
+                trade_date=resolved_trade_date,
+            ),
+            items=items,
+            total=len(items),
+        )
+    )
 
 
 @router.get("/selection/history", response_model=SelectionHistoryResponse)
@@ -134,3 +170,17 @@ async def get_selection_history(
     service = SelectionService(db)
     items = await service.get_history(date, limit)
     return SelectionHistoryResponse(data=items)
+
+
+@router.get("/screening/history", response_model=ScreeningHistoryResponse)
+async def get_screening_history(
+    date: str | None = None,
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningHistoryResponse:
+    service = SelectionService(db)
+    items = await service.get_history(date, limit)
+    return ScreeningHistoryResponse(
+        data=ScreeningHistoryData(trade_date=date, limit=limit, items=items, total=len(items))
+    )
