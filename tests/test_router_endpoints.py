@@ -266,28 +266,43 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
                             "score": 15.5,
                             "signal": "buy",
                             "reason_summary": "Change >= 1.50%; Market = sz",
+                            "evidence": [
+                                {
+                                    "key": "change_rate",
+                                    "label": "Daily change",
+                                    "value": 2.5,
+                                    "operator": ">=",
+                                    "condition": 1.5,
+                                    "matched": True,
+                                },
+                                {
+                                    "key": "market",
+                                    "label": "Market",
+                                    "value": "sz",
+                                    "operator": "=",
+                                    "condition": "sz",
+                                    "matched": True,
+                                },
+                            ],
                             "reason": {
                                 "summary": "Change >= 1.50%; Market = sz",
-                                "matched": [
-                                    {
-                                        "field": "change_rate",
-                                        "operator": ">=",
-                                        "value": 1.5,
-                                        "summary": "Change >= 1.50%",
-                                    },
-                                    {
-                                        "field": "market",
-                                        "operator": "=",
-                                        "value": "sz",
-                                        "summary": "Market = sz",
-                                    },
-                                ],
                                 "evidence": [
                                     {
-                                        "metric": "change_rate",
+                                        "key": "change_rate",
+                                        "label": "Daily change",
                                         "value": 2.5,
-                                        "summary": "Daily change 2.50%",
-                                    }
+                                        "operator": ">=",
+                                        "condition": 1.5,
+                                        "matched": True,
+                                    },
+                                    {
+                                        "key": "market",
+                                        "label": "Market",
+                                        "value": "sz",
+                                        "operator": "=",
+                                        "condition": "sz",
+                                        "matched": True,
+                                    },
                                 ],
                             },
                         }
@@ -350,7 +365,11 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
     assert screening_run_response.json()["success"] is True
     assert screening_run_response.json()["data"]["total"] == 1
     assert screening_run_response.json()["data"]["query"]["scope"]["limit"] == 50
-    assert screening_run_response.json()["data"]["items"][0]["reason"]["matched"][0]["field"] == "change_rate"
+    assert screening_run_response.json()["data"]["items"][0]["evidence"][0]["key"] == "change_rate"
+    assert (
+        screening_run_response.json()["data"]["items"][0]["reason"]["evidence"][1]["condition"]
+        == "sz"
+    )
     assert history_response.json()["success"] is True
     assert history_response.json()["data"][0]["code"] == "000001"
     assert history_response.json()["data"][0]["signal"] == "hold"

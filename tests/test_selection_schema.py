@@ -34,21 +34,26 @@ def test_screening_run_response_preserves_structured_reason_payload():
                         "score": 15.5,
                         "signal": "buy",
                         "reason_summary": "Change >= 1.50%",
+                        "evidence": [
+                            {
+                                "key": "change_rate",
+                                "label": "Daily change",
+                                "value": 2.5,
+                                "operator": ">=",
+                                "condition": 1.5,
+                                "matched": True,
+                            }
+                        ],
                         "reason": {
                             "summary": "Change >= 1.50%",
-                            "matched": [
-                                {
-                                    "field": "change_rate",
-                                    "operator": ">=",
-                                    "value": 1.5,
-                                    "summary": "Change >= 1.50%",
-                                }
-                            ],
                             "evidence": [
                                 {
-                                    "metric": "change_rate",
+                                    "key": "change_rate",
+                                    "label": "Daily change",
                                     "value": 2.5,
-                                    "summary": "Daily change 2.50%",
+                                    "operator": ">=",
+                                    "condition": 1.5,
+                                    "matched": True,
                                 }
                             ],
                         },
@@ -60,5 +65,5 @@ def test_screening_run_response_preserves_structured_reason_payload():
     )
 
     assert response.data.query.filters.change_min == 1.5
-    assert response.data.items[0].reason.matched[0].field == "change_rate"
-    assert response.data.items[0].reason.evidence[0].summary == "Daily change 2.50%"
+    assert response.data.items[0].evidence[0].key == "change_rate"
+    assert response.data.items[0].reason.evidence[0].condition == 1.5
