@@ -188,6 +188,14 @@ export const selectionApi = {
 
   getHistory: (params?: { limit?: number }) =>
     api.get('/selection/history', { params }) as Promise<any>,
+
+  getScreeningMetadata: () => api.get('/screening/metadata') as Promise<any>,
+
+  runScreening: (payload: { filters?: Record<string, unknown>; scope?: Record<string, unknown> }) =>
+    api.post('/screening/run', payload) as Promise<any>,
+
+  getScreeningHistory: (params?: { date?: string; limit?: number }) =>
+    api.get('/screening/history', { params }) as Promise<any>,
 }
 
 export const fundFlowApi = {
