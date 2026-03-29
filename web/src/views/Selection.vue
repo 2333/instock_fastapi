@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="header-left">
         <h1>股票精选</h1>
-        <p class="subtitle">根据条件筛选和选择股票</p>
+        <p class="subtitle">运行规范筛选并进入个股验证详情</p>
       </div>
       <div class="header-right">
         <button class="btn btn-secondary" @click="toggleCriteriaPanel">
@@ -120,15 +120,25 @@
       ></div>
 
       <main class="results-panel">
+        <div class="review-note">
+          <strong>Milestone 3</strong>
+          <span>当前前端已接入规范筛选结果与个股验证链路，规范接口支持价格、日涨跌幅、市场三个筛选维度。</span>
+        </div>
+
         <div v-if="!hasResults" class="empty-state">
           <div class="empty-icon">🎯</div>
           <h3>暂无结果</h3>
-          <p>配置筛选条件后点击"开始筛选"</p>
+          <p>运行筛选后可查看命中原因，并进入个股详情复核验证数据</p>
         </div>
 
         <template v-else>
           <div class="results-header">
-            <span class="results-count">共 {{ results.length }} 只股票</span>
+            <div class="results-summary">
+              <span class="results-count">共 {{ screeningSummary.total }} 只股票</span>
+              <span v-if="screeningSummary.tradeDate" class="results-date">
+                筛选交易日 {{ formatDisplayDate(screeningSummary.tradeDate) }}
+              </span>
+            </div>
             <div class="results-actions">
               <select v-model="sortBy" class="filter-select">
                 <option value="score">按评分排序</option>
@@ -144,7 +154,8 @@
                   <th>代码</th>
                   <th>名称</th>
                   <th>评分</th>
-                  <th>信号</th>
+                  <th>命中原因</th>
+                  <th>验证入口</th>
                   <th>日期</th>
                 </tr>
               </thead>
@@ -152,13 +163,27 @@
                 <tr 
                   v-for="stock in sortedResults" 
                   :key="stock.code"
-                  @click="$router.push(`/stock/${stock.code}`)"
+                  @click="openStockDetail(stock)"
                 >
                   <td class="stock-code">{{ stock.code }}</td>
                   <td class="stock-name">{{ stock.name || '-' }}</td>
                   <td>{{ stock.score }}</td>
+                  <td class="reason-cell">
+                    <div class="reason-summary">{{ stock.reason_summary || '已命中筛选条件' }}</div>
+                    <div v-if="stock.evidence.length" class="evidence-list">
+                      <span
+                        v-for="item in stock.evidence.slice(0, 3)"
+                        :key="`${stock.code}-${item.key}`"
+                        class="evidence-chip"
+                      >
+                        {{ formatEvidence(item) }}
+                      </span>
+                    </div>
+                  </td>
                   <td>
-                    <span class="signal-badge" :class="stock.signal">{{ stock.signal }}</span>
+                    <button class="detail-link" @click.stop="openStockDetail(stock)">
+                      查看验证
+                    </button>
                   </td>
                   <td>{{ stock.date || stock.trade_date }}</td>
                 </tr>
@@ -173,8 +198,18 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { selectionApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
+
+interface ScreeningEvidenceItem {
+  key: string
+  label: string
+  value: string | number | boolean | null
+  operator?: string | null
+  condition?: string | number | boolean | null
+  matched?: boolean
+}
 
 interface StockResult {
   ts_code: string
@@ -185,12 +220,19 @@ interface StockResult {
   signal: string
   trade_date: string
   date?: string
+  reason_summary?: string | null
+  evidence: ScreeningEvidenceItem[]
 }
 
+const router = useRouter()
 const loading = ref(false)
 const hasResults = ref(false)
 const results = ref<StockResult[]>([])
 const sortBy = ref('score')
+const screeningSummary = ref({
+  total: 0,
+  tradeDate: '',
+})
 const criteriaPanelRef = ref<HTMLElement | null>(null)
 const criteriaCollapsed = ref(false)
 const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
@@ -225,6 +267,22 @@ const criteria = reactive({
 })
 const CRITERIA_STORAGE_KEY = 'instock_selection_criteria'
 
+const canonicalFilterKeys = ['priceMin', 'priceMax', 'changeMin', 'changeMax', 'market'] as const
+const nonCanonicalLabels: Record<string, string> = {
+  marketCapMin: '市值下限',
+  marketCapMax: '市值上限',
+  weekChangeMin: '周涨跌下限',
+  weekChangeMax: '周涨跌上限',
+  peMin: '市盈率下限',
+  peMax: '市盈率上限',
+  rsiMin: 'RSI 下限',
+  rsiMax: 'RSI 上限',
+  macdBullish: 'MACD 看涨',
+  macdBearish: 'MACD 看跌',
+  volumeRatioMin: '量比下限',
+  volumeRatioMax: '量比上限',
+}
+
 const sortedResults = computed(() => {
   const sorted = [...results.value]
   sorted.sort((a, b) => {
@@ -237,19 +295,69 @@ const sortedResults = computed(() => {
   return sorted
 })
 
+const formatDisplayDate = (value?: string | null) => {
+  if (!value) return '-'
+  if (value.includes('-')) return value
+  if (value.length !== 8) return value
+  return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+}
+
+const normalizeResult = (item: any): StockResult => ({
+  ...item,
+  code: item.code || item.symbol || item.ts_code?.split('.')[0],
+  name: item.stock_name || item.name,
+  evidence: Array.isArray(item.evidence) ? item.evidence : [],
+})
+
+const buildCanonicalFilters = () => {
+  return canonicalFilterKeys.reduce<Record<string, unknown>>((acc, key) => {
+    const value = criteria[key]
+    if (value !== null && value !== '') {
+      acc[key] = value
+    }
+    return acc
+  }, {})
+}
+
+const getIgnoredCriteriaLabels = () => {
+  return Object.entries(nonCanonicalLabels)
+    .filter(([key]) => {
+      const value = criteria[key as keyof typeof criteria]
+      return value !== null && value !== '' && value !== false
+    })
+    .map(([, label]) => label)
+}
+
+const formatEvidence = (item: ScreeningEvidenceItem) => {
+  const operator = item.operator ? ` ${item.operator} ${item.condition}` : ''
+  const value = item.value ?? '-'
+  return `${item.label}: ${value}${operator}`
+}
+
+const openStockDetail = (stock: StockResult) => {
+  router.push({
+    path: `/stock/${stock.code}`,
+    query: {
+      screening_date: stock.trade_date || stock.date || '',
+    },
+  })
+}
+
 const fetchResults = async () => {
   loading.value = true
   try {
-    const data = await selectionApi.getHistory({ limit: 100 })
-    results.value = (data || []).map((r: any) => ({
-      ...r,
-      code: r.code || r.symbol || r.ts_code?.split('.')[0],
-      name: r.stock_name || r.name,
-    }))
+    const response = await selectionApi.getScreeningHistory({ limit: 100 })
+    const payload = response?.data || {}
+    results.value = (payload.items || []).map(normalizeResult)
+    screeningSummary.value = {
+      total: Number(payload.total || results.value.length),
+      tradeDate: payload.trade_date || results.value[0]?.trade_date || '',
+    }
     hasResults.value = results.value.length > 0
   } catch (e) {
     console.error('Failed to fetch selection results:', e)
     results.value = []
+    screeningSummary.value = { total: 0, tradeDate: '' }
   } finally {
     loading.value = false
   }
@@ -258,12 +366,24 @@ const fetchResults = async () => {
 const runSelection = async () => {
   loading.value = true
   try {
-    const data = await selectionApi.runSelection(criteria)
-    results.value = (data || []).map((r: any) => ({
-      ...r,
-      code: r.code || r.symbol || r.ts_code?.split('.')[0],
-      name: r.stock_name || r.name,
-    }))
+    const ignoredCriteria = getIgnoredCriteriaLabels()
+    if (ignoredCriteria.length > 0) {
+      showNotification?.('warning', `本次规范筛选暂未接入：${ignoredCriteria.join('、')}`)
+    }
+
+    const response = await selectionApi.runScreening({
+      filters: buildCanonicalFilters(),
+      scope: {
+        limit: 100,
+        market: criteria.market || undefined,
+      },
+    })
+    const payload = response?.data || {}
+    results.value = (payload.items || []).map(normalizeResult)
+    screeningSummary.value = {
+      total: Number(payload.total || results.value.length),
+      tradeDate: payload.query?.trade_date || results.value[0]?.trade_date || '',
+    }
     hasResults.value = results.value.length > 0
     showNotification?.('success', `筛选完成，共 ${results.value.length} 只`)
   } catch (e) {
@@ -490,6 +610,23 @@ onMounted(() => {
   min-width: 0;
 }
 
+.review-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: rgba(41, 98, 255, 0.08);
+  border: 1px solid rgba(41, 98, 255, 0.2);
+  border-radius: 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.72);
+
+  strong {
+    color: #9ab7ff;
+  }
+}
+
 @media (max-width: 1200px) {
   .selection-layout {
     flex-direction: column;
@@ -545,6 +682,17 @@ onMounted(() => {
 .results-count {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.6);
+}
+
+.results-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.results-date {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .results-actions {
@@ -610,26 +758,40 @@ onMounted(() => {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.signal-badge {
+.reason-cell {
+  min-width: 280px;
+}
+
+.reason-summary {
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.84);
+  line-height: 1.4;
+}
+
+.evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.evidence-chip {
+  display: inline-flex;
+  max-width: 100%;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.58);
   font-size: 11px;
-  font-weight: 600;
+}
 
-  &.buy {
-    background: rgba(0, 200, 83, 0.15);
-    color: #00C853;
-  }
-
-  &.sell {
-    background: rgba(255, 23, 68, 0.15);
-    color: #FF1744;
-  }
-
-  &.hold {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
-  }
+.detail-link {
+  padding: 6px 10px;
+  border: 1px solid rgba(41, 98, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(41, 98, 255, 0.1);
+  color: #9ab7ff;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .macd-badge {

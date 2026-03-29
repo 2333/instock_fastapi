@@ -124,6 +124,54 @@
             </div>
           </div>
 
+          <div class="panel-section validation-panel">
+            <div class="section-header">
+              <h3>筛选验证</h3>
+              <span v-if="screeningTradeDate" class="section-chip">来自 {{ formatDisplayDate(screeningTradeDate) }} 筛选</span>
+            </div>
+            <p class="validation-copy">
+              结合最新价格、指标和形态数据，帮助复核本次筛选结果是否仍然有效。
+            </p>
+            <div v-if="freshnessItems.length" class="freshness-grid">
+              <div v-for="item in freshnessItems" :key="item.key" class="freshness-item">
+                <span class="label">{{ item.label }}</span>
+                <div class="freshness-value">
+                  <span class="freshness-badge" :class="item.current ? 'is-current' : 'is-stale'">
+                    {{ item.current ? '最新' : '待确认' }}
+                  </span>
+                  <span>{{ formatDisplayDate(item.tradeDate) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="validationMetrics.length" class="validation-group">
+              <h4>筛选指标</h4>
+              <div class="validation-list">
+                <div v-for="item in validationMetrics" :key="`${item.metric}-${item.trade_date}`" class="validation-item">
+                  <div class="validation-item-header">
+                    <strong>{{ item.metric }}</strong>
+                    <span>{{ formatDisplayDate(item.trade_date) }}</span>
+                  </div>
+                  <p>{{ item.summary }}</p>
+                </div>
+              </div>
+            </div>
+            <div v-if="validationPatterns.length" class="validation-group">
+              <h4>形态注释</h4>
+              <div class="validation-list">
+                <div v-for="item in validationPatterns" :key="`${item.metric}-${item.trade_date}-${item.summary}`" class="validation-item">
+                  <div class="validation-item-header">
+                    <strong>{{ item.metric }}</strong>
+                    <span>{{ formatDisplayDate(item.trade_date) }}</span>
+                  </div>
+                  <p>{{ item.summary }}</p>
+                </div>
+              </div>
+            </div>
+            <div v-if="!validationMetrics.length && !validationPatterns.length" class="empty-state validation-empty">
+              暂无可展示的验证信息
+            </div>
+          </div>
+
           <div class="panel-section">
             <h3>{{ t('stock_actions') }}</h3>
             <div class="action-buttons">
@@ -242,6 +290,12 @@ interface DateRange {
   end: string
 }
 
+interface ValidationItem {
+  metric: string
+  trade_date?: string | null
+  summary: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const { locale, t } = useLocale()
@@ -260,6 +314,7 @@ const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
+const screeningTradeDate = computed(() => toQueryDate(route.query.screening_date))
 const marketLabel = computed(() => {
   const exchange = String(stockInfo.value?.exchange || '').toUpperCase()
   if (exchange === 'SSE' || exchange === 'SH') return t('stock_market_sh')
@@ -318,6 +373,32 @@ const requestedPatternRange = computed<DateRange | null>(() => {
 })
 
 const hasRequestedPatternRange = computed(() => !!requestedPatternRange.value)
+const freshnessItems = computed(() => {
+  const freshness = stockInfo.value?.data_freshness
+  if (!freshness) return []
+  return [
+    {
+      key: 'price',
+      label: '价格数据',
+      tradeDate: freshness.price_trade_date,
+      current: Boolean(freshness.price_current),
+    },
+    {
+      key: 'indicator',
+      label: '指标快照',
+      tradeDate: freshness.indicator_trade_date,
+      current: Boolean(freshness.indicator_current),
+    },
+    {
+      key: 'pattern',
+      label: '形态识别',
+      tradeDate: freshness.pattern_trade_date,
+      current: Boolean(freshness.pattern_current),
+    },
+  ].filter((item) => item.tradeDate)
+})
+const validationMetrics = computed<ValidationItem[]>(() => stockInfo.value?.validation_context?.screening_metrics || [])
+const validationPatterns = computed<ValidationItem[]>(() => stockInfo.value?.validation_context?.pattern_annotations || [])
 
 const patternRangeLabel = computed(() => {
   if (!requestedPatternRange.value) {
@@ -834,6 +915,115 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+}
+
+.validation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.validation-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.freshness-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.freshness-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+
+  .label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.freshness-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+
+  &.is-current {
+    background: rgba(0, 200, 83, 0.15);
+    color: #00C853;
+  }
+
+  &.is-stale {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffd54f;
+  }
+}
+
+.validation-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  h4 {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.62);
+  }
+}
+
+.validation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.validation-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+
+  p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.72);
+  }
+}
+
+.validation-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.48);
+
+  strong {
+    color: rgba(255, 255, 255, 0.86);
+    text-transform: capitalize;
+  }
+}
+
+.validation-empty {
+  padding: 12px;
 }
 
 .profile-item {
