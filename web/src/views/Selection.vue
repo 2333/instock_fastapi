@@ -24,6 +24,26 @@
         :style="{ width: `${criteriaPanelWidth}px` }"
       >
         <div class="panel-section">
+          <div class="section-heading">
+            <h3>当前可用筛选</h3>
+            <p>规范筛选接口当前支持价格、日涨跌幅和市场范围。</p>
+          </div>
+          <div class="criteria-group">
+            <label>市场范围</label>
+            <select v-model="criteria.market" class="filter-select criteria-select">
+              <option value="">全部市场</option>
+              <option
+                v-for="option in marketOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="panel-section">
           <h3>价格条件</h3>
           <div class="criteria-group">
             <label>价格范围</label>
@@ -31,14 +51,6 @@
               <input type="number" v-model.number="criteria.priceMin" placeholder="最小" class="input-small">
               <span>-</span>
               <input type="number" v-model.number="criteria.priceMax" placeholder="最大" class="input-small">
-            </div>
-          </div>
-          <div class="criteria-group">
-            <label>市值 (亿元)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.marketCapMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.marketCapMax" placeholder="最大" class="input-small">
             </div>
           </div>
         </div>
@@ -53,58 +65,24 @@
               <input type="number" v-model.number="criteria.changeMax" placeholder="最大" class="input-small">
             </div>
           </div>
-          <div class="criteria-group">
-            <label>周涨跌 (%)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.weekChangeMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.weekChangeMax" placeholder="最大" class="input-small">
-            </div>
-          </div>
         </div>
 
         <div class="panel-section">
-          <h3>技术指标</h3>
-          <div class="criteria-group">
-            <label>市盈率</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.peMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.peMax" placeholder="最大" class="input-small">
-            </div>
+          <div class="section-heading">
+            <h3>暂未接入的历史条件</h3>
+            <p>以下条件保留为展示项，当前不会参与规范筛选。</p>
           </div>
-          <div class="criteria-group">
-            <label>RSI (14)</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.rsiMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.rsiMax" placeholder="最大" class="input-small">
-            </div>
-          </div>
-          <div class="criteria-group">
-            <label>MACD 信号</label>
-            <div class="checkbox-group">
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="criteria.macdBullish">
-                <span>MACD 看涨</span>
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="criteria.macdBearish">
-                <span>MACD 看跌</span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel-section">
-          <h3>成交量条件</h3>
-          <div class="criteria-group">
-            <label>量比</label>
-            <div class="range-inputs">
-              <input type="number" v-model.number="criteria.volumeRatioMin" placeholder="最小" class="input-small">
-              <span>-</span>
-              <input type="number" v-model.number="criteria.volumeRatioMax" placeholder="最大" class="input-small">
-            </div>
+          <div class="legacy-grid">
+            <section
+              v-for="group in unavailableFilterGroups"
+              :key="group.title"
+              class="legacy-card"
+            >
+              <h4>{{ group.title }}</h4>
+              <ul class="legacy-list">
+                <li v-for="item in group.items" :key="item">{{ item }}</li>
+              </ul>
+            </section>
           </div>
         </div>
       </aside>
@@ -120,9 +98,9 @@
       ></div>
 
       <main class="results-panel">
-        <div class="review-note">
-          <strong>Milestone 3</strong>
-          <span>当前前端已接入规范筛选结果与个股验证链路，规范接口支持价格、日涨跌幅、市场三个筛选维度。</span>
+        <div class="availability-note">
+          <strong>规范筛选说明</strong>
+          <span>{{ supportedFiltersDescription }}</span>
         </div>
 
         <div v-if="!hasResults" class="empty-state">
@@ -224,11 +202,22 @@ interface StockResult {
   evidence: ScreeningEvidenceItem[]
 }
 
+interface FilterMetadataItem {
+  key: string
+  label: string
+  value_type: string
+  operators: string[]
+}
+
 const router = useRouter()
 const loading = ref(false)
 const hasResults = ref(false)
 const results = ref<StockResult[]>([])
 const sortBy = ref('score')
+const screeningMetadata = ref<{
+  filter_fields?: FilterMetadataItem[]
+  markets?: string[]
+} | null>(null)
 const screeningSummary = ref({
   total: 0,
   tradeDate: '',
@@ -268,6 +257,11 @@ const criteria = reactive({
 const CRITERIA_STORAGE_KEY = 'instock_selection_criteria'
 
 const canonicalFilterKeys = ['priceMin', 'priceMax', 'changeMin', 'changeMax', 'market'] as const
+const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围']
+const marketLabelMap: Record<string, string> = {
+  sh: '沪市',
+  sz: '深市',
+}
 const nonCanonicalLabels: Record<string, string> = {
   marketCapMin: '市值下限',
   marketCapMax: '市值上限',
@@ -282,6 +276,46 @@ const nonCanonicalLabels: Record<string, string> = {
   volumeRatioMin: '量比下限',
   volumeRatioMax: '量比上限',
 }
+const unavailableFilterGroups = [
+  { title: '价格扩展', items: ['市值范围'] },
+  { title: '涨跌扩展', items: ['周涨跌幅'] },
+  { title: '技术指标', items: ['市盈率', 'RSI (14)', 'MACD 信号'] },
+  { title: '成交量', items: ['量比'] },
+]
+
+const marketOptions = computed(() => {
+  const metadataMarkets = screeningMetadata.value?.markets || []
+  const normalized = metadataMarkets
+    .map((label) => {
+      const value = Object.entries(marketLabelMap).find(([, name]) => name === label)?.[0]
+      return value ? { value, label } : null
+    })
+    .filter((item): item is { value: 'sh' | 'sz'; label: string } => item !== null)
+
+  return normalized.length > 0
+    ? normalized
+    : [
+        { value: 'sh' as const, label: '沪市' },
+        { value: 'sz' as const, label: '深市' },
+      ]
+})
+
+const supportedFiltersDescription = computed(() => {
+  const labels = screeningMetadata.value?.filter_fields?.length
+    ? Array.from(
+        new Set(
+          screeningMetadata.value.filter_fields.map((item) => {
+            if (item.key.startsWith('price')) return '价格范围'
+            if (item.key.startsWith('change')) return '日涨跌幅'
+            if (item.key === 'market') return '市场范围'
+            return item.label
+          })
+        )
+      )
+    : defaultSupportedFilterLabels
+
+  return `当前结果页仅启用 ${labels.join('、')}；历史条件已标记为暂未接入，不会参与本次筛选。`
+})
 
 const sortedResults = computed(() => {
   const sorted = [...results.value]
@@ -319,13 +353,17 @@ const buildCanonicalFilters = () => {
   }, {})
 }
 
-const getIgnoredCriteriaLabels = () => {
-  return Object.entries(nonCanonicalLabels)
-    .filter(([key]) => {
-      const value = criteria[key as keyof typeof criteria]
-      return value !== null && value !== '' && value !== false
-    })
-    .map(([, label]) => label)
+const resetNonCanonicalCriteria = () => {
+  const clearedLabels: string[] = []
+  const mutableCriteria = criteria as Record<string, string | number | boolean | null>
+  for (const [key, label] of Object.entries(nonCanonicalLabels)) {
+    const value = mutableCriteria[key]
+    if (value !== null && value !== '' && value !== false) {
+      clearedLabels.push(label)
+    }
+    mutableCriteria[key] = typeof value === 'boolean' ? false : null
+  }
+  return clearedLabels
 }
 
 const formatEvidence = (item: ScreeningEvidenceItem) => {
@@ -363,14 +401,19 @@ const fetchResults = async () => {
   }
 }
 
+const fetchScreeningMetadata = async () => {
+  try {
+    const response = await selectionApi.getScreeningMetadata()
+    screeningMetadata.value = response?.data || null
+  } catch (e) {
+    console.error('Failed to fetch screening metadata:', e)
+    screeningMetadata.value = null
+  }
+}
+
 const runSelection = async () => {
   loading.value = true
   try {
-    const ignoredCriteria = getIgnoredCriteriaLabels()
-    if (ignoredCriteria.length > 0) {
-      showNotification?.('warning', `本次规范筛选暂未接入：${ignoredCriteria.join('、')}`)
-    }
-
     const response = await selectionApi.runScreening({
       filters: buildCanonicalFilters(),
       scope: {
@@ -409,12 +452,17 @@ onMounted(() => {
   if (savedCriteria) {
     try {
       Object.assign(criteria, JSON.parse(savedCriteria))
+      const clearedLabels = resetNonCanonicalCriteria()
+      if (clearedLabels.length > 0) {
+        showNotification?.('info', `已清除未接入规范筛选的历史条件：${clearedLabels.join('、')}`)
+      }
     } catch {
       // ignore broken local cache
     }
   }
   hydrateCriteriaWidth()
   criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
+  fetchScreeningMetadata()
   fetchResults()
 })
 
@@ -543,6 +591,21 @@ onMounted(() => {
   }
 }
 
+.section-heading {
+  margin-bottom: 16px;
+
+  h3 {
+    margin-bottom: 6px;
+  }
+
+  p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
 .criteria-group {
   margin-bottom: 16px;
 
@@ -556,6 +619,10 @@ onMounted(() => {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
   }
+}
+
+.criteria-select {
+  width: 100%;
 }
 
 .range-inputs {
@@ -579,6 +646,32 @@ onMounted(() => {
     outline: none;
     border-color: #2962FF;
   }
+}
+
+.legacy-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.legacy-card {
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+
+  h4 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.72);
+  }
+}
+
+.legacy-list {
+  margin: 0;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .checkbox-group {
@@ -610,7 +703,7 @@ onMounted(() => {
   min-width: 0;
 }
 
-.review-note {
+.availability-note {
   display: flex;
   align-items: center;
   gap: 10px;
