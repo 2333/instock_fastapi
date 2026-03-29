@@ -72,82 +72,127 @@ class SelectionService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
+    @staticmethod
+    def _format_condition_value(key: str, value: Any) -> str | int | float | bool:
+        if key in {"priceMin", "priceMax", "changeMin", "changeMax"}:
+            return round(float(value), 4)
+        return value
+
+    @staticmethod
+    def _build_condition_evidence(
+        *,
+        key: str,
+        label: str,
+        operator: str,
+        condition: Any,
+        actual_value: Any,
+    ) -> dict[str, Any]:
+        return {
+            "key": key,
+            "label": label,
+            "value": round(float(actual_value), 4)
+            if isinstance(actual_value, (int, float))
+            else actual_value,
+            "operator": operator,
+            "condition": SelectionService._format_condition_value(key, condition),
+            "matched": True,
+        }
+
     def _build_reason(self, conditions: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
-        matched: list[dict[str, Any]] = []
-
-        if conditions.get("priceMin") is not None:
-            value = float(conditions["priceMin"])
-            matched.append(
-                {
-                    "field": "close",
-                    "operator": ">=",
-                    "value": value,
-                    "summary": f"Close >= {value:.2f}",
-                }
-            )
-        if conditions.get("priceMax") is not None:
-            value = float(conditions["priceMax"])
-            matched.append(
-                {
-                    "field": "close",
-                    "operator": "<=",
-                    "value": value,
-                    "summary": f"Close <= {value:.2f}",
-                }
-            )
-        if conditions.get("changeMin") is not None:
-            value = float(conditions["changeMin"])
-            matched.append(
-                {
-                    "field": "change_rate",
-                    "operator": ">=",
-                    "value": value,
-                    "summary": f"Change >= {value:.2f}%",
-                }
-            )
-        if conditions.get("changeMax") is not None:
-            value = float(conditions["changeMax"])
-            matched.append(
-                {
-                    "field": "change_rate",
-                    "operator": "<=",
-                    "value": value,
-                    "summary": f"Change <= {value:.2f}%",
-                }
-            )
-        if conditions.get("market"):
-            matched.append(
-                {
-                    "field": "market",
-                    "operator": "=",
-                    "value": str(conditions["market"]),
-                    "summary": f"Market = {conditions['market']}",
-                }
-            )
-
         pct = float(row["pct_chg"] or 0)
         amount = float(row["amount"] or 0)
         close = float(row["close"] or 0)
-        evidence = [
-            {"metric": "close", "value": round(close, 4), "summary": f"Latest close {close:.2f}"},
-            {
-                "metric": "change_rate",
-                "value": round(pct, 4),
-                "summary": f"Daily change {pct:.2f}%",
-            },
-            {
-                "metric": "amount",
-                "value": round(amount, 4),
-                "summary": f"Turnover {amount:.0f}",
-            },
-        ]
+        market_value = "sh" if str(row["ts_code"]).endswith(".SH") else "sz"
+        evidence: list[dict[str, Any]] = []
+        summary_parts: list[str] = []
 
-        if matched:
-            summary = "; ".join(item["summary"] for item in matched[:3])
+        if conditions.get("priceMin") is not None:
+            value = float(conditions["priceMin"])
+            summary_parts.append(f"Close >= {value:.2f}")
+            evidence.append(
+                self._build_condition_evidence(
+                    key="close",
+                    label="Close",
+                    operator=">=",
+                    condition=value,
+                    actual_value=close,
+                )
+            )
+        if conditions.get("priceMax") is not None:
+            value = float(conditions["priceMax"])
+            summary_parts.append(f"Close <= {value:.2f}")
+            evidence.append(
+                self._build_condition_evidence(
+                    key="close",
+                    label="Close",
+                    operator="<=",
+                    condition=value,
+                    actual_value=close,
+                )
+            )
+        if conditions.get("changeMin") is not None:
+            value = float(conditions["changeMin"])
+            summary_parts.append(f"Change >= {value:.2f}%")
+            evidence.append(
+                self._build_condition_evidence(
+                    key="change_rate",
+                    label="Daily change",
+                    operator=">=",
+                    condition=value,
+                    actual_value=pct,
+                )
+            )
+        if conditions.get("changeMax") is not None:
+            value = float(conditions["changeMax"])
+            summary_parts.append(f"Change <= {value:.2f}%")
+            evidence.append(
+                self._build_condition_evidence(
+                    key="change_rate",
+                    label="Daily change",
+                    operator="<=",
+                    condition=value,
+                    actual_value=pct,
+                )
+            )
+        if conditions.get("market"):
+            summary_parts.append(f"Market = {conditions['market']}")
+            evidence.append(
+                {
+                    "key": "market",
+                    "label": "Market",
+                    "value": market_value,
+                    "operator": "=",
+                    "condition": str(conditions["market"]),
+                    "matched": market_value == str(conditions["market"]),
+                }
+            )
+
+        if summary_parts:
+            summary = "; ".join(summary_parts[:3])
         else:
             summary = f"Included in latest screening universe with daily change {pct:.2f}%"
+            evidence = [
+                {
+                    "key": "close",
+                    "label": "Close",
+                    "value": round(close, 4),
+                    "matched": True,
+                },
+                {
+                    "key": "change_rate",
+                    "label": "Daily change",
+                    "value": round(pct, 4),
+                    "matched": True,
+                },
+                {
+                    "key": "amount",
+                    "label": "Turnover",
+                    "value": round(amount, 4),
+                    "matched": True,
+                },
+            ]
 
-        return {"summary": summary, "matched": matched, "evidence": evidence}
+        return {"summary": summary, "evidence": evidence}
 
     async def run_selection(
         self, conditions: dict[str, Any], date: str | None, limit: int = 300
@@ -232,6 +277,7 @@ class SelectionService:
                     "change_rate": pct,
                     "amount": amt,
                     "reason_summary": reason["summary"],
+                    "evidence": reason["evidence"],
                     "reason": reason,
                 }
             )

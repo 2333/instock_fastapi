@@ -80,8 +80,23 @@ async def test_selection_service_run_selection_scores_and_labels_rows():
     assert results[1]["signal"] == "sell"
     assert results[0]["date"] == "20240102"
     assert results[0]["reason_summary"] == "Close >= 5.00; Close <= 20.00; Change >= -5.00%"
-    assert results[0]["reason"]["matched"][-1]["summary"] == "Market = sz"
-    assert results[0]["reason"]["evidence"][1]["summary"] == "Daily change 2.50%"
+    assert results[0]["evidence"][0] == {
+        "key": "close",
+        "label": "Close",
+        "value": 10.6,
+        "operator": ">=",
+        "condition": 5.0,
+        "matched": True,
+    }
+    assert results[0]["evidence"][-1] == {
+        "key": "market",
+        "label": "Market",
+        "value": "sz",
+        "operator": "=",
+        "condition": "sz",
+        "matched": True,
+    }
+    assert results[0]["reason"]["evidence"] == results[0]["evidence"]
 
 
 @pytest.mark.asyncio

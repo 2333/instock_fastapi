@@ -39,28 +39,21 @@ class ScreeningScope(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class ScreeningConditionMatch(BaseModel):
-    """Minimal summary for one matched screening condition."""
-
-    field: str
-    operator: str
-    value: str | int | float | bool
-    summary: str
-
-
 class ScreeningEvidenceItem(BaseModel):
-    """Minimal evidence attached to one screening result."""
+    """Minimal structured evidence attached to one screening result."""
 
-    metric: str
+    key: str
+    label: str
     value: str | int | float | bool | None = None
-    summary: str
+    operator: str | None = None
+    condition: str | int | float | bool | None = None
+    matched: bool = True
 
 
 class ScreeningReason(BaseModel):
     """Human-readable explanation for why a result matched."""
 
     summary: str | None = None
-    matched: list[ScreeningConditionMatch] = Field(default_factory=list)
     evidence: list[ScreeningEvidenceItem] = Field(default_factory=list)
 
 
@@ -113,6 +106,9 @@ class SelectionResultItem(BaseModel):
     signal: str  # "buy", "sell", or "hold"
     reason_summary: str | None = Field(
         None, description="Minimal human-readable reason summary for the match"
+    )
+    evidence: list[ScreeningEvidenceItem] = Field(
+        default_factory=list, description="Structured evidence for why the stock matched"
     )
     reason: ScreeningReason | None = Field(
         None, description="Optional structured reason/evidence payload"
