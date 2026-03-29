@@ -1,524 +1,785 @@
 <template>
-  <div class="dashboard">
-    <div class="dashboard-header">
-      <div class="header-left">
-        <h1>数据看板</h1>
-        <p class="subtitle">实时监控与分析</p>
+  <div class="dashboard-page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Phase 0 工作台</p>
+        <h1>重新进入扫描与验证</h1>
+        <p class="subtitle">
+          首页只保留四个真实入口，帮助你从最近一次扫描、关注和验证继续往下走。
+        </p>
       </div>
-      <div class="header-right">
-        <span class="last-updated">更新时间: {{ lastUpdated }}</span>
-        <button class="btn btn-primary" @click="refreshData" :disabled="loading">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
-          刷新
+      <div class="header-actions">
+        <div class="sync-meta">
+          <span class="sync-label">最近刷新</span>
+          <strong>{{ lastSyncedLabel }}</strong>
+        </div>
+        <button class="refresh-btn" @click="refreshWorkbench" :disabled="loading">
+          {{ loading ? '刷新中...' : '刷新工作台' }}
         </button>
       </div>
+    </header>
+
+    <div v-if="loadWarnings.length" class="warning-banner">
+      <strong>部分卡片未完成加载</strong>
+      <span>{{ loadWarnings.join(' / ') }}</span>
     </div>
 
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
-      <p>加载中...</p>
-    </div>
-
-    <div v-else class="dashboard-grid">
-      <!-- 今日形态 -->
-      <div class="card">
+    <div class="card-grid">
+      <section class="workbench-card">
         <div class="card-header">
-          <h3>今日形态</h3>
-          <router-link to="/patterns" class="card-link">查看全部</router-link>
-        </div>
-        <div class="pattern-list">
-          <div v-if="recentPatterns.length === 0" class="empty-state">
-            暂无形态数据
+          <div>
+            <span class="card-kicker">扫描温度</span>
+            <h2>今日形态摘要</h2>
           </div>
-          <div 
-            v-else
-            v-for="pattern in recentPatterns" 
-            :key="`${pattern.code}-${pattern.type}`"
-            class="pattern-item"
-            @click="$router.push(`/stock/${pattern.code}`)"
+          <router-link to="/patterns" class="card-link">进入形态识别</router-link>
+        </div>
+
+        <div class="metric-strip">
+          <div class="metric-block">
+            <span class="metric-value">{{ patternSummary.total }}</span>
+            <span class="metric-label">命中总数</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--positive">{{ patternSummary.bullish }}</span>
+            <span class="metric-label">看涨</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ patternSummary.neutral }}</span>
+            <span class="metric-label">中性</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--negative">{{ patternSummary.bearish }}</span>
+            <span class="metric-label">看跌</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="patternSummary.tradeDate">
+            最近评估交易日 {{ formatDisplayDate(patternSummary.tradeDate) }}，优先从置信度更高的形态回到个股详情。
+          </template>
+          <template v-else>
+            当前没有可展示的形态结果，进入形态识别页可重新扫描。
+          </template>
+        </p>
+
+        <div v-if="topPatterns.length" class="list-stack">
+          <router-link
+            v-for="pattern in topPatterns"
+            :key="`${pattern.code}-${pattern.patternName}-${pattern.tradeDate}`"
+            :to="buildStockLink(pattern.code, pattern.tradeDate)"
+            class="list-row"
           >
-            <div class="pattern-info">
-              <span class="pattern-code">{{ pattern.code }}</span>
-              <span class="pattern-name">{{ pattern.name }}</span>
+            <div>
+              <strong>{{ pattern.code }}</strong>
+              <span>{{ pattern.name }}</span>
             </div>
-            <div class="pattern-meta">
-              <span class="badge" :class="getSignalClass(pattern.signal)">{{ pattern.signal }}</span>
-              <span class="pattern-confidence">{{ pattern.confidence }}%</span>
+            <div class="row-meta">
+              <span :class="signalBadgeClass(pattern.signal)">{{ signalLabel(pattern.signal) }}</span>
+              <span>{{ pattern.confidence.toFixed(0) }}%</span>
             </div>
-          </div>
+          </router-link>
         </div>
-      </div>
+      </section>
 
-      <!-- 精选回顾 -->
-      <div class="card">
+      <section class="workbench-card">
         <div class="card-header">
-          <h3>精选回顾</h3>
-          <router-link to="/selection" class="card-link">查看全部</router-link>
+          <div>
+            <span class="card-kicker">我的关注</span>
+            <h2>关注列表回看</h2>
+          </div>
+          <router-link to="/attention" class="card-link">管理关注</router-link>
         </div>
-        <div class="selection-summary">
-          <div class="selection-stat">
-            <span class="selection-value">{{ selectionStats.total }}</span>
-            <span class="selection-label">精选总数</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value price-up">{{ selectionStats.winning }}</span>
-            <span class="selection-label">盈利交易</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value">{{ selectionStats.winRate }}%</span>
-            <span class="selection-label">胜率</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value">{{ formatReturn(selectionStats.avgReturn) }}%</span>
-            <span class="selection-label">平均收益</span>
-          </div>
-        </div>
-      </div>
 
-      <!-- 快速跳转 -->
-      <div class="card full-width">
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ attentionItems.length }}</span>
+            <span class="metric-label">已关注股票</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ latestAttentionDateLabel }}</span>
+            <span class="metric-label">最近加入</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="attentionItems.length">
+            从关注列表直接回到个股详情，继续核对走势与筛选证据。
+          </template>
+          <template v-else>
+            暂无关注股票，可在详情页或关注页补充观察名单。
+          </template>
+        </p>
+
+        <div v-if="topAttentionItems.length" class="list-stack">
+          <router-link
+            v-for="stock in topAttentionItems"
+            :key="stock.code"
+            :to="buildStockLink(stock.code)"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ stock.code }}</strong>
+              <span>{{ stock.name }}</span>
+            </div>
+            <div class="row-meta">
+              <span>{{ formatDisplayDate(stock.createdAt) }}</span>
+            </div>
+          </router-link>
+        </div>
+      </section>
+
+      <section class="workbench-card">
         <div class="card-header">
-          <h3>快速导航</h3>
+          <div>
+            <span class="card-kicker">最新筛选</span>
+            <h2>最近一次筛选结果</h2>
+          </div>
+          <router-link to="/selection" class="card-link">继续筛选</router-link>
         </div>
-        <div class="quick-nav">
-          <router-link to="/stocks" class="nav-item">
-            <span class="nav-icon">📊</span>
-            <span class="nav-label">股票列表</span>
-          </router-link>
-          <router-link to="/patterns" class="nav-item">
-            <span class="nav-icon">🔄</span>
-            <span class="nav-label">形态分析</span>
-          </router-link>
-          <router-link to="/selection" class="nav-item">
-            <span class="nav-icon">✨</span>
-            <span class="nav-label">精选策略</span>
-          </router-link>
-          <router-link to="/backtest" class="nav-item">
-            <span class="nav-icon">📈</span>
-            <span class="nav-label">回测分析</span>
-          </router-link>
-          <router-link to="/attention" class="nav-item">
-            <span class="nav-icon">⭐</span>
-            <span class="nav-label">我的关注</span>
+
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ latestScreeningCount }}</span>
+            <span class="metric-label">最新命中</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ latestScreeningDateLabel }}</span>
+            <span class="metric-label">筛选交易日</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="latestScreeningCount > 0">
+            保留最近交易日的筛选命中，便于直接重回结果页或逐只进入验证详情。
+          </template>
+          <template v-else>
+            还没有筛选历史，进入股票精选页可发起新的规范筛选。
+          </template>
+        </p>
+
+        <div v-if="latestScreeningItems.length" class="list-stack">
+          <router-link
+            v-for="item in latestScreeningItems"
+            :key="`${item.code}-${item.tradeDate}`"
+            :to="buildStockLink(item.code, item.tradeDate)"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.code }}</strong>
+              <span>{{ item.name }}</span>
+            </div>
+            <div class="row-meta">
+              <span>{{ item.score.toFixed(1) }} 分</span>
+            </div>
           </router-link>
         </div>
-      </div>
+      </section>
+
+      <section class="workbench-card">
+        <div class="card-header">
+          <div>
+            <span class="card-kicker">最近验证</span>
+            <h2>历史验证入口</h2>
+          </div>
+          <router-link to="/selection" class="card-link">查看历史</router-link>
+        </div>
+
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ latestValidationCount }}</span>
+            <span class="metric-label">历史记录</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ latestValidationDateLabel }}</span>
+            <span class="metric-label">最近日期</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="latestValidationCount > 0">
+            从历史筛选记录回到个股详情，继续核查价格、指标和形态是否支持当时结论。
+          </template>
+          <template v-else>
+            暂无历史验证记录，当前首页不会伪造策略或回测摘要。
+          </template>
+        </p>
+
+        <div v-if="latestValidationItems.length" class="list-stack">
+          <router-link
+            v-for="item in latestValidationItems"
+            :key="item.selectionId"
+            :to="buildStockLink(item.code, item.tradeDate)"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.code }}</strong>
+              <span>{{ item.name }}</span>
+            </div>
+            <div class="row-meta">
+              <span>{{ item.score.toFixed(1) }} 分</span>
+            </div>
+          </router-link>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { patternApi, selectionApi } from '@/api'
+import { computed, onMounted, ref } from 'vue'
+import { attentionApi, patternApi, selectionApi } from '@/api'
 
-const lastUpdated = ref(new Date().toLocaleString())
-const loading = ref(false)
-
-interface PatternItem {
+interface AttentionEntry {
   code: string
   name: string
-  type: string
-  signal: string
-  confidence: number
+  createdAt: string
 }
 
-const recentPatterns = ref<PatternItem[]>([])
+interface ScreeningEntry {
+  selectionId: string
+  code: string
+  name: string
+  tradeDate: string
+  score: number
+}
 
-const selectionStats = reactive({
-  total: 0,
-  winning: 0,
-  winRate: 0,
-  avgReturn: 0,
+interface PatternEntry {
+  code: string
+  name: string
+  tradeDate: string
+  confidence: number
+  signal: string
+  patternName: string
+}
+
+const loading = ref(false)
+const lastSyncedAt = ref('')
+const loadWarnings = ref<string[]>([])
+
+const attentionItems = ref<AttentionEntry[]>([])
+const screeningItems = ref<ScreeningEntry[]>([])
+const validationItems = ref<ScreeningEntry[]>([])
+const patternItems = ref<PatternEntry[]>([])
+
+const normalizeList = <T>(response: unknown, fallback: T[] = []): T[] => {
+  if (Array.isArray(response)) return response as T[]
+  if (response && typeof response === 'object') {
+    const payload = (response as { data?: unknown }).data
+    if (Array.isArray(payload)) return payload as T[]
+  }
+  return fallback
+}
+
+const normalizeScreeningHistory = (response: unknown) => {
+  if (response && typeof response === 'object') {
+    const payload = (response as { data?: { items?: unknown[] } }).data
+    if (payload && Array.isArray(payload.items)) {
+      return payload.items
+    }
+  }
+  return []
+}
+
+const coerceNumber = (value: unknown) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const normalizeAttentionEntry = (item: any): AttentionEntry => ({
+  code: String(item?.code || item?.symbol || item?.ts_code?.split('.')?.[0] || ''),
+  name: String(item?.stock_name || item?.name || item?.code || '--'),
+  createdAt: String(item?.created_at || ''),
 })
 
-const getSignalClass = (signal: string) => {
-  if (!signal) return 'neutral'
-  const s = signal.toLowerCase()
-  if (s.includes('bull') || s.includes('买') || s.includes('多')) return 'bullish'
-  if (s.includes('bear') || s.includes('卖') || s.includes('空')) return 'bearish'
+const normalizeScreeningEntry = (item: any): ScreeningEntry => ({
+  selectionId: String(item?.selection_id || `${item?.code || ''}-${item?.trade_date || item?.date || ''}`),
+  code: String(item?.code || item?.ts_code?.split('.')?.[0] || ''),
+  name: String(item?.stock_name || item?.name || item?.code || '--'),
+  tradeDate: String(item?.trade_date || item?.date || ''),
+  score: coerceNumber(item?.score),
+})
+
+const normalizePatternEntry = (item: any): PatternEntry => ({
+  code: String(item?.code || item?.symbol || item?.ts_code?.split('.')?.[0] || ''),
+  name: String(item?.stock_name || item?.name || item?.code || '--'),
+  tradeDate: String(item?.trade_date || item?.date || ''),
+  confidence: coerceNumber(item?.confidence),
+  signal: String(item?.pattern_type || item?.signal || 'neutral'),
+  patternName: String(item?.pattern_name || item?.type || ''),
+})
+
+const signalKey = (signal: string) => {
+  const normalized = signal.toLowerCase()
+  if (normalized.includes('bull') || normalized.includes('买') || normalized.includes('多')) return 'bullish'
+  if (normalized.includes('bear') || normalized.includes('卖') || normalized.includes('空')) return 'bearish'
   return 'neutral'
 }
 
-const formatReturn = (value: number) => {
-  if (!value || isNaN(value)) return '0.00'
-  return value.toFixed(2)
-}
-
-const fetchPatterns = async () => {
-  try {
-    const patterns = await patternApi.getTodayPatterns({ 
-      limit: 10,
-      min_confidence: 0,
-    })
-    if (patterns && patterns.length > 0) {
-      recentPatterns.value = patterns.map((p: any) => ({
-        code: p.code || p.ts_code?.split('.')[0] || '',
-        name: p.stock_name || p.name || p.ts_code || '',
-        type: p.pattern_name || '',
-        signal: p.pattern_type || p.signal || 'neutral',
-        confidence: parseFloat(p.confidence) || 0,
-      }))
-    } else {
-      recentPatterns.value = []
-    }
-  } catch (e) {
-    console.error('获取形态数据失败:', e)
-    recentPatterns.value = []
+const groupByLatestDate = (items: ScreeningEntry[]) => {
+  const latestDate = items.reduce((latest, item) => {
+    return item.tradeDate > latest ? item.tradeDate : latest
+  }, '')
+  return {
+    latestDate,
+    items: items.filter((item) => item.tradeDate === latestDate),
   }
 }
 
-const fetchSelectionStats = async () => {
-  try {
-    const history = await selectionApi.getHistory({ limit: 100 })
-    if (history && history.length > 0) {
-      selectionStats.total = history.length
-      const winning = history.filter((r: any) => r.signal === 'buy' || r.score > 0).length
-      selectionStats.winning = winning
-      selectionStats.winRate = Math.round((winning / history.length) * 100 * 10) / 10
-      
-      const totalReturn = history.reduce((sum: number, r: any) => sum + (parseFloat(r.score) || 0), 0)
-      selectionStats.avgReturn = totalReturn / history.length
-    }
-  } catch (e) {
-    console.error('获取精选数据失败:', e)
+const patternSummary = computed(() => {
+  const summary = {
+    total: patternItems.value.length,
+    bullish: 0,
+    neutral: 0,
+    bearish: 0,
+    tradeDate: '',
   }
+
+  for (const item of patternItems.value) {
+    summary.tradeDate = item.tradeDate > summary.tradeDate ? item.tradeDate : summary.tradeDate
+    const key = signalKey(item.signal)
+    if (key === 'bullish') summary.bullish += 1
+    if (key === 'bearish') summary.bearish += 1
+    if (key === 'neutral') summary.neutral += 1
+  }
+
+  return summary
+})
+
+const topPatterns = computed(() => {
+  return [...patternItems.value]
+    .sort((a, b) => b.confidence - a.confidence || b.tradeDate.localeCompare(a.tradeDate))
+    .slice(0, 3)
+})
+
+const topAttentionItems = computed(() => attentionItems.value.slice(0, 3))
+
+const latestScreeningGroup = computed(() => groupByLatestDate(screeningItems.value))
+const latestValidationGroup = computed(() => groupByLatestDate(validationItems.value))
+
+const latestScreeningItems = computed(() => {
+  return [...latestScreeningGroup.value.items]
+    .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
+    .slice(0, 3)
+})
+
+const latestValidationItems = computed(() => {
+  return [...latestValidationGroup.value.items]
+    .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
+    .slice(0, 3)
+})
+
+const latestScreeningCount = computed(() => latestScreeningGroup.value.items.length)
+const latestValidationCount = computed(() => latestValidationGroup.value.items.length)
+
+const lastSyncedLabel = computed(() => {
+  return lastSyncedAt.value ? formatDisplayDate(lastSyncedAt.value, true) : '--'
+})
+
+const latestScreeningDateLabel = computed(() => {
+  return latestScreeningGroup.value.latestDate
+    ? formatDisplayDate(latestScreeningGroup.value.latestDate)
+    : '--'
+})
+
+const latestValidationDateLabel = computed(() => {
+  return latestValidationGroup.value.latestDate
+    ? formatDisplayDate(latestValidationGroup.value.latestDate)
+    : '--'
+})
+
+const latestAttentionDateLabel = computed(() => {
+  const latest = attentionItems.value[0]?.createdAt
+  return latest ? formatDisplayDate(latest) : '--'
+})
+
+const formatDisplayDate = (value: string, withTime = false) => {
+  if (!value) return '--'
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value
+  }
+
+  if (/^\d{8}$/.test(value)) {
+    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  const options: Intl.DateTimeFormatOptions = withTime
+    ? {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      }
+    : {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }
+  return new Intl.DateTimeFormat('zh-CN', options).format(date)
 }
 
-const refreshData = async () => {
+const buildStockLink = (code: string, screeningDate?: string) => ({
+  path: `/stock/${code}`,
+  query: screeningDate ? { screening_date: screeningDate } : undefined,
+})
+
+const signalLabel = (signal: string) => {
+  const key = signalKey(signal)
+  if (key === 'bullish') return '看涨'
+  if (key === 'bearish') return '看跌'
+  return '中性'
+}
+
+const signalBadgeClass = (signal: string) => `signal-badge signal-badge--${signalKey(signal)}`
+
+const refreshWorkbench = async () => {
   loading.value = true
-  lastUpdated.value = new Date().toLocaleString()
-  await Promise.all([
-    fetchPatterns(),
-    fetchSelectionStats(),
+  loadWarnings.value = []
+
+  const results = await Promise.allSettled([
+    attentionApi.getList(),
+    selectionApi.getScreeningHistory({ limit: 60 }),
+    selectionApi.getHistory({ limit: 60 }),
+    patternApi.getTodayPatterns({ limit: 120, min_confidence: 60 }),
   ])
+
+  const [attentionResult, screeningResult, validationResult, patternResult] = results
+
+  if (attentionResult.status === 'fulfilled') {
+    attentionItems.value = normalizeList(attentionResult.value).map(normalizeAttentionEntry)
+  } else {
+    attentionItems.value = []
+    loadWarnings.value.push('关注列表')
+    console.error('Failed to fetch attention list:', attentionResult.reason)
+  }
+
+  if (screeningResult.status === 'fulfilled') {
+    screeningItems.value = normalizeScreeningHistory(screeningResult.value).map(normalizeScreeningEntry)
+  } else {
+    screeningItems.value = []
+    loadWarnings.value.push('最近筛选')
+    console.error('Failed to fetch screening history:', screeningResult.reason)
+  }
+
+  if (validationResult.status === 'fulfilled') {
+    validationItems.value = normalizeList(validationResult.value).map(normalizeScreeningEntry)
+  } else {
+    validationItems.value = []
+    loadWarnings.value.push('历史验证')
+    console.error('Failed to fetch selection history:', validationResult.reason)
+  }
+
+  if (patternResult.status === 'fulfilled') {
+    patternItems.value = normalizeList(patternResult.value).map(normalizePatternEntry)
+  } else {
+    patternItems.value = []
+    loadWarnings.value.push('形态摘要')
+    console.error('Failed to fetch pattern summary:', patternResult.reason)
+  }
+
+  lastSyncedAt.value = new Date().toISOString()
   loading.value = false
 }
 
 onMounted(() => {
-  refreshData()
+  refreshWorkbench()
 })
 </script>
 
 <style scoped lang="scss">
-.dashboard {
+.dashboard-page {
   padding: 24px;
 }
 
-.dashboard-header {
+.page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 24px;
+  gap: 24px;
+  margin-bottom: 20px;
 
   h1 {
-    margin: 0;
-    font-size: 28px;
+    margin: 6px 0 0;
+    font-size: 30px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .subtitle {
-    margin: 4px 0 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.92);
   }
 }
 
-.header-right {
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8ba8ff;
+}
+
+.subtitle {
+  max-width: 720px;
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.58);
+  line-height: 1.6;
+}
+
+.header-actions {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.last-updated {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+.sync-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 120px;
+
+  strong {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+  }
 }
 
-.btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.sync-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.44);
+}
+
+.refresh-btn {
   padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid rgba(122, 162, 255, 0.24);
+  border-radius: 10px;
+  background: rgba(41, 98, 255, 0.16);
+  color: #dfe8ff;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(41, 98, 255, 0.24);
+    border-color: rgba(122, 162, 255, 0.4);
+  }
 
   &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  &.btn-primary {
-    background: #2962FF;
-    color: white;
-
-    &:hover:not(:disabled) {
-      background: #1E53E5;
-    }
+    opacity: 0.65;
+    cursor: wait;
   }
 }
 
-.loading-state {
+.warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 184, 77, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 184, 77, 0.08);
+  color: rgba(255, 235, 204, 0.88);
+
+  span {
+    color: rgba(255, 235, 204, 0.68);
+  }
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.workbench-card {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px;
-  background: rgba(26, 26, 26, 0.5);
-  border-radius: 12px;
-
-  p {
-    margin: 16px 0;
-    color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #2962FF;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-
-.card {
-  background: rgba(26, 26, 26, 0.5);
+  gap: 18px;
+  min-height: 280px;
+  padding: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.card.full-width {
-  grid-column: span 2;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(18, 24, 38, 0.98), rgba(13, 18, 29, 0.98)),
+    rgba(16, 19, 28, 0.92);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.18);
 }
 
 .card-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 16px;
 
-  h3 {
-    margin: 0;
-    font-size: 16px;
+  h2 {
+    margin: 4px 0 0;
+    font-size: 22px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.92);
   }
+}
+
+.card-kicker {
+  font-size: 12px;
+  color: rgba(139, 168, 255, 0.88);
+  letter-spacing: 0.04em;
 }
 
 .card-link {
+  color: #c6d5ff;
   font-size: 13px;
-  color: #2962FF;
   text-decoration: none;
 
   &:hover {
-    text-decoration: underline;
+    color: #ffffff;
   }
 }
 
-.pattern-list {
-  max-height: 300px;
-  overflow-y: auto;
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.empty-state {
-  padding: 40px 20px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.4);
+.metric-strip--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.pattern-item {
+.metric-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.metric-value--positive {
+  color: #59d38c;
+}
+
+.metric-value--negative {
+  color: #ff7b7b;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.card-description {
+  margin: 0;
+  min-height: 44px;
+  color: rgba(255, 255, 255, 0.64);
+  line-height: 1.6;
+}
+
+.list-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.list-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition: background 0.2s;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  &:last-child {
-    border-bottom: none;
-  }
-}
-
-.pattern-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.pattern-code {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.pattern-name {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.pattern-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.badge {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-
-  &.bullish {
-    background: rgba(0, 200, 83, 0.15);
-    color: #00C853;
-  }
-
-  &.bearish {
-    background: rgba(255, 23, 68, 0.15);
-    color: #FF1744;
-  }
-
-  &.neutral {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-.pattern-confidence {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.selection-summary {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  padding: 20px;
-  gap: 20px;
-}
-
-.selection-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.selection-value {
-  font-size: 28px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.selection-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.quick-nav {
-  display: flex;
-  gap: 16px;
-  padding: 20px;
-  overflow-x: auto;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
   text-decoration: none;
-  transition: all 0.2s;
-  min-width: 100px;
+  transition: background 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    background: rgba(41, 98, 255, 0.1);
-    transform: translateY(-2px);
+    background: rgba(41, 98, 255, 0.12);
+    transform: translateY(-1px);
+  }
+
+  strong {
+    display: block;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 15px;
+  }
+
+  span {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 13px;
   }
 }
 
-.nav-icon {
-  font-size: 24px;
+.row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
-.nav-label {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+.signal-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
 }
 
-@media (max-width: 1200px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .card.full-width {
-    grid-column: span 1;
-  }
-
-  .selection-summary {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.signal-badge--bullish {
+  background: rgba(89, 211, 140, 0.14);
+  color: #72e2a1;
 }
 
-@media (max-width: 768px) {
-  .dashboard {
-    padding: 16px;
-  }
+.signal-badge--neutral {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+}
 
-  .dashboard-header {
+.signal-badge--bearish {
+  background: rgba(255, 123, 123, 0.14);
+  color: #ff9d9d;
+}
+
+@media (max-width: 1100px) {
+  .page-header {
     flex-direction: column;
-    gap: 16px;
   }
 
-  .header-right {
+  .header-actions {
     width: 100%;
     justify-content: space-between;
   }
 
-  .selection-summary {
+  .sync-meta {
+    align-items: flex-start;
+  }
+
+  .card-grid {
     grid-template-columns: 1fr;
-    gap: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-page {
+    padding: 18px;
   }
 
-  .quick-nav {
-    flex-wrap: wrap;
+  .header-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .nav-item {
-    min-width: calc(50% - 8px);
+  .metric-strip,
+  .metric-strip--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
