@@ -19,6 +19,9 @@
           </svg>
           加载模板
         </button>
+        <button class="btn btn-secondary" @click="saveStrategy" :disabled="loading || !selectedStrategyTemplate">
+          保存策略
+        </button>
         <button class="btn btn-primary" @click="runBacktest" :disabled="loading">
           <svg v-if="!loading" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="5 3 19 12 5 21 5 3" />
@@ -517,6 +520,28 @@ const loadStrategyTemplates = async () => {
     }
   } catch (error) {
     showNotification?.('warning', '策略模板加载失败，使用默认配置')
+  }
+}
+
+const saveStrategy = async () => {
+  if (!selectedStrategyTemplate.value) return
+
+  try {
+    await strategyApi.createMyStrategy({
+      name: `${selectedStrategyTemplate.value.displayName}-${config.stockCode}-${Date.now()}`,
+      description: `从回测页保存：${selectedStrategyTemplate.value.displayName}`,
+      params: {
+        template: config.strategyType,
+        stock_code: config.stockCode,
+        period: config.period,
+        initial_capital: config.initialCapital,
+        strategy_params: { ...strategyParams },
+      },
+      is_active: true,
+    })
+    showNotification?.('success', '已保存当前策略配置')
+  } catch (error) {
+    showNotification?.('error', '保存策略失败')
   }
 }
 
