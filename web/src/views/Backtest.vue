@@ -69,6 +69,17 @@
               </button>
             </div>
           </div>
+          <div class="config-row">
+            <div class="config-item">
+              <label>回测编号</label>
+              <input v-model="currentBacktestId" type="text" class="input-text" placeholder="输入 bt 编号后加载">
+            </div>
+            <div class="config-item config-action">
+              <button class="btn btn-secondary btn-full" @click="loadBacktestResult(currentBacktestId)" :disabled="!currentBacktestId">
+                加载结果
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="config-section">
@@ -867,13 +878,14 @@ const applyBacktestResult = (result: any) => {
 }
 
 const loadBacktestResult = async (backtestId: string) => {
-  if (!backtestId) return
+  const normalizedBacktestId = String(backtestId || '').trim()
+  if (!normalizedBacktestId) return
   try {
-    const result = await backtestApi.getBacktest(backtestId)
+    const result = await backtestApi.getBacktest(normalizedBacktestId)
+    currentBacktestId.value = normalizedBacktestId
     if (result?.status === 'completed') {
-      currentBacktestId.value = backtestId
       applyBacktestResult(result)
-      showNotification?.('info', `已加载历史回测结果 #${backtestId}`)
+      showNotification?.('info', `已加载历史回测结果 #${normalizedBacktestId}`)
     }
   } catch (error) {
     showNotification?.('warning', '历史回测结果加载失败')
