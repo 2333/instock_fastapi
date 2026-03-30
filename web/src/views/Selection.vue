@@ -69,8 +69,40 @@
 
         <div class="panel-section">
           <div class="section-heading">
-            <h3>暂未接入的历史条件</h3>
-            <p>以下条件保留为展示项，当前不会参与规范筛选。</p>
+            <h3>技术指标</h3>
+            <p>基于最新交易日的技术指标进行筛选。</p>
+          </div>
+
+          <div class="criteria-group">
+            <label>RSI 范围</label>
+            <div class="range-inputs">
+              <input type="number" v-model.number="criteria.rsiMin" placeholder="最小" min="0" max="100" class="input-small">
+              <span>-</span>
+              <input type="number" v-model.number="criteria.rsiMax" placeholder="最大" min="0" max="100" class="input-small">
+            </div>
+            <p class="field-hint">RSI 相对强弱指标，通常 0-100，超卖区域低于 30</p>
+          </div>
+
+          <div class="criteria-group">
+            <label>MACD 信号</label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="criteria.macdBullish">
+                只看 MACD 看涨（金叉倾向）
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="criteria.macdBearish">
+                只看 MACD 看跌（死叉倾向）
+              </label>
+            </div>
+            <p class="field-hint">MACD 柱状图是否为正（看涨）或为负（看跌）</p>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-heading">
+            <h3>其他条件</h3>
+            <p>以下条件暂未接入，不会参与当前筛选。</p>
           </div>
           <div class="legacy-grid">
             <section
@@ -256,8 +288,14 @@ const criteria = reactive({
 })
 const CRITERIA_STORAGE_KEY = 'instock_selection_criteria'
 
-const canonicalFilterKeys = ['priceMin', 'priceMax', 'changeMin', 'changeMax', 'market'] as const
-const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围']
+const canonicalFilterKeys = [
+  'priceMin', 'priceMax',
+  'changeMin', 'changeMax',
+  'market',
+  'rsiMin', 'rsiMax',
+  'macdBullish', 'macdBearish'
+] as const
+const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围', 'RSI', 'MACD']
 const marketLabelMap: Record<string, string> = {
   sh: '沪市',
   sz: '深市',
@@ -279,7 +317,7 @@ const nonCanonicalLabels: Record<string, string> = {
 const unavailableFilterGroups = [
   { title: '价格扩展', items: ['市值范围'] },
   { title: '涨跌扩展', items: ['周涨跌幅'] },
-  { title: '技术指标', items: ['市盈率', 'RSI (14)', 'MACD 信号'] },
+  { title: '技术指标扩展', items: ['市盈率', 'KDJ', 'BOLL'] },
   { title: '成交量', items: ['量比'] },
 ]
 
@@ -308,13 +346,15 @@ const supportedFiltersDescription = computed(() => {
             if (item.key.startsWith('price')) return '价格范围'
             if (item.key.startsWith('change')) return '日涨跌幅'
             if (item.key === 'market') return '市场范围'
+            if (item.key.startsWith('rsi')) return 'RSI'
+            if (item.key.startsWith('macd')) return 'MACD'
             return item.label
           })
         )
       )
     : defaultSupportedFilterLabels
 
-  return `当前结果页仅启用 ${labels.join('、')}；历史条件已标记为暂未接入，不会参与本次筛选。`
+  return `当前启用：${labels.join('、')}。其他条件暂未接入。`
 })
 
 const sortedResults = computed(() => {
