@@ -227,6 +227,19 @@
               <span class="summary-badge" :class="resultSummaryTone">{{ resultSummaryTag }}</span>
             </div>
             <p class="result-summary-text">{{ resultSummaryText }}</p>
+
+            <div v-if="compareRows.length" class="compare-grid">
+              <div class="compare-row compare-row--head">
+                <span>参数</span>
+                <span>当前配置</span>
+                <span>已保存配置</span>
+              </div>
+              <div v-for="row in compareRows" :key="row.label" class="compare-row">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.current }}</strong>
+                <strong>{{ row.saved }}</strong>
+              </div>
+            </div>
           </div>
 
           <div class="metrics-grid">
@@ -510,6 +523,19 @@ const resultSummaryText = computed(() => {
     return `${returnPart}${tradePart} 当前结果接近持平，更适合继续调参或换模板验证。`
   }
   return `${returnPart}${tradePart} 当前参数组合没有形成理想结果，建议优先复盘模板与参数设置。`
+})
+
+const compareRows = computed(() => {
+  if (!selectedSavedStrategy.value?.params) return []
+  const saved = selectedSavedStrategy.value.params as Record<string, any>
+  const savedParams = (saved.strategy_params && typeof saved.strategy_params === 'object') ? saved.strategy_params as Record<string, any> : {}
+
+  return [
+    { label: '股票', current: config.stockCode, saved: String(saved.stock_code || '--') },
+    { label: '周期', current: config.period, saved: String(saved.period || '--') },
+    { label: '模板', current: config.strategyType, saved: String(saved.strategy_type || saved.template || '--') },
+    { label: '参数数量', current: String(Object.keys(strategyParams).length), saved: String(Object.keys(savedParams).length) },
+  ]
 })
 
 const formatCurrency = (value: number) =>
@@ -1291,6 +1317,29 @@ onBeforeUnmount(() => {
   margin: 0;
   color: rgba(255, 255, 255, 0.72);
   line-height: 1.7;
+}
+
+.compare-grid {
+  margin-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+.compare-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  gap: 12px;
+  padding: 6px 0;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.compare-row--head {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.compare-row strong {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .metrics-grid {
