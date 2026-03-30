@@ -81,7 +81,10 @@
             </div>
           </div>
           <div v-if="recentBacktests.length" class="recent-backtests">
-            <span class="recent-backtests__label">最近查看</span>
+            <div class="recent-backtests__head">
+              <span class="recent-backtests__label">最近查看</span>
+              <button class="recent-backtests__clear" @click="clearRecentBacktests">清空</button>
+            </div>
             <button
               v-for="backtestId in recentBacktests"
               :key="backtestId"
@@ -597,6 +600,12 @@ const rememberBacktestId = (backtestId: string) => {
   if (!normalized) return
   recentBacktests.value = [normalized, ...recentBacktests.value.filter((item) => item !== normalized)].slice(0, 6)
   window.localStorage.setItem(RECENT_BACKTESTS_KEY, JSON.stringify(recentBacktests.value))
+}
+
+const clearRecentBacktests = () => {
+  recentBacktests.value = []
+  window.localStorage.removeItem(RECENT_BACKTESTS_KEY)
+  showNotification?.('info', '已清空最近查看记录')
 }
 
 const buildShareQuery = () => ({
@@ -1234,10 +1243,24 @@ onBeforeUnmount(() => {
   margin-top: 12px;
 }
 
-.recent-backtests__label {
+.recent-backtests__head {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recent-backtests__label {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
+}
+
+.recent-backtests__clear {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .recent-backtests__item {
