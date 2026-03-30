@@ -103,6 +103,13 @@
                   <option value="drawdown">按最大回撤</option>
                 </select>
               </div>
+              <div class="config-item">
+                <select v-model="historyOutcomeFilter" class="select-full history-sort">
+                  <option value="all">全部结果</option>
+                  <option value="profit">只看盈利</option>
+                  <option value="loss">只看亏损</option>
+                </select>
+              </div>
             </div>
             <div class="history-filter-actions">
               <button class="btn btn-secondary btn-small" @click="filterByCurrentStock" :disabled="!config.stockCode">
@@ -571,6 +578,7 @@ const recentBacktests = ref<string[]>([])
 const backtestHistory = ref<BacktestHistoryItem[]>([])
 const historyFilter = ref('')
 const historySort = ref<'created' | 'return' | 'drawdown'>('created')
+const historyOutcomeFilter = ref<'all' | 'profit' | 'loss'>('all')
 const selectedCompareBacktestId = ref('')
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
@@ -679,11 +687,17 @@ const compareRows = computed(() => {
 
 const filteredBacktestHistory = computed(() => {
   const keyword = historyFilter.value.trim().toLowerCase()
-  const filtered = !keyword
+  let filtered = !keyword
     ? [...backtestHistory.value]
     : backtestHistory.value.filter((item) =>
         [item.code, item.name, item.strategy, item.stockName].some((value) => String(value || '').toLowerCase().includes(keyword))
       )
+
+  if (historyOutcomeFilter.value === 'profit') {
+    filtered = filtered.filter((item) => (item.totalReturn ?? -Infinity) >= 0)
+  } else if (historyOutcomeFilter.value === 'loss') {
+    filtered = filtered.filter((item) => (item.totalReturn ?? Infinity) < 0)
+  }
 
   if (historySort.value === 'return') {
     return filtered.sort((a, b) => (b.totalReturn ?? -Infinity) - (a.totalReturn ?? -Infinity))
