@@ -294,8 +294,20 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, shallowRef, onBeforeUnmount, inject } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import * as echarts from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { backtestApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
+
+echarts.use([
+  LineChart,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  CanvasRenderer,
+])
 
 interface Trade {
   id: number
@@ -457,7 +469,6 @@ const initEquityChart = async () => {
     return
   }
 
-  const echarts = await import('echarts')
   equityChartInstance.value = echarts.init(equityChartRef.value, 'dark', { renderer: 'canvas' })
 
   const dates = points.map((p) => p.date)
