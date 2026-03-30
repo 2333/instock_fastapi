@@ -1,4 +1,5 @@
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -137,3 +138,87 @@ class MarketDataService:
             """)
         result = await self.db.execute(query, {"date": date, "limit": limit})
         return [row._mapping for row in result.fetchall()]
+
+    async def get_task_health(self, alert_limit: int = 10) -> dict:
+        """返回关键抓取任务的用户可见健康摘要。"""
+        baseline_trade_date = await self._resolve_trade_date(None, "daily_bars")
+        datasets: list[dict] = []
+        for dataset in ("daily_bars", "fund_flows", "stock_tops", "stock_block_trades"):
+            latest_trade_date = await self._resolve_trade_date(None, dataset)
+            datasets.append(
+                {
+                    "dataset": dataset,
+                    "latest_trade_date": latest_trade_date,
+                    "baseline_trade_date": baseline_trade_date,
+                    "current": bool(
+                        latest_trade_date
+                        and baseline_trade_date
+                        and latest_trade_date == baseline_trade_date
+                    ),
+                }
+            )
+
+        latest_alerts_query = text("""
+            WITH latest_status AS (
+                SELECT
+                    task_name,
+                    entity_type,
+                    entity_key,
+                    MAX(updated_at) AS latest_updated_at
+                FROM data_fetch_audit
+                GROUP BY task_name, entity_type, entity_key
+            )
+            SELECT
+                audit.task_name,
+                audit.entity_type,
+                audit.entity_key,
+                audit.trade_date,
+                audit.status,
+                audit.source,
+                audit.note,
+                audit.updated_at
+            FROM data_fetch_audit AS audit
+            INNER JOIN latest_status AS latest
+                ON audit.task_name = latest.task_name
+                AND audit.entity_type = latest.entity_type
+                AND audit.entity_key = latest.entity_key
+                AND audit.updated_at = latest.latest_updated_at
+            WHERE audit.status <> 'done'
+            ORDER BY audit.updated_at DESC, audit.task_name ASC
+            LIMIT :limit
+        """)
+        alert_count_query = text("""
+            WITH latest_status AS (
+                SELECT
+                    task_name,
+                    entity_type,
+                    entity_key,
+                    MAX(updated_at) AS latest_updated_at
+                FROM data_fetch_audit
+                GROUP BY task_name, entity_type, entity_key
+            )
+            SELECT COUNT(*)
+            FROM data_fetch_audit AS audit
+            INNER JOIN latest_status AS latest
+                ON audit.task_name = latest.task_name
+                AND audit.entity_type = latest.entity_type
+                AND audit.entity_key = latest.entity_key
+                AND audit.updated_at = latest.latest_updated_at
+            WHERE audit.status <> 'done'
+        """)
+
+        try:
+            alerts_result = await self.db.execute(latest_alerts_query, {"limit": alert_limit})
+            alert_count_result = await self.db.execute(alert_count_query)
+            alerts = [dict(row._mapping) for row in alerts_result.fetchall()]
+            alert_count = int(alert_count_result.scalar() or 0)
+        except SQLAlchemyError:
+            alerts = []
+            alert_count = 0
+
+        return {
+            "baseline_trade_date": baseline_trade_date,
+            "datasets": datasets,
+            "alerts": alerts,
+            "alert_count": alert_count,
+        }

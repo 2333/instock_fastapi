@@ -150,6 +150,17 @@ async def test_indicator_and_market_endpoints(client):
             "app.api.routers.market_router.MarketDataService.get_north_bound_funds",
             new=AsyncMock(return_value=[{"value": 123}]),
         ),
+        patch(
+            "app.api.routers.market_router.MarketDataService.get_task_health",
+            new=AsyncMock(
+                return_value={
+                    "baseline_trade_date": "20240102",
+                    "datasets": [{"dataset": "daily_bars", "latest_trade_date": "20240102", "baseline_trade_date": "20240102", "current": True}],
+                    "alerts": [{"task_name": "fetch_fund_flow", "status": "needs_fallback"}],
+                    "alert_count": 1,
+                }
+            ),
+        ),
     ):
         indicators = await client.get("/api/v1/indicators", params={"code": "000001"})
         latest_indicator = await client.get("/api/v1/indicators/latest", params={"code": "000001"})
@@ -157,6 +168,7 @@ async def test_indicator_and_market_endpoints(client):
         block_trades = await client.get("/api/v1/market/block-trades")
         lhb = await client.get("/api/v1/market/lhb")
         north_bound = await client.get("/api/v1/market/north-bound")
+        task_health = await client.get("/api/v1/market/task-health")
 
     assert indicators.status_code == 200
     assert indicators.json()[0]["code"] == "000001"
@@ -165,6 +177,10 @@ async def test_indicator_and_market_endpoints(client):
     assert block_trades.json()[0]["code"] == "000001"
     assert lhb.json()[0]["code"] == "000001"
     assert north_bound.json()[0]["value"] == 123
+    assert task_health.status_code == 200
+    assert task_health.json()["alert_count"] == 1
+    assert task_health.json()["datasets"][0]["current"] is True
+    assert task_health.json()["baseline_trade_date"] == "20240102"
 
 
 @pytest.mark.asyncio
