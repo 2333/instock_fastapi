@@ -87,12 +87,23 @@
             <div class="recent-backtests__head">
               <span class="recent-backtests__label">回测历史</span>
             </div>
-            <input
-              v-model="historyFilter"
-              type="text"
-              class="input-text history-filter"
-              placeholder="按代码 / 策略 / 名称筛选"
-            >
+            <div class="config-row history-filter-row">
+              <div class="config-item">
+                <input
+                  v-model="historyFilter"
+                  type="text"
+                  class="input-text history-filter"
+                  placeholder="按代码 / 策略 / 名称筛选"
+                >
+              </div>
+              <div class="config-item">
+                <select v-model="historySort" class="select-full history-sort">
+                  <option value="created">按创建时间</option>
+                  <option value="return">按总收益</option>
+                  <option value="drawdown">按最大回撤</option>
+                </select>
+              </div>
+            </div>
             <button
               v-for="item in filteredBacktestHistory"
               :key="item.id"
@@ -530,6 +541,7 @@ const currentBacktestId = ref('')
 const recentBacktests = ref<string[]>([])
 const backtestHistory = ref<BacktestHistoryItem[]>([])
 const historyFilter = ref('')
+const historySort = ref<'created' | 'return' | 'drawdown'>('created')
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -637,10 +649,19 @@ const compareRows = computed(() => {
 
 const filteredBacktestHistory = computed(() => {
   const keyword = historyFilter.value.trim().toLowerCase()
-  if (!keyword) return backtestHistory.value
-  return backtestHistory.value.filter((item) =>
-    [item.code, item.name, item.strategy, item.stockName].some((value) => String(value || '').toLowerCase().includes(keyword))
-  )
+  const filtered = !keyword
+    ? [...backtestHistory.value]
+    : backtestHistory.value.filter((item) =>
+        [item.code, item.name, item.strategy, item.stockName].some((value) => String(value || '').toLowerCase().includes(keyword))
+      )
+
+  if (historySort.value === 'return') {
+    return filtered.sort((a, b) => (b.totalReturn ?? -Infinity) - (a.totalReturn ?? -Infinity))
+  }
+  if (historySort.value === 'drawdown') {
+    return filtered.sort((a, b) => (b.maxDrawdown ?? -Infinity) - (a.maxDrawdown ?? -Infinity))
+  }
+  return filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
 })
 
 const currentHistoryItem = computed(() =>
@@ -1429,8 +1450,13 @@ onBeforeUnmount(() => {
   margin-top: 12px;
 }
 
-.history-filter {
+.history-filter-row {
   margin-bottom: 4px;
+}
+
+.history-filter,
+.history-sort {
+  margin-bottom: 0;
 }
 
 .recent-backtests__head {
