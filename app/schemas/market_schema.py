@@ -1,5 +1,7 @@
 """市场数据相关的 Schema 定义"""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -56,3 +58,52 @@ class StockListQuery(BaseModel):
     sort_by: str | None = Field(None, description="排序字段")
     sort_order: str | None = Field("desc", description="排序方向 asc/desc")
     keyword: str | None = Field(None, description="搜索关键词(代码/名称)")
+
+
+class MarketTaskHealthItem(BaseModel):
+    task_name: str
+    entity_type: str
+    entity_key: str
+    latest_trade_date: str | None = None
+    audit_trade_date: str | None = None
+    audit_status: str | None = None
+    audit_source: str | None = None
+    audit_note: str | None = None
+    updated_at: str | None = None
+    current: bool = False
+
+
+class MarketTaskHealthResponse(BaseModel):
+    market_trade_date: str | None = None
+    items: list[MarketTaskHealthItem]
+
+
+class MarketTaskDatasetStatus(BaseModel):
+    """关键市场数据表的新鲜度摘要"""
+
+    dataset: str = Field(..., description="数据集标识")
+    latest_trade_date: str | None = Field(None, description="该数据集最新交易日")
+    baseline_trade_date: str | None = Field(None, description="基准交易日，当前取 daily_bars 最新值")
+    current: bool = Field(False, description="是否与基准交易日对齐")
+
+
+class MarketTaskHealthAlert(BaseModel):
+    """最近仍未恢复的抓取告警"""
+
+    task_name: str
+    entity_type: str
+    entity_key: str
+    trade_date: str | None = None
+    status: str
+    source: str | None = None
+    note: str | None = None
+    updated_at: datetime | None = None
+
+
+class MarketTaskHealthResponse(BaseModel):
+    """Phase 0 任务健康摘要"""
+
+    baseline_trade_date: str | None = None
+    datasets: list[MarketTaskDatasetStatus] = Field(default_factory=list)
+    alerts: list[MarketTaskHealthAlert] = Field(default_factory=list)
+    alert_count: int = 0
