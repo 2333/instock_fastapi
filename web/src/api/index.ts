@@ -164,6 +164,11 @@ export const strategyApi = {
 
   getTemplates: () => api.get('/strategies/templates') as Promise<any>,
 
+  getMyStrategies: () => api.get('/strategies/my') as Promise<any>,
+
+  createMyStrategy: (payload: { name: string; description?: string; params?: Record<string, unknown>; is_active?: boolean }) =>
+    api.post('/strategies/my', payload) as Promise<any>,
+
   runStrategy: (strategy: string, date?: string) =>
     api.post('/strategies/run', { strategy, date }) as Promise<any>,
 
