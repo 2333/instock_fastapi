@@ -17,7 +17,7 @@ const routes = [
   },
   {
     path: '/',
-    name: 'Dashboard',
+    name: 'HomeWorkbench',
     component: () => import('@/views/Dashboard.vue'),
     meta: { title: '首页工作台' }
   },

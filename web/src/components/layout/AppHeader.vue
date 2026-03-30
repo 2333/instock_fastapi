@@ -31,7 +31,7 @@
           :class="{ active: $route.path === '/' }"
         >
           <span class="nav-icon">📊</span>
-          <span>{{ t("nav_dashboard") }}</span>
+          <span>{{ t("nav_home") }}</span>
         </router-link>
         <router-link
           to="/workspace"
