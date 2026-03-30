@@ -103,6 +103,10 @@
                 <span>{{ item.stockName || item.strategy || item.name }}</span>
                 <span>{{ item.startDate }}-{{ item.endDate }}</span>
               </div>
+              <div class="history-backtests__stats">
+                <span>回撤 {{ formatPercent(item.maxDrawdown) }}</span>
+                <span>创建 {{ formatDateTime(item.createdAt) }}</span>
+              </div>
             </button>
           </div>
 
@@ -629,6 +633,13 @@ const formatDate = (d: Date) => {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}${m}${day}`
+}
+
+const formatDateTime = (value?: string) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
 const resolveDateRange = () => {
@@ -1429,6 +1440,15 @@ onBeforeUnmount(() => {
   gap: 2px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
+}
+
+.history-backtests__stats {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.46);
 }
 
 .recent-backtests__item--history {
