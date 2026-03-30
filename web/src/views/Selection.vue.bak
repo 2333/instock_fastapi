@@ -318,6 +318,20 @@ const marketLabelMap: Record<string, string> = {
   sh: '沪市',
   sz: '深市',
 }
+const nonCanonicalLabels: Record<string, string> = {
+  marketCapMin: '市值下限',
+  marketCapMax: '市值上限',
+  weekChangeMin: '周涨跌下限',
+  weekChangeMax: '周涨跌上限',
+  peMin: '市盈率下限',
+  peMax: '市盈率上限',
+  rsiMin: 'RSI 下限',
+  rsiMax: 'RSI 上限',
+  macdBullish: 'MACD 看涨',
+  macdBearish: 'MACD 看跌',
+  volumeRatioMin: '量比下限',
+  volumeRatioMax: '量比上限',
+}
 const unavailableFilterGroups = [
   { title: '价格扩展', items: ['市值范围'] },
   { title: '涨跌扩展', items: ['周涨跌幅'] },
