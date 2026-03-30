@@ -83,18 +83,26 @@
               </button>
             </div>
           </div>
-          <div v-if="backtestHistory.length" class="recent-backtests">
+          <div v-if="backtestHistory.length" class="history-backtests">
             <div class="recent-backtests__head">
               <span class="recent-backtests__label">回测历史</span>
             </div>
             <button
               v-for="item in backtestHistory"
-              :key="item.backtest_id"
-              class="recent-backtests__item recent-backtests__item--history"
-              @click="loadBacktestResult(item.backtest_id)"
+              :key="item.id"
+              class="history-backtests__item"
+              @click="loadBacktestResult(item.id)"
             >
-              <strong>#{{ item.backtest_id }}</strong>
-              <span>{{ item.strategy || item.name || 'backtest' }} / {{ item.code || '--' }}</span>
+              <div class="history-backtests__top">
+                <strong>{{ item.code || item.name }}</strong>
+                <span :class="item.totalReturn !== null && item.totalReturn >= 0 ? 'price-up' : 'price-down'">
+                  {{ formatPercent(item.totalReturn) }}
+                </span>
+              </div>
+              <div class="history-backtests__meta">
+                <span>{{ item.stockName || item.strategy || item.name }}</span>
+                <span>{{ item.startDate }}-{{ item.endDate }}</span>
+              </div>
             </button>
           </div>
 
@@ -474,11 +482,30 @@ interface SavedStrategy {
   isActive: boolean
 }
 
+interface BacktestHistoryItem {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  initialCapital: number
+  finalCapital: number | null
+  totalReturn: number | null
+  annualReturn: number | null
+  maxDrawdown: number | null
+  sharpeRatio: number | null
+  winRate: number | null
+  totalTrades: number | null
+  code?: string
+  stockName?: string
+  strategy?: string
+  createdAt?: string
+}
+
 const loading = ref(false)
 const hasResults = ref(false)
 const currentBacktestId = ref('')
 const recentBacktests = ref<string[]>([])
-const backtestHistory = ref<Array<{ backtest_id: string; name?: string; strategy?: string; code?: string; total_return?: number; max_drawdown?: number }>>([])
+const backtestHistory = ref<BacktestHistoryItem[]>([])
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -591,6 +618,11 @@ const formatCurrency = (value: number) =>
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(value)
+
+const formatPercent = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--'
+  return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+}
 
 const formatDate = (d: Date) => {
   const y = d.getFullYear()
@@ -717,6 +749,39 @@ const normalizeSavedStrategy = (strategy: any): SavedStrategy => ({
   isActive: Boolean(strategy?.is_active ?? strategy?.isActive ?? true),
 })
 
+const normalizeBacktestHistoryItem = (item: any): BacktestHistoryItem => ({
+  id: String(item?.id || ''),
+  name: String(item?.name || ''),
+  startDate: String(item?.start_date || item?.startDate || ''),
+  endDate: String(item?.end_date || item?.endDate || ''),
+  initialCapital: Number(item?.initial_capital ?? item?.initialCapital ?? 0),
+  finalCapital:
+    item?.final_capital === null || item?.final_capital === undefined
+      ? null
+      : Number(item.final_capital),
+  totalReturn:
+    item?.total_return === null || item?.total_return === undefined ? null : Number(item.total_return),
+  annualReturn:
+    item?.annual_return === null || item?.annual_return === undefined
+      ? null
+      : Number(item.annual_return),
+  maxDrawdown:
+    item?.max_drawdown === null || item?.max_drawdown === undefined
+      ? null
+      : Number(item.max_drawdown),
+  sharpeRatio:
+    item?.sharpe_ratio === null || item?.sharpe_ratio === undefined
+      ? null
+      : Number(item.sharpe_ratio),
+  winRate: item?.win_rate === null || item?.win_rate === undefined ? null : Number(item.win_rate),
+  totalTrades:
+    item?.total_trades === null || item?.total_trades === undefined ? null : Number(item.total_trades),
+  code: item?.code ? String(item.code) : undefined,
+  stockName: item?.stock_name ? String(item.stock_name) : undefined,
+  strategy: item?.strategy ? String(item.strategy) : undefined,
+  createdAt: item?.created_at ? String(item.created_at) : undefined,
+})
+
 const applyTemplateDefaults = (template: StrategyTemplate | null) => {
   Object.keys(strategyParams).forEach((key) => {
     delete strategyParams[key]
@@ -836,8 +901,15 @@ const loadSavedStrategies = async () => {
 
 const loadBacktestHistory = async () => {
   try {
-    const items = await backtestApi.getBacktestHistory(8)
-    backtestHistory.value = Array.isArray(items) ? items : []
+    const response = await backtestApi.getBacktestHistory(8)
+    const items: any[] = Array.isArray(response?.data)
+      ? response.data
+      : Array.isArray(response)
+        ? response
+        : []
+    backtestHistory.value = items
+      .map(normalizeBacktestHistoryItem)
+      .filter((item: BacktestHistoryItem) => item.id)
   } catch (error) {
     backtestHistory.value = []
     showNotification?.('warning', '回测历史加载失败')
@@ -908,14 +980,15 @@ const applySavedStrategy = () => {
 
 const applyBacktestResult = (result: any) => {
   const summary = result?.summary || result?.data?.result_data?.summary || {}
-  metrics.initialCapital = Number(summary.initial_capital ?? config.initialCapital)
-  metrics.finalCapital = Number(summary.final_capital ?? config.initialCapital)
-  metrics.totalReturn = Number(summary.total_return ?? 0)
-  metrics.annualizedReturn = Number(summary.annual_return ?? 0)
-  metrics.maxDrawdown = Number(summary.max_drawdown ?? 0)
-  metrics.sharpeRatio = Number(summary.sharpe_ratio ?? 0)
-  metrics.winRate = Number(summary.win_rate ?? 0)
-  metrics.totalTrades = Number(summary.total_trades ?? 0)
+  const row = result?.data || {}
+  metrics.initialCapital = Number(summary.initial_capital ?? row.initial_capital ?? config.initialCapital)
+  metrics.finalCapital = Number(summary.final_capital ?? row.final_capital ?? config.initialCapital)
+  metrics.totalReturn = Number(summary.total_return ?? row.total_return ?? 0)
+  metrics.annualizedReturn = Number(summary.annual_return ?? row.annual_return ?? 0)
+  metrics.maxDrawdown = Number(summary.max_drawdown ?? row.max_drawdown ?? 0)
+  metrics.sharpeRatio = Number(summary.sharpe_ratio ?? row.sharpe_ratio ?? 0)
+  metrics.winRate = Number(summary.win_rate ?? row.win_rate ?? 0)
+  metrics.totalTrades = Number(summary.total_trades ?? row.total_trades ?? 0)
   metrics.winningTrades = Number(summary.winning_trades ?? 0)
   metrics.profitFactor = Number(summary.profit_factor ?? 0)
   metrics.avgWin = Number(summary.avg_win ?? 0)
@@ -1007,6 +1080,7 @@ const runBacktest = async () => {
 
     hasResults.value = true
     await initEquityChart()
+    await loadBacktestHistory()
     showNotification?.('success', '回测完成')
   } catch (e) {
     showNotification?.('error', '回测执行失败')
@@ -1295,6 +1369,13 @@ onBeforeUnmount(() => {
   margin-top: 12px;
 }
 
+.history-backtests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .recent-backtests__head {
   width: 100%;
   display: flex;
@@ -1322,6 +1403,32 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.78);
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.history-backtests__item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.82);
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-backtests__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-backtests__meta {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .recent-backtests__item--history {

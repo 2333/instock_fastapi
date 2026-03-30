@@ -71,7 +71,28 @@ async def test_backtest_endpoints(client, current_user_override):
         ),
         patch(
             "app.api.routers.backtest_router.BacktestService.list_results",
-            new=AsyncMock(return_value=[{"backtest_id": "12", "name": "demo", "strategy": "ma_crossover"}]),
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "id": "12",
+                        "name": "demo",
+                        "start_date": "20240101",
+                        "end_date": "20240131",
+                        "initial_capital": 100000.0,
+                        "final_capital": 108000.0,
+                        "total_return": 8.0,
+                        "annual_return": 11.5,
+                        "max_drawdown": -3.2,
+                        "sharpe_ratio": 1.12,
+                        "win_rate": 100.0,
+                        "total_trades": 1,
+                        "strategy": "ma_crossover",
+                        "code": "000001",
+                        "stock_name": "平安银行",
+                        "created_at": "2024-01-31T08:30:00",
+                    }
+                ]
+            ),
         ),
         patch(
             "app.api.routers.backtest_router.BacktestService.get_result",
@@ -88,7 +109,9 @@ async def test_backtest_endpoints(client, current_user_override):
     assert run_response.status_code == 200
     assert run_response.json()["id"] == "bt-1"
     assert history_response.status_code == 200
-    assert history_response.json()[0]["backtest_id"] == "12"
+    assert history_response.json()["success"] is True
+    assert history_response.json()["data"][0]["id"] == "12"
+    assert history_response.json()["data"][0]["code"] == "000001"
     assert get_response.json()["status"] == "done"
 
 

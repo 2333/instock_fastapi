@@ -239,28 +239,67 @@ class BacktestService:
 
     async def list_results(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         query = text("""
-            SELECT id, name, created_at, result_data
+            SELECT
+                id,
+                name,
+                start_date,
+                end_date,
+                initial_capital,
+                final_capital,
+                total_return,
+                annual_return,
+                max_drawdown,
+                sharpe_ratio,
+                win_rate,
+                total_trades,
+                created_at,
+                result_data
             FROM backtest_results
             WHERE user_id = :user_id
             ORDER BY created_at DESC, id DESC
             LIMIT :limit
         """)
         result = await self.db.execute(query, {"user_id": user_id, "limit": limit})
-        rows = result.fetchall()
+        rows = result.mappings().all()
         items: list[dict[str, Any]] = []
         for row in rows:
-            payload = row._mapping.get("result_data") or {}
+            payload = row.get("result_data") or {}
             summary = payload.get("summary") or {}
             meta = payload.get("meta") or {}
             items.append(
                 {
-                    "backtest_id": str(row._mapping.get("id")),
-                    "name": row._mapping.get("name") or meta.get("strategy") or "backtest",
-                    "created_at": row._mapping.get("created_at"),
+                    "id": str(row.get("id")),
+                    "name": row.get("name") or meta.get("strategy") or "backtest",
+                    "start_date": row.get("start_date"),
+                    "end_date": row.get("end_date"),
+                    "initial_capital": float(row.get("initial_capital"))
+                    if row.get("initial_capital") is not None
+                    else 0.0,
+                    "final_capital": float(row.get("final_capital"))
+                    if row.get("final_capital") is not None
+                    else None,
                     "strategy": meta.get("strategy"),
                     "code": meta.get("code"),
-                    "total_return": summary.get("total_return"),
-                    "max_drawdown": summary.get("max_drawdown"),
+                    "stock_name": meta.get("name"),
+                    "total_return": float(row.get("total_return"))
+                    if row.get("total_return") is not None
+                    else summary.get("total_return"),
+                    "annual_return": float(row.get("annual_return"))
+                    if row.get("annual_return") is not None
+                    else summary.get("annual_return"),
+                    "max_drawdown": float(row.get("max_drawdown"))
+                    if row.get("max_drawdown") is not None
+                    else summary.get("max_drawdown"),
+                    "sharpe_ratio": float(row.get("sharpe_ratio"))
+                    if row.get("sharpe_ratio") is not None
+                    else summary.get("sharpe_ratio"),
+                    "win_rate": float(row.get("win_rate"))
+                    if row.get("win_rate") is not None
+                    else summary.get("win_rate"),
+                    "total_trades": row.get("total_trades")
+                    if row.get("total_trades") is not None
+                    else summary.get("total_trades"),
+                    "created_at": row.get("created_at"),
                 }
             )
         return items

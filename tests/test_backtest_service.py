@@ -125,17 +125,27 @@ async def test_run_backtest_returns_minimal_report_structure():
 @pytest.mark.asyncio
 async def test_list_results_returns_recent_history_summary():
     query_result = Mock()
-    row = MagicMock()
-    row._mapping = {
-        "id": 12,
-        "name": "ma_crossover-000001",
-        "created_at": "2024-01-03T10:00:00",
-        "result_data": {
-            "summary": {"total_return": 12.3, "max_drawdown": -4.5},
-            "meta": {"strategy": "ma_crossover", "code": "000001"},
-        },
-    }
-    query_result.fetchall.return_value = [row]
+    query_result.mappings.return_value.all.return_value = [
+        {
+            "id": 12,
+            "name": "ma_crossover-000001",
+            "start_date": "20240101",
+            "end_date": "20240131",
+            "initial_capital": 100000,
+            "final_capital": 112300,
+            "total_return": 12.3,
+            "annual_return": 18.5,
+            "max_drawdown": -4.5,
+            "sharpe_ratio": 1.31,
+            "win_rate": 100.0,
+            "total_trades": 1,
+            "created_at": "2024-01-03T10:00:00",
+            "result_data": {
+                "summary": {"total_return": 12.3, "max_drawdown": -4.5},
+                "meta": {"strategy": "ma_crossover", "code": "000001", "name": "平安银行"},
+            },
+        }
+    ]
     db = Mock()
     db.execute = AsyncMock(return_value=query_result)
     service = BacktestService(db=db)
@@ -144,13 +154,22 @@ async def test_list_results_returns_recent_history_summary():
 
     assert result == [
         {
-            "backtest_id": "12",
+            "id": "12",
             "name": "ma_crossover-000001",
+            "start_date": "20240101",
+            "end_date": "20240131",
+            "initial_capital": 100000.0,
+            "final_capital": 112300.0,
             "created_at": "2024-01-03T10:00:00",
             "strategy": "ma_crossover",
             "code": "000001",
+            "stock_name": "平安银行",
             "total_return": 12.3,
+            "annual_return": 18.5,
             "max_drawdown": -4.5,
+            "sharpe_ratio": 1.31,
+            "win_rate": 100.0,
+            "total_trades": 1,
         }
     ]
 
