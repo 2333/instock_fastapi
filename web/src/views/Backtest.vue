@@ -23,6 +23,9 @@
         <button class="btn btn-secondary" @click="saveStrategy" :disabled="loading || !selectedStrategyTemplate">
           保存策略
         </button>
+        <button class="btn btn-secondary" @click="copyShareLink">
+          复制链接
+        </button>
         <button class="btn btn-primary" @click="runBacktest" :disabled="loading">
           <svg v-if="!loading" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="5 3 19 12 5 21 5 3" />
@@ -539,17 +542,30 @@ const toggleConfigPanel = () => {
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, configCollapsed.value ? '1' : '0')
 }
 
+const buildShareQuery = () => ({
+  ...route.query,
+  stock: config.stockCode || undefined,
+  period: config.period || undefined,
+  strategy: config.strategyType || undefined,
+  saved: selectedSavedStrategyId.value || undefined,
+  bt: currentBacktestId.value || undefined,
+})
+
 const syncQueryFromState = () => {
   void router.replace({
-    query: {
-      ...route.query,
-      stock: config.stockCode || undefined,
-      period: config.period || undefined,
-      strategy: config.strategyType || undefined,
-      saved: selectedSavedStrategyId.value || undefined,
-      bt: currentBacktestId.value || undefined,
-    },
+    query: buildShareQuery(),
   })
+}
+
+const copyShareLink = async () => {
+  const href = router.resolve({ path: route.path, query: buildShareQuery() }).href
+  const url = href.startsWith('http') ? href : `${window.location.origin}${href}`
+  try {
+    await navigator.clipboard.writeText(url)
+    showNotification?.('success', '已复制当前回测链接')
+  } catch (error) {
+    showNotification?.('warning', '复制链接失败，请手动复制地址栏')
+  }
 }
 
 const hydrateFromQuery = () => {
