@@ -455,6 +455,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
         ),
         add=Mock(),
         commit=AsyncMock(),
+        flush=AsyncMock(),  # Add flush method
         refresh=AsyncMock(side_effect=refresh_strategy),
         delete=AsyncMock(),
     )
@@ -539,6 +540,7 @@ async def test_strategy_create_persists_params_payload(client, current_user_over
         execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
         add=Mock(),
         commit=AsyncMock(),
+        flush=AsyncMock(),  # Add flush method
         refresh=AsyncMock(side_effect=refresh_strategy),
     )
 

@@ -166,6 +166,7 @@ class MarketDataService:
                     entity_key,
                     MAX(updated_at) AS latest_updated_at
                 FROM data_fetch_audit
+                WHERE entity_type IS NOT NULL AND entity_key IS NOT NULL
                 GROUP BY task_name, entity_type, entity_key
             )
             SELECT
@@ -184,6 +185,8 @@ class MarketDataService:
                 AND audit.entity_key = latest.entity_key
                 AND audit.updated_at = latest.latest_updated_at
             WHERE audit.status <> 'done'
+                AND audit.entity_type IS NOT NULL
+                AND audit.entity_key IS NOT NULL
             ORDER BY audit.updated_at DESC, audit.task_name ASC
             LIMIT :limit
         """)
@@ -195,6 +198,7 @@ class MarketDataService:
                     entity_key,
                     MAX(updated_at) AS latest_updated_at
                 FROM data_fetch_audit
+                WHERE entity_type IS NOT NULL AND entity_key IS NOT NULL
                 GROUP BY task_name, entity_type, entity_key
             )
             SELECT COUNT(*)
@@ -205,6 +209,8 @@ class MarketDataService:
                 AND audit.entity_key = latest.entity_key
                 AND audit.updated_at = latest.latest_updated_at
             WHERE audit.status <> 'done'
+                AND audit.entity_type IS NOT NULL
+                AND audit.entity_key IS NOT NULL
         """)
 
         try:

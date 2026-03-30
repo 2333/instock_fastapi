@@ -14,7 +14,7 @@ CREATE_FETCH_AUDIT_TABLE_SQL = text("""
       status VARCHAR(32) NOT NULL,
       source VARCHAR(32) NULL,
       note TEXT NULL,
-      updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
     )
     """)
@@ -42,14 +42,14 @@ async def upsert_fetch_audit(
               task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
             )
             VALUES (
-              :task_name, :entity_type, :entity_key, :trade_date, :status, :source, :note, NOW()
+              :task_name, :entity_type, :entity_key, :trade_date, :status, :source, :note, CURRENT_TIMESTAMP
             )
             ON CONFLICT (task_name, entity_type, entity_key, trade_date)
             DO UPDATE SET
               status = EXCLUDED.status,
               source = EXCLUDED.source,
               note = EXCLUDED.note,
-              updated_at = NOW()
+              updated_at = CURRENT_TIMESTAMP
             """),
         {
             "task_name": task_name,
