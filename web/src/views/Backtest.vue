@@ -4,6 +4,7 @@
       <div class="header-left">
         <h1>策略回测</h1>
         <p class="subtitle">测试和优化您的交易策略</p>
+        <p v-if="currentBacktestId" class="backtest-id-hint">结果编号：{{ currentBacktestId }}</p>
       </div>
       <div class="header-right">
         <button class="btn btn-secondary" @click="toggleConfigPanel">
@@ -416,6 +417,7 @@ interface SavedStrategy {
 
 const loading = ref(false)
 const hasResults = ref(false)
+const currentBacktestId = ref('')
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -545,6 +547,7 @@ const syncQueryFromState = () => {
       period: config.period || undefined,
       strategy: config.strategyType || undefined,
       saved: selectedSavedStrategyId.value || undefined,
+      bt: currentBacktestId.value || undefined,
     },
   })
 }
@@ -554,11 +557,13 @@ const hydrateFromQuery = () => {
   const period = typeof route.query.period === 'string' ? route.query.period : ''
   const strategy = typeof route.query.strategy === 'string' ? route.query.strategy : ''
   const saved = typeof route.query.saved === 'string' ? route.query.saved : ''
+  const backtestId = typeof route.query.bt === 'string' ? route.query.bt : ''
 
   if (stock) config.stockCode = stock
   if (period) config.period = period
   if (strategy) config.strategyType = strategy
   if (saved) selectedSavedStrategyId.value = saved
+  if (backtestId) currentBacktestId.value = backtestId
 }
 
 const normalizeTemplate = (template: any): StrategyTemplate => ({
@@ -780,6 +785,59 @@ const applySavedStrategy = () => {
   showNotification?.('success', `已加载配置：${selectedSavedStrategy.value.name}`)
 }
 
+const applyBacktestResult = (result: any) => {
+  const summary = result?.summary || result?.data?.result_data?.summary || {}
+  metrics.initialCapital = Number(summary.initial_capital ?? config.initialCapital)
+  metrics.finalCapital = Number(summary.final_capital ?? config.initialCapital)
+  metrics.totalReturn = Number(summary.total_return ?? 0)
+  metrics.annualizedReturn = Number(summary.annual_return ?? 0)
+  metrics.maxDrawdown = Number(summary.max_drawdown ?? 0)
+  metrics.sharpeRatio = Number(summary.sharpe_ratio ?? 0)
+  metrics.winRate = Number(summary.win_rate ?? 0)
+  metrics.totalTrades = Number(summary.total_trades ?? 0)
+  metrics.winningTrades = Number(summary.winning_trades ?? 0)
+  metrics.profitFactor = Number(summary.profit_factor ?? 0)
+  metrics.avgWin = Number(summary.avg_win ?? 0)
+  metrics.avgLoss = Number(summary.avg_loss ?? 0)
+
+  equityCurve.value = (result?.equity_curve || result?.data?.result_data?.equity_curve || []).map((item: any) => ({
+    date: String(item.date),
+    equity: Number(item.equity),
+    benchmark: Number(item.benchmark),
+  }))
+
+  trades.value = (result?.trades || result?.data?.result_data?.trades || []).map((trade: any) => ({
+    id: Number(trade.id),
+    date: String(trade.date),
+    type: String(trade.type),
+    price: Number(trade.price),
+    quantity: Number(trade.quantity),
+    profit: Number(trade.profit),
+    returnPct: Number(trade.return_pct ?? trade.returnPct ?? 0),
+    holdDays: Number(trade.hold_days ?? trade.holdDays ?? 0),
+  }))
+
+  hasResults.value = true
+  if (result?.backtest_id) {
+    currentBacktestId.value = String(result.backtest_id)
+    syncQueryFromState()
+  }
+}
+
+const loadBacktestResult = async (backtestId: string) => {
+  if (!backtestId) return
+  try {
+    const result = await backtestApi.getBacktest(backtestId)
+    if (result?.status === 'completed') {
+      currentBacktestId.value = backtestId
+      applyBacktestResult(result)
+      showNotification?.('info', `已加载历史回测结果 #${backtestId}`)
+    }
+  } catch (error) {
+    showNotification?.('warning', '历史回测结果加载失败')
+  }
+}
+
 const runBacktest = async () => {
   loading.value = true
   try {
@@ -903,6 +961,9 @@ onMounted(() => {
   hydrateFromQuery()
   void loadStrategyTemplates()
   void loadSavedStrategies()
+  if (currentBacktestId.value) {
+    void loadBacktestResult(currentBacktestId.value)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -932,6 +993,12 @@ onBeforeUnmount(() => {
     margin: 4px 0 0;
     font-size: 14px;
     color: rgba(255, 255, 255, 0.5);
+  }
+
+  .backtest-id-hint {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
   }
 }
 
