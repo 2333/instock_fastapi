@@ -23,6 +23,38 @@ def _resolve_trade_date_dt(bar: DailyBar):
     return datetime.strptime(bar.trade_date, "%Y%m%d").date()
 
 
+def _build_moving_average_indicators(
+    ts_code: str,
+    bars: list[DailyBar],
+    closes: np.ndarray,
+) -> list[dict]:
+    indicators_data: list[dict] = []
+    windows = (
+        ("MA5", 5, 2),
+        ("MA10", 10, 2),
+        ("MA20", 20, 2),
+        ("MA60", 60, 2),
+    )
+
+    for i, bar in enumerate(bars):
+        trade_date_dt = _resolve_trade_date_dt(bar)
+        for indicator_name, window, precision in windows:
+            if i < window - 1:
+                continue
+            value = np.mean(closes[i - window + 1 : i + 1])
+            indicators_data.append(
+                {
+                    "ts_code": ts_code,
+                    "trade_date": bar.trade_date,
+                    "trade_date_dt": trade_date_dt,
+                    "indicator_name": indicator_name,
+                    "indicator_value": Decimal(str(round(value, precision))),
+                }
+            )
+
+    return indicators_data
+
+
 async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates: list[str]):
     """Calculate technical indicators for given ts_code and trade_dates."""
     result = await session.execute(
@@ -39,55 +71,7 @@ async def calculate_indicators(session: AsyncSession, ts_code: str, trade_dates:
     closes = np.array([float(bar.close) for bar in bars], dtype=np.float64)
     highs = np.array([float(bar.high) for bar in bars], dtype=np.float64)
     lows = np.array([float(bar.low) for bar in bars], dtype=np.float64)
-    indicators_data: list[dict] = []
-
-    for i, bar in enumerate(bars):
-        trade_date_dt = _resolve_trade_date_dt(bar)
-        # Moving Averages
-        if i >= 4:
-            ma5 = np.mean(closes[max(0, i - 4) : i + 1])
-            indicators_data.append(
-                {
-                    "ts_code": ts_code,
-                    "trade_date": bar.trade_date,
-                    "trade_date_dt": trade_date_dt,
-                    "indicator_name": "MA5",
-                    "indicator_value": Decimal(str(round(ma5, 2))),
-                }
-            )
-        if i >= 9:
-            ma10 = np.mean(closes[max(0, i - 9) : i + 1])
-            indicators_data.append(
-                {
-                    "ts_code": ts_code,
-                    "trade_date": bar.trade_date,
-                    "trade_date_dt": trade_date_dt,
-                    "indicator_name": "MA10",
-                    "indicator_value": Decimal(str(round(ma10, 2))),
-                }
-            )
-        if i >= 19:
-            ma20 = np.mean(closes[max(0, i - 19) : i + 1])
-            indicators_data.append(
-                {
-                    "ts_code": ts_code,
-                    "trade_date": bar.trade_date,
-                    "trade_date_dt": trade_date_dt,
-                    "indicator_name": "MA20",
-                    "indicator_value": Decimal(str(round(ma20, 2))),
-                }
-            )
-        if i >= 29:
-            ma60 = np.mean(closes[max(0, i - 29) : i + 1])
-            indicators_data.append(
-                {
-                    "ts_code": ts_code,
-                    "trade_date": bar.trade_date,
-                    "trade_date_dt": trade_date_dt,
-                    "indicator_name": "MA60",
-                    "indicator_value": Decimal(str(round(ma60, 2))),
-                }
-            )
+    indicators_data = _build_moving_average_indicators(ts_code, bars, closes)
 
     # RSI (14)
     if len(closes) >= 14:
