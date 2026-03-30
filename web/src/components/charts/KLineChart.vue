@@ -56,7 +56,23 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import * as echarts from 'echarts/core'
+import { BarChart, CandlestickChart, LineChart } from 'echarts/charts'
+import { DataZoomComponent, GridComponent, MarkAreaComponent, MarkPointComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { useLocale } from '@/composables/useLocale'
+
+echarts.use([
+  BarChart,
+  CandlestickChart,
+  LineChart,
+  DataZoomComponent,
+  GridComponent,
+  MarkAreaComponent,
+  MarkPointComponent,
+  TooltipComponent,
+  CanvasRenderer,
+])
 
 interface KlineData {
   date: string
@@ -494,7 +510,6 @@ const focusRange = () => {
 const initChart = async () => {
   if (!chartRef.value) return
 
-  const echarts = await import('echarts')
   chartInstance.value = echarts.init(chartRef.value, 'dark', {
     renderer: 'canvas',
     useDirtyRect: true,
