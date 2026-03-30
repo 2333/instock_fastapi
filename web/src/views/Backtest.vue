@@ -4,7 +4,10 @@
       <div class="header-left">
         <h1>策略回测</h1>
         <p class="subtitle">测试和优化您的交易策略</p>
-        <p v-if="currentBacktestId" class="backtest-id-hint">结果编号：{{ currentBacktestId }}</p>
+        <div v-if="currentBacktestId" class="backtest-id-hint">
+          <span>结果编号：{{ currentBacktestId }}</span>
+          <button class="backtest-id-copy" @click="copyBacktestId">复制编号</button>
+        </div>
       </div>
       <div class="header-right">
         <button class="btn btn-secondary" @click="toggleConfigPanel">
@@ -634,6 +637,16 @@ const copyShareLink = async () => {
   }
 }
 
+const copyBacktestId = async () => {
+  if (!currentBacktestId.value) return
+  try {
+    await navigator.clipboard.writeText(currentBacktestId.value)
+    showNotification?.('success', '已复制回测编号')
+  } catch (error) {
+    showNotification?.('warning', '复制编号失败，请手动复制')
+  }
+}
+
 const hydrateFromQuery = () => {
   const stock = typeof route.query.stock === 'string' ? route.query.stock : ''
   const period = typeof route.query.period === 'string' ? route.query.period : ''
@@ -1085,6 +1098,18 @@ onBeforeUnmount(() => {
     margin: 8px 0 0;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.45);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .backtest-id-copy {
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 0;
   }
 }
 
