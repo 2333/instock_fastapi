@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import async_session_factory
 from app.models.stock_model import User
 from app.services.auth_service import AuthService
+from core.providers.market_data_provider import MarketDataProvider
+from core.providers.postgres_provider import PostgreSQLProvider
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -13,6 +15,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 async def get_db() -> AsyncSession:
     async with async_session_factory() as session:
         yield session
+
+
+async def get_provider(db: AsyncSession = Depends(get_db)) -> MarketDataProvider:
+    """获取市场数据提供者（默认 PostgreSQL）"""
+    return PostgreSQLProvider(db)
 
 
 async def get_current_user(

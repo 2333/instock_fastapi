@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_provider
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
 from app.schemas.selection_schema import (
@@ -20,7 +20,9 @@ from app.schemas.selection_schema import (
     SelectionRequest,
     SelectionResponse,
 )
+from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
+from app.services.selection_service_with_provider import SelectionServiceWithProvider
 
 router = APIRouter()
 
@@ -124,9 +126,10 @@ async def run_selection(
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    provider: MarketDataProvider = Depends(get_provider),
 ) -> SelectionResponse:
-    """Backward-compatible selection entrypoint."""
-    service = SelectionService(db)
+    """Selection endpoint using provider-based service."""
+    service = SelectionServiceWithProvider(db=db, provider=provider)
     conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
     if request.scope.market and "market" not in conditions:
         conditions["market"] = request.scope.market
@@ -140,8 +143,10 @@ async def run_screening(
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    provider: MarketDataProvider = Depends(get_provider),
 ) -> ScreeningRunResponse:
-    service = SelectionService(db)
+    """Main screening endpoint with provider-based service."""
+    service = SelectionServiceWithProvider(db=db, provider=provider)
     conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
     if request.scope.market and "market" not in conditions:
         conditions["market"] = request.scope.market
