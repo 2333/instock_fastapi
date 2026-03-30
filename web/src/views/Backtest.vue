@@ -217,6 +217,14 @@
         </div>
 
         <template v-else>
+          <div class="card result-summary-card">
+            <div class="card-header">
+              <h3>结果摘要</h3>
+              <span class="summary-badge" :class="resultSummaryTone">{{ resultSummaryTag }}</span>
+            </div>
+            <p class="result-summary-text">{{ resultSummaryText }}</p>
+          </div>
+
           <div class="metrics-grid">
             <div class="metric-card">
               <div class="metric-header">
@@ -465,6 +473,36 @@ const metrics = reactive({
 })
 
 const trades = ref<Trade[]>([])
+
+const resultSummaryTag = computed(() => {
+  if (metrics.totalReturn > 0 && metrics.maxDrawdown > -10) return '表现稳健'
+  if (metrics.totalReturn > 0) return '收益为正'
+  if (metrics.totalReturn === 0) return '基本持平'
+  return '需要复盘'
+})
+
+const resultSummaryTone = computed(() => {
+  if (metrics.totalReturn > 0 && metrics.maxDrawdown > -10) return 'summary-badge--bullish'
+  if (metrics.totalReturn > 0) return 'summary-badge--neutral'
+  if (metrics.totalReturn === 0) return 'summary-badge--flat'
+  return 'summary-badge--bearish'
+})
+
+const resultSummaryText = computed(() => {
+  const returnPart = `区间总收益 ${metrics.totalReturn >= 0 ? '+' : ''}${metrics.totalReturn.toFixed(2)}%，最大回撤 ${metrics.maxDrawdown.toFixed(2)}%。`
+  const tradePart = `共 ${metrics.totalTrades} 笔交易，胜率 ${metrics.winRate.toFixed(1)}%，夏普 ${metrics.sharpeRatio.toFixed(2)}。`
+
+  if (metrics.totalReturn > 0 && metrics.maxDrawdown > -10) {
+    return `${returnPart}${tradePart} 当前这组参数更接近“收益和回撤都可接受”的状态，可以作为后续对比基线。`
+  }
+  if (metrics.totalReturn > 0) {
+    return `${returnPart}${tradePart} 收益已经转正，但回撤或波动仍值得继续优化。`
+  }
+  if (metrics.totalReturn === 0) {
+    return `${returnPart}${tradePart} 当前结果接近持平，更适合继续调参或换模板验证。`
+  }
+  return `${returnPart}${tradePart} 当前参数组合没有形成理想结果，建议优先复盘模板与参数设置。`
+})
 
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('zh-CN', {
@@ -1091,6 +1129,45 @@ onBeforeUnmount(() => {
     font-size: 14px;
     color: rgba(255, 255, 255, 0.5);
   }
+}
+
+.result-summary-card {
+  margin-bottom: 20px;
+  background: rgba(26, 26, 26, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.summary-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.summary-badge--bullish {
+  background: rgba(89, 211, 140, 0.16);
+}
+
+.summary-badge--neutral {
+  background: rgba(91, 163, 255, 0.16);
+}
+
+.summary-badge--flat {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.summary-badge--bearish {
+  background: rgba(255, 123, 123, 0.16);
+}
+
+.result-summary-text {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.7;
 }
 
 .metrics-grid {
