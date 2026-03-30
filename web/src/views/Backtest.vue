@@ -154,6 +154,12 @@
                 >
                   设为对照
                 </button>
+                <button
+                  class="history-backtests__action history-backtests__action--primary"
+                  @click.stop="replayBacktestFromHistory(item)"
+                >
+                  重新运行
+                </button>
               </div>
             </button>
             <div v-if="!filteredBacktestHistory.length" class="history-backtests__empty">
@@ -1236,6 +1242,37 @@ const loadBacktestResult = async (backtestId: string) => {
   }
 }
 
+const replayBacktestFromHistory = async (item: any) => {
+  try {
+    const result = await backtestApi.getBacktest(String(item.id))
+    if (result?.status !== 'completed') {
+      showNotification?.('warning', '无法加载该回测的配置信息')
+      return
+    }
+    const meta = result?.data?.result_data?.meta || {}
+    const params = meta.strategy_params || {}
+
+    // Apply strategy template if present
+    if (meta.strategy && strategyTemplates.value.some(t => t.name === meta.strategy)) {
+      config.strategyType = meta.strategy
+    }
+
+    // Apply basic config fields
+    if (meta.code) config.stockCode = String(meta.code).trim()
+    if (item.startDate) config.period = String(item.startDate) + ',' + String(item.endDate)
+    if (item.initialCapital) config.initialCapital = Number(item.initialCapital)
+
+    // Apply strategy-specific params using existing helper
+    applySavedStrategyParams(params)
+
+    // Scroll to config panel
+    configPanelRef.value?.scrollIntoView({ behavior: 'smooth' })
+    showNotification?.('info', '已加载历史配置到面板，请修改参数后点击运行')
+  } catch (error) {
+    showNotification?.('warning', '加载历史配置失败')
+  }
+}
+
 const runBacktest = async () => {
   loading.value = true
   try {
@@ -1697,6 +1734,11 @@ onBeforeUnmount(() => {
   padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.history-backtests__action--primary {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
 .history-backtests__action:disabled {
