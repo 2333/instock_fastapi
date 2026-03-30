@@ -1,4 +1,5 @@
 from datetime import datetime, time
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
@@ -45,6 +46,27 @@ class TestDailyBarsAPI:
         data = response.json()
         assert "bars" in data
         assert len(data["bars"]) == 1
+
+    async def test_get_stock_detail_reports_adjust_fallback_when_requested_data_missing(self, client):
+        with patch(
+            "app.services.stock_service.StockService._fetch_adjusted_bars",
+            new=AsyncMock(return_value=[]),
+        ):
+            response = await client.get(
+                "/api/v1/stocks/000001.SZ",
+                params={
+                    "start_date": "20240101",
+                    "end_date": "20240131",
+                    "adjust": "qfq",
+                },
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["adjust_requested"] == "qfq"
+        assert data["adjust_applied"] == "bfq"
+        assert data["adjust_note"] == "requested_adjust_data_unavailable_fallback_to_bfq"
+        assert data["data_freshness"]["price_current"] is True
+        assert data["data_freshness"]["indicator_current"] is True
 
 
 class TestInfoAPI:
