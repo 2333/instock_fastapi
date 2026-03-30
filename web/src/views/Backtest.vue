@@ -87,8 +87,14 @@
             <div class="recent-backtests__head">
               <span class="recent-backtests__label">回测历史</span>
             </div>
+            <input
+              v-model="historyFilter"
+              type="text"
+              class="input-text history-filter"
+              placeholder="按代码 / 策略 / 名称筛选"
+            >
             <button
-              v-for="item in backtestHistory"
+              v-for="item in filteredBacktestHistory"
               :key="item.id"
               class="history-backtests__item"
               @click="loadBacktestResult(item.id)"
@@ -523,6 +529,7 @@ const hasResults = ref(false)
 const currentBacktestId = ref('')
 const recentBacktests = ref<string[]>([])
 const backtestHistory = ref<BacktestHistoryItem[]>([])
+const historyFilter = ref('')
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -626,6 +633,14 @@ const compareRows = computed(() => {
     { label: '模板', current: config.strategyType, saved: String(saved.strategy_type || saved.template || '--') },
     { label: '参数数量', current: String(Object.keys(strategyParams).length), saved: String(Object.keys(savedParams).length) },
   ]
+})
+
+const filteredBacktestHistory = computed(() => {
+  const keyword = historyFilter.value.trim().toLowerCase()
+  if (!keyword) return backtestHistory.value
+  return backtestHistory.value.filter((item) =>
+    [item.code, item.name, item.strategy, item.stockName].some((value) => String(value || '').toLowerCase().includes(keyword))
+  )
 })
 
 const currentHistoryItem = computed(() =>
@@ -1412,6 +1427,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   margin-top: 12px;
+}
+
+.history-filter {
+  margin-bottom: 4px;
 }
 
 .recent-backtests__head {
