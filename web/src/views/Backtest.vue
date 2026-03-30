@@ -146,6 +146,15 @@
                 <span>回撤 {{ formatPercent(item.maxDrawdown) }}</span>
                 <span>创建 {{ formatDateTime(item.createdAt) }}</span>
               </div>
+              <div class="history-backtests__actions">
+                <button
+                  class="history-backtests__action"
+                  @click.stop="selectedCompareBacktestId = item.id"
+                  :disabled="item.id === currentBacktestId"
+                >
+                  设为对照
+                </button>
+              </div>
             </button>
             <div v-if="!filteredBacktestHistory.length" class="history-backtests__empty">
               没有匹配的回测记录，试试更换关键词或排序方式。
@@ -1674,6 +1683,25 @@ onBeforeUnmount(() => {
   gap: 12px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.46);
+}
+
+.history-backtests__actions {
+  margin-top: 10px;
+}
+
+.history-backtests__action {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.history-backtests__action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .recent-backtests__item--history {
