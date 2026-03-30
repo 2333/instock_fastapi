@@ -129,6 +129,9 @@
                 <span>创建 {{ formatDateTime(item.createdAt) }}</span>
               </div>
             </button>
+            <div v-if="!filteredBacktestHistory.length" class="history-backtests__empty">
+              没有匹配的回测记录，试试更换关键词或排序方式。
+            </div>
           </div>
 
           <div v-if="recentBacktests.length" class="recent-backtests">
@@ -1564,6 +1567,14 @@ onBeforeUnmount(() => {
   font-size: 11px;
   background: rgba(91, 163, 255, 0.16);
   color: rgba(255, 255, 255, 0.82);
+}
+
+.history-backtests__empty {
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 14px;
+  color: rgba(255, 255, 255, 0.56);
+  text-align: center;
 }
 
 .history-backtests__meta {
