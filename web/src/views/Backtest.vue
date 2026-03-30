@@ -40,6 +40,34 @@
         :style="{ width: `${configPanelWidth}px` }"
       >
         <div class="config-section">
+          <h4>已保存配置</h4>
+          <div class="config-row">
+            <div class="config-item">
+              <label>策略配置</label>
+              <select v-model="selectedSavedStrategyId" class="select-full">
+                <option value="">选择已保存策略</option>
+                <option
+                  v-for="strategy in savedStrategies"
+                  :key="strategy.id"
+                  :value="String(strategy.id)"
+                >
+                  {{ strategy.name }}
+                </option>
+              </select>
+            </div>
+            <div class="config-item config-action">
+              <button
+                class="btn btn-secondary btn-full"
+                @click="applySavedStrategy"
+                :disabled="!selectedSavedStrategy"
+              >
+                加载配置
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
           <h4>股票选择</h4>
           <div class="config-item">
             <label>股票代码</label>
@@ -369,12 +397,22 @@ interface StrategyTemplate {
   parameters: StrategyTemplateParam[]
 }
 
+interface SavedStrategy {
+  id: number
+  name: string
+  description?: string
+  params?: Record<string, unknown>
+  isActive: boolean
+}
+
 const loading = ref(false)
 const hasResults = ref(false)
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
 const strategyTemplates = ref<StrategyTemplate[]>([])
+const savedStrategies = ref<SavedStrategy[]>([])
+const selectedSavedStrategyId = ref('')
 const configPanelRef = ref<HTMLElement | null>(null)
 const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
@@ -406,6 +444,9 @@ const strategyParams = reactive<Record<string, string | number>>({})
 
 const selectedStrategyTemplate = computed(() =>
   strategyTemplates.value.find((template) => template.name === config.strategyType) || null
+)
+const selectedSavedStrategy = computed(() =>
+  savedStrategies.value.find((strategy) => String(strategy.id) === selectedSavedStrategyId.value) || null
 )
 
 const metrics = reactive({
@@ -487,6 +528,14 @@ const normalizeTemplate = (template: any): StrategyTemplate => ({
     : [],
 })
 
+const normalizeSavedStrategy = (strategy: any): SavedStrategy => ({
+  id: Number(strategy?.id || 0),
+  name: String(strategy?.name || ''),
+  description: strategy?.description ? String(strategy.description) : undefined,
+  params: strategy?.params && typeof strategy.params === 'object' ? strategy.params : undefined,
+  isActive: Boolean(strategy?.is_active ?? strategy?.isActive ?? true),
+})
+
 const applyTemplateDefaults = (template: StrategyTemplate | null) => {
   Object.keys(strategyParams).forEach((key) => {
     delete strategyParams[key]
@@ -498,12 +547,106 @@ const applyTemplateDefaults = (template: StrategyTemplate | null) => {
   })
 }
 
+const assignStrategyParams = (params: Record<string, unknown> | null | undefined) => {
+  Object.keys(strategyParams).forEach((key) => {
+    delete strategyParams[key]
+  })
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (typeof value === 'number' || typeof value === 'string') {
+      strategyParams[key] = value
+    }
+  })
+}
+
+const pickSavedValue = (saved: Record<string, unknown>, ...keys: string[]) =>
+  keys.find((key) => saved[key] !== undefined) ? saved[keys.find((key) => saved[key] !== undefined) as string] : undefined
+
+const applySavedStrategyParams = (params: Record<string, unknown> | null | undefined) => {
+  const saved = params || {}
+  const savedTemplate = String(
+    saved.strategy_type || saved.template || (saved.strategy as Record<string, unknown> | undefined)?.template || ''
+  ).trim()
+
+  if (savedTemplate && strategyTemplates.value.some((template) => template.name === savedTemplate)) {
+    config.strategyType = savedTemplate
+  }
+
+  const stockCode = pickSavedValue(saved, 'stock_code', 'stockCode')
+  const period = pickSavedValue(saved, 'period')
+  const initialCapital = pickSavedValue(saved, 'initial_capital', 'initialCapital')
+  const positionSize = pickSavedValue(saved, 'position_size', 'positionSize')
+  const maxPosition = pickSavedValue(saved, 'max_position', 'maxPosition')
+  const stopLoss = pickSavedValue(saved, 'stop_loss', 'stopLoss')
+  const takeProfit = pickSavedValue(saved, 'take_profit', 'takeProfit')
+  const minHoldDays = pickSavedValue(saved, 'min_hold_days', 'minHoldDays')
+  const commissionRate = pickSavedValue(saved, 'commission_rate', 'commissionRate')
+  const minCommission = pickSavedValue(saved, 'min_commission', 'minCommission')
+  const slippage = pickSavedValue(saved, 'slippage')
+
+  if (stockCode !== undefined) {
+    config.stockCode = String(stockCode).trim() || config.stockCode
+  }
+  if (period !== undefined) {
+    config.period = String(period)
+  }
+  if (initialCapital !== undefined) {
+    config.initialCapital = Number(initialCapital)
+  }
+  if (positionSize !== undefined) {
+    config.positionSize = Number(positionSize)
+  }
+  if (maxPosition !== undefined) {
+    config.maxPosition = Number(maxPosition)
+  }
+  if (stopLoss !== undefined) {
+    config.stopLoss = Number(stopLoss)
+  }
+  if (takeProfit !== undefined) {
+    config.takeProfit = Number(takeProfit)
+  }
+  if (minHoldDays !== undefined) {
+    config.minHoldDays = Number(minHoldDays)
+  }
+  if (commissionRate !== undefined) {
+    config.commissionRate = Number(commissionRate)
+  }
+  if (minCommission !== undefined) {
+    config.minCommission = Number(minCommission)
+  }
+  if (slippage !== undefined) {
+    config.slippage = Number(slippage)
+  }
+
+  const nestedStrategy = saved.strategy
+  const nestedParams = nestedStrategy && typeof nestedStrategy === 'object'
+    ? (nestedStrategy as Record<string, unknown>).params
+    : undefined
+  const flatParams = saved.strategy_params
+  assignStrategyParams(
+    flatParams && typeof flatParams === 'object'
+      ? flatParams as Record<string, unknown>
+      : nestedParams && typeof nestedParams === 'object'
+        ? nestedParams as Record<string, unknown>
+        : selectedStrategyTemplate.value?.defaultParams || {}
+  )
+}
+
 const loadTemplate = () => {
   configCollapsed.value = false
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, '0')
   applyTemplateDefaults(selectedStrategyTemplate.value)
   if (selectedStrategyTemplate.value) {
     showNotification?.('success', `已加载 ${selectedStrategyTemplate.value.displayName} 模板`)
+  }
+}
+
+const loadSavedStrategies = async () => {
+  try {
+    const strategies = await strategyApi.getMyStrategies()
+    savedStrategies.value = Array.isArray(strategies) ? strategies.map(normalizeSavedStrategy) : []
+  } catch (error) {
+    savedStrategies.value = []
+    showNotification?.('warning', '已保存策略加载失败')
   }
 }
 
@@ -527,22 +670,46 @@ const saveStrategy = async () => {
   if (!selectedStrategyTemplate.value) return
 
   try {
-    await strategyApi.createMyStrategy({
-      name: `${selectedStrategyTemplate.value.displayName}-${config.stockCode}-${Date.now()}`,
+    const suggestedName = `${selectedStrategyTemplate.value.displayName}-${config.stockCode}`
+    const strategyName = window.prompt('输入策略配置名称', suggestedName)?.trim()
+    if (!strategyName) return
+
+    const created = await strategyApi.createMyStrategy({
+      name: strategyName,
       description: `从回测页保存：${selectedStrategyTemplate.value.displayName}`,
       params: {
-        template: config.strategyType,
+        strategy_type: config.strategyType,
         stock_code: config.stockCode,
         period: config.period,
         initial_capital: config.initialCapital,
+        position_size: config.positionSize,
+        max_position: config.maxPosition,
+        stop_loss: config.stopLoss,
+        take_profit: config.takeProfit,
+        min_hold_days: config.minHoldDays,
+        commission_rate: config.commissionRate,
+        min_commission: config.minCommission,
+        slippage: config.slippage,
         strategy_params: { ...strategyParams },
       },
       is_active: true,
     })
+    const normalized = normalizeSavedStrategy(created)
+    savedStrategies.value = [normalized, ...savedStrategies.value.filter((item) => item.id !== normalized.id)]
+    selectedSavedStrategyId.value = String(normalized.id)
     showNotification?.('success', '已保存当前策略配置')
   } catch (error) {
     showNotification?.('error', '保存策略失败')
   }
+}
+
+const applySavedStrategy = () => {
+  if (!selectedSavedStrategy.value) return
+
+  configCollapsed.value = false
+  window.localStorage.setItem(PANEL_COLLAPSED_KEY, '0')
+  applySavedStrategyParams(selectedSavedStrategy.value.params)
+  showNotification?.('success', `已加载配置：${selectedSavedStrategy.value.name}`)
 }
 
 const runBacktest = async () => {
@@ -657,6 +824,7 @@ onMounted(() => {
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
   void loadStrategyTemplates()
+  void loadSavedStrategies()
 })
 
 onBeforeUnmount(() => {
@@ -832,6 +1000,11 @@ onBeforeUnmount(() => {
   }
 }
 
+.config-action {
+  display: flex;
+  align-items: flex-end;
+}
+
 .input-text,
 .input-number,
 .select-full {
@@ -848,6 +1021,11 @@ onBeforeUnmount(() => {
     outline: none;
     border-color: #2962FF;
   }
+}
+
+.btn-full {
+  width: 100%;
+  justify-content: center;
 }
 
 .strategy-params {
