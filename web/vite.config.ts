@@ -66,5 +66,32 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes("node_modules")) return;
+
+            if (id.includes("echarts") || id.includes("zrender") || id.includes("vue-echarts")) {
+              return "charts-vendor";
+            }
+
+            if (id.includes("vue-router")) {
+              return "router-vendor";
+            }
+
+            if (id.includes("pinia") || id.includes("@vueuse")) {
+              return "state-vendor";
+            }
+
+            if (id.includes("node_modules/vue")) {
+              return "vue-vendor";
+            }
+
+            return "vendor";
+          },
+        },
+      },
+    },
   };
 });
