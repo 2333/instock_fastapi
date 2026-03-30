@@ -522,8 +522,11 @@ const humanizeDatasetName = (value: string) => {
   const labels: Record<string, string> = {
     daily_bars: '日线行情',
     fund_flows: '资金流向',
+    stock_tops: '龙虎榜',
     stock_top: '龙虎榜',
+    stock_block_trades: '大宗交易',
     block_trades: '大宗交易',
+    north_bound_funds: '北向资金',
     north_bound: '北向资金',
   }
   return labels[value] || value.replace(/_/g, ' ')
@@ -531,6 +534,7 @@ const humanizeDatasetName = (value: string) => {
 
 const humanizeTaskName = (value: string) => {
   const labels: Record<string, string> = {
+    fetch_daily_data: '日线数据抓取',
     fetch_fund_flow: '资金流抓取',
     fetch_market_reference: '市场参考抓取',
     fetch_block_trades: '大宗交易抓取',
@@ -751,48 +755,6 @@ onMounted(() => {
   }
 }
 
-.health-strip {
-  display: grid;
-  grid-template-columns: 1.2fr auto 1fr;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 20px;
-  padding: 14px 16px;
-  border: 1px solid rgba(89, 211, 140, 0.18);
-  border-radius: 14px;
-  background: rgba(89, 211, 140, 0.06);
-
-  &--warning {
-    border-color: rgba(255, 184, 77, 0.24);
-    background: rgba(255, 184, 77, 0.08);
-  }
-}
-
-.health-strip__summary,
-.health-strip__metrics,
-.health-strip__alert {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.health-kicker {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.health-strip__summary strong,
-.health-strip__alert strong {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.health-strip__summary span,
-.health-strip__metrics span,
-.health-strip__alert span {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.66);
-}
-
 .card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -997,10 +959,6 @@ onMounted(() => {
   }
 
   .card-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .health-strip {
     grid-template-columns: 1fr;
   }
 }
