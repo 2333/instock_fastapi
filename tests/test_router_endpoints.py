@@ -495,3 +495,47 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
     assert delete_response.json()["status"] == "success"
     assert run_response.json()["strategy"] == "enter"
     assert results_response.json()[0]["strategy_name"] == "enter"
+
+
+@pytest.mark.asyncio
+async def test_strategy_create_persists_params_payload(client, current_user_override):
+    async def refresh_strategy(obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = 9
+        if getattr(obj, "user_id", None) is None:
+            obj.user_id = 1
+
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+        add=Mock(),
+        commit=AsyncMock(),
+        refresh=AsyncMock(side_effect=refresh_strategy),
+    )
+
+    async def override_router_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = override_router_db
+
+    try:
+        response = await client.post(
+            "/api/v1/strategies/my",
+            json={
+                "name": "ma_crossover-600519",
+                "description": "saved from backtest",
+                "params": {
+                    "strategy_type": "ma_crossover",
+                    "stock_code": "600519",
+                    "strategy_params": {"fast_ma": 5, "slow_ma": 20},
+                },
+                "is_active": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    saved_strategy = fake_db.add.call_args.args[0]
+    assert saved_strategy.name == "ma_crossover-600519"
+    assert saved_strategy.params["strategy_type"] == "ma_crossover"
+    assert saved_strategy.params["strategy_params"]["fast_ma"] == 5
