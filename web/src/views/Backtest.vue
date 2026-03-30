@@ -347,6 +347,18 @@
               </select>
             </div>
 
+            <div v-if="compareTargetHistoryItem" class="compare-target-meta">
+              <div>
+                <span class="compare-target-meta__label">当前回测</span>
+                <strong>{{ config.stockCode || '--' }} / {{ config.strategyType || '--' }}</strong>
+              </div>
+              <div>
+                <span class="compare-target-meta__label">对照历史</span>
+                <strong>#{{ compareTargetHistoryItem.id }} / {{ compareTargetHistoryItem.code || compareTargetHistoryItem.name || '--' }}</strong>
+                <small>{{ compareTargetHistoryItem.strategy || '--' }} · {{ formatDateTime(compareTargetHistoryItem.createdAt) }}</small>
+              </div>
+            </div>
+
             <div v-if="resultCompareRows.length" class="compare-grid compare-grid--metrics">
               <div class="compare-row compare-row--head compare-row--delta">
                 <span>结果</span>
@@ -1815,6 +1827,35 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   margin-top: 12px;
+}
+
+.compare-target-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.compare-target-meta__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.compare-target-meta strong {
+  display: block;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.compare-target-meta small {
+  display: block;
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.56);
 }
 
 .compare-target-row__label {
