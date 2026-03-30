@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.stock_model import Strategy, User
-from app.schemas.strategy_schema import StrategyResponse, StrategyResultResponse
+from app.schemas.strategy_schema import (
+    StrategyResponse,
+    StrategyResultResponse,
+    StrategyTemplateResponse,
+)
 from app.services.strategy_service import StrategyService
 
 router = APIRouter()
@@ -47,6 +51,11 @@ class StrategyListResponse(BaseModel):
 @router.get("/strategies", response_model=list[StrategyResponse])
 async def get_strategies():
     return StrategyService.get_strategy_list()
+
+
+@router.get("/strategies/templates", response_model=list[StrategyTemplateResponse])
+async def get_strategy_templates():
+    return StrategyService.get_strategy_templates()
 
 
 @router.get("/strategies/my", response_model=list[StrategyListResponse])

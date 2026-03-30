@@ -187,6 +187,7 @@ class BacktestService:
                 "code": stock_row["symbol"],
                 "name": stock_row["name"],
                 "strategy": params.get("strategy") or "buy_hold",
+                "strategy_params": params.get("strategy_params") or {},
             },
         }
 
@@ -219,6 +220,7 @@ class BacktestService:
                             "code": stock_row["symbol"],
                             "name": stock_row["name"],
                             "strategy": params.get("strategy") or "buy_hold",
+                            "strategy_params": params.get("strategy_params") or {},
                         },
                     },
                 )
