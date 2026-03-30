@@ -112,34 +112,56 @@
           <div class="config-item">
             <label>策略类型</label>
             <select v-model="config.strategyType" class="select-full">
-              <option value="ma_crossover">MA 交叉</option>
-              <option value="rsi_oversold">RSI 超卖</option>
-              <option value="macd_cross">MACD 交叉</option>
-              <option value="boll_breakout">布林带突破</option>
-              <option value="pattern_based">形态策略</option>
+              <option
+                v-for="template in strategyTemplates"
+                :key="template.name"
+                :value="template.name"
+              >
+                {{ template.displayName }}
+              </option>
             </select>
           </div>
-          <div v-if="config.strategyType === 'ma_crossover'" class="strategy-params">
+          <p v-if="selectedStrategyTemplate?.description" class="strategy-description">
+            {{ selectedStrategyTemplate.description }}
+          </p>
+          <div
+            v-if="selectedStrategyTemplate?.parameters.length"
+            class="strategy-params"
+          >
             <div class="config-row">
-              <div class="config-item">
-                <label>快速 MA</label>
-                <input type="number" v-model.number="config.fastMA" class="input-number">
-              </div>
-              <div class="config-item">
-                <label>慢速 MA</label>
-                <input type="number" v-model.number="config.slowMA" class="input-number">
-              </div>
-            </div>
-          </div>
-          <div v-if="config.strategyType === 'rsi_oversold'" class="strategy-params">
-            <div class="config-row">
-              <div class="config-item">
-                <label>RSI 周期</label>
-                <input type="number" v-model.number="config.rsiPeriod" class="input-number">
-              </div>
-              <div class="config-item">
-                <label>超卖水平</label>
-                <input type="number" v-model.number="config.oversoldLevel" class="input-number">
+              <div
+                v-for="param in selectedStrategyTemplate.parameters"
+                :key="param.name"
+                class="config-item"
+              >
+                <label>{{ param.label }}</label>
+                <select
+                  v-if="param.type === 'select'"
+                  v-model="strategyParams[param.name]"
+                  class="select-full"
+                >
+                  <option
+                    v-for="option in param.options || []"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+                <input
+                  v-else-if="param.type === 'number'"
+                  v-model.number="strategyParams[param.name]"
+                  class="input-number"
+                  :min="param.min"
+                  :max="param.max"
+                  :step="param.step || 1"
+                >
+                <input
+                  v-else
+                  type="text"
+                  v-model="strategyParams[param.name]"
+                  class="input-text"
+                >
               </div>
             </div>
           </div>
@@ -292,13 +314,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, shallowRef, onBeforeUnmount, inject } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { backtestApi } from '@/api'
+import { backtestApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
 echarts.use([
@@ -320,11 +342,36 @@ interface Trade {
   holdDays: number
 }
 
+interface StrategyTemplateOption {
+  label: string
+  value: string
+}
+
+interface StrategyTemplateParam {
+  name: string
+  label: string
+  type: string
+  default: string | number | null
+  min?: number
+  max?: number
+  step?: number
+  options?: StrategyTemplateOption[]
+}
+
+interface StrategyTemplate {
+  name: string
+  displayName: string
+  description?: string
+  defaultParams: Record<string, string | number>
+  parameters: StrategyTemplateParam[]
+}
+
 const loading = ref(false)
 const hasResults = ref(false)
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
+const strategyTemplates = ref<StrategyTemplate[]>([])
 const configPanelRef = ref<HTMLElement | null>(null)
 const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
@@ -351,11 +398,12 @@ const config = reactive({
   minCommission: 5,
   slippage: 0.1,
   strategyType: 'ma_crossover',
-  fastMA: 5,
-  slowMA: 20,
-  rsiPeriod: 14,
-  oversoldLevel: 30,
 })
+const strategyParams = reactive<Record<string, string | number>>({})
+
+const selectedStrategyTemplate = computed(() =>
+  strategyTemplates.value.find((template) => template.name === config.strategyType) || null
+)
 
 const metrics = reactive({
   initialCapital: 100000,
@@ -404,9 +452,72 @@ const toggleConfigPanel = () => {
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, configCollapsed.value ? '1' : '0')
 }
 
+const normalizeTemplate = (template: any): StrategyTemplate => ({
+  name: String(template?.name || ''),
+  displayName: String(template?.display_name || template?.displayName || ''),
+  description: template?.description ? String(template.description) : undefined,
+  defaultParams: Object.fromEntries(
+    Object.entries(template?.default_params || template?.defaultParams || {}).map(([key, value]) => [
+      key,
+      typeof value === 'number' || typeof value === 'string' ? value : String(value ?? ''),
+    ])
+  ),
+  parameters: Array.isArray(template?.parameters)
+    ? template.parameters.map((param: any) => ({
+        name: String(param?.name || ''),
+        label: String(param?.label || param?.name || ''),
+        type: String(param?.type || 'number'),
+        default:
+          typeof param?.default === 'number' || typeof param?.default === 'string'
+            ? param.default
+            : null,
+        min: typeof param?.min === 'number' ? param.min : undefined,
+        max: typeof param?.max === 'number' ? param.max : undefined,
+        step: typeof param?.step === 'number' ? param.step : undefined,
+        options: Array.isArray(param?.options)
+          ? param.options.map((option: any) => ({
+              label: String(option?.label || option?.value || ''),
+              value: String(option?.value || ''),
+            }))
+          : undefined,
+      }))
+    : [],
+})
+
+const applyTemplateDefaults = (template: StrategyTemplate | null) => {
+  Object.keys(strategyParams).forEach((key) => {
+    delete strategyParams[key]
+  })
+  if (!template) return
+
+  Object.entries(template.defaultParams).forEach(([key, value]) => {
+    strategyParams[key] = value
+  })
+}
+
 const loadTemplate = () => {
   configCollapsed.value = false
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, '0')
+  applyTemplateDefaults(selectedStrategyTemplate.value)
+  if (selectedStrategyTemplate.value) {
+    showNotification?.('success', `已加载 ${selectedStrategyTemplate.value.displayName} 模板`)
+  }
+}
+
+const loadStrategyTemplates = async () => {
+  try {
+    const templates = await strategyApi.getTemplates()
+    strategyTemplates.value = Array.isArray(templates) ? templates.map(normalizeTemplate) : []
+    if (!strategyTemplates.value.length) return
+
+    if (!strategyTemplates.value.some((template) => template.name === config.strategyType)) {
+      config.strategyType = strategyTemplates.value[0].name
+    } else {
+      applyTemplateDefaults(selectedStrategyTemplate.value)
+    }
+  } catch (error) {
+    showNotification?.('warning', '策略模板加载失败，使用默认配置')
+  }
 }
 
 const runBacktest = async () => {
@@ -415,6 +526,7 @@ const runBacktest = async () => {
     const range = resolveDateRange()
     const result = await backtestApi.runBacktest({
       strategy: config.strategyType,
+      strategy_params: { ...strategyParams },
       start_date: range.start,
       end_date: range.end,
       initial_capital: config.initialCapital,
@@ -460,6 +572,13 @@ const runBacktest = async () => {
     loading.value = false
   }
 }
+
+watch(
+  () => config.strategyType,
+  () => {
+    applyTemplateDefaults(selectedStrategyTemplate.value)
+  }
+)
 
 const initEquityChart = async () => {
   if (!equityChartRef.value) return
@@ -512,6 +631,7 @@ const initEquityChart = async () => {
 onMounted(() => {
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
+  void loadStrategyTemplates()
 })
 
 onBeforeUnmount(() => {
@@ -709,6 +829,13 @@ onBeforeUnmount(() => {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.strategy-description {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .results-panel {

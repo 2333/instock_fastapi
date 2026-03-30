@@ -162,6 +162,8 @@ export const patternApi = {
 export const strategyApi = {
   getStrategies: () => api.get('/strategies') as Promise<any>,
 
+  getTemplates: () => api.get('/strategies/templates') as Promise<any>,
+
   runStrategy: (strategy: string, date?: string) =>
     api.post('/strategies/run', { strategy, date }) as Promise<any>,
 
@@ -172,6 +174,7 @@ export const strategyApi = {
 export const backtestApi = {
   runBacktest: (params: {
     strategy: string
+    strategy_params?: Record<string, string | number>
     start_date: string
     end_date: string
     initial_capital: number

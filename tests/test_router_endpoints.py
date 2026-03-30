@@ -441,6 +441,25 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
                 return_value=[{"name": "enter", "display_name": "放量上涨"}],
             ),
             patch(
+                "app.api.routers.strategy_router.StrategyService.get_strategy_templates",
+                return_value=[
+                    {
+                        "name": "ma_crossover",
+                        "display_name": "MA 交叉",
+                        "description": "短期均线上穿长期均线时生成买入信号。",
+                        "default_params": {"fast_ma": 5, "slow_ma": 20},
+                        "parameters": [
+                            {
+                                "name": "fast_ma",
+                                "label": "快速 MA",
+                                "type": "number",
+                                "default": 5,
+                            }
+                        ],
+                    }
+                ],
+            ),
+            patch(
                 "app.api.routers.strategy_router.StrategyService.run_strategy",
                 new=AsyncMock(return_value={"status": "success", "strategy": "enter"}),
             ),
@@ -450,6 +469,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
             ),
         ):
             strategy_list = await client.get("/api/v1/strategies")
+            strategy_templates = await client.get("/api/v1/strategies/templates")
             my_strategies = await client.get("/api/v1/strategies/my")
             create_response = await client.post(
                 "/api/v1/strategies/my",
@@ -468,6 +488,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
         app.dependency_overrides.pop(get_db, None)
 
     assert strategy_list.json()[0]["name"] == "enter"
+    assert strategy_templates.json()[0]["default_params"]["fast_ma"] == 5
     assert my_strategies.json()[0]["name"] == "enter"
     assert create_response.status_code == 200
     assert update_response.json()["name"] == "enter-2"

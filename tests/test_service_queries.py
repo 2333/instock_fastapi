@@ -6,7 +6,7 @@ import pytest
 from app.services.attention_service import AttentionService
 from app.services.fund_flow_service import FundFlowService
 from app.services.indicator_service import IndicatorService
-from app.services.strategy_service import STRATEGIES, StrategyService
+from app.services.strategy_service import STRATEGIES, STRATEGY_TEMPLATES, StrategyService
 
 
 def make_result(*, rows=None, row=None):
@@ -23,6 +23,15 @@ def make_mapping_row(**kwargs):
 @pytest.mark.asyncio
 async def test_strategy_service_returns_static_strategy_list():
     assert StrategyService.get_strategy_list() == STRATEGIES
+
+
+@pytest.mark.asyncio
+async def test_strategy_service_returns_strategy_templates():
+    templates = StrategyService.get_strategy_templates()
+
+    assert templates == STRATEGY_TEMPLATES
+    assert templates[0]["default_params"]["fast_ma"] == 5
+    assert templates[0]["parameters"][0]["name"] == "fast_ma"
 
 
 @pytest.mark.asyncio
