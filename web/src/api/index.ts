@@ -186,6 +186,8 @@ export const backtestApi = {
     stock_code?: string
   }) => api.post('/backtest', params) as Promise<any>,
 
+  getBacktestHistory: (limit = 10) => api.get('/backtest/history', { params: { limit } }) as Promise<any>,
+
   getBacktest: (id: string) => api.get(`/backtest/${id}`) as Promise<any>,
 }
 
