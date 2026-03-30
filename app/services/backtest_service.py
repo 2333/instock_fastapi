@@ -237,6 +237,34 @@ class BacktestService:
 
         return result
 
+    async def list_results(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        query = text("""
+            SELECT id, name, created_at, result_data
+            FROM backtest_results
+            WHERE user_id = :user_id
+            ORDER BY created_at DESC, id DESC
+            LIMIT :limit
+        """)
+        result = await self.db.execute(query, {"user_id": user_id, "limit": limit})
+        rows = result.fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row._mapping.get("result_data") or {}
+            summary = payload.get("summary") or {}
+            meta = payload.get("meta") or {}
+            items.append(
+                {
+                    "backtest_id": str(row._mapping.get("id")),
+                    "name": row._mapping.get("name") or meta.get("strategy") or "backtest",
+                    "created_at": row._mapping.get("created_at"),
+                    "strategy": meta.get("strategy"),
+                    "code": meta.get("code"),
+                    "total_return": summary.get("total_return"),
+                    "max_drawdown": summary.get("max_drawdown"),
+                }
+            )
+        return items
+
     async def get_result(self, backtest_id: str, user_id: int | None = None) -> dict[str, Any]:
         if user_id:
             query = text("""
