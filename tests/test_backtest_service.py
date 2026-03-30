@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -120,3 +120,34 @@ async def test_run_backtest_returns_minimal_report_structure():
     }
     assert result["meta"]["code"] == "000001"
     assert result["meta"]["name"] == "平安银行"
+
+
+@pytest.mark.asyncio
+async def test_get_result_returns_completed_payload_for_owner():
+    query_result = Mock()
+    row = MagicMock()
+    row.__getitem__.side_effect = lambda idx: [12, 7, "demo", {"external_backtest_id": "bt_1"}][idx]
+    row._mapping = {"id": 12, "user_id": 7, "name": "demo", "result_data": {"external_backtest_id": "bt_1"}}
+    query_result.fetchone.return_value = row
+    db = Mock()
+    db.execute = AsyncMock(return_value=query_result)
+    service = BacktestService(db=db)
+
+    result = await service.get_result("bt_1", user_id=7)
+
+    assert result["status"] == "completed"
+    assert result["backtest_id"] == "12"
+    assert result["data"]["id"] == 12
+
+
+@pytest.mark.asyncio
+async def test_get_result_returns_not_found_when_missing():
+    query_result = Mock()
+    query_result.fetchone.return_value = None
+    db = Mock()
+    db.execute = AsyncMock(return_value=query_result)
+    service = BacktestService(db=db)
+
+    result = await service.get_result("bt_missing", user_id=7)
+
+    assert result == {"backtest_id": "bt_missing", "status": "not_found"}
