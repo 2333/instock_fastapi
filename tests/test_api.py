@@ -1,3 +1,8 @@
+from sqlalchemy import text
+
+from tests.conftest import async_session_factory_test
+
+
 class TestStocksAPI:
     async def test_get_stocks(self, client):
         response = await client.get("/api/v1/stocks")
@@ -51,3 +56,54 @@ class TestHealthCheck:
         response = await client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "healthy"
+
+
+class TestMarketTaskHealthAPI:
+    async def test_get_task_health_exposes_stale_dataset_and_active_alerts(self, client):
+        async with async_session_factory_test() as session:
+            await session.execute(
+                text("""
+                    CREATE TABLE IF NOT EXISTS data_fetch_audit (
+                      task_name VARCHAR(64) NOT NULL,
+                      entity_type VARCHAR(64) NOT NULL,
+                      entity_key VARCHAR(128) NOT NULL,
+                      trade_date VARCHAR(10) NOT NULL DEFAULT '',
+                      status VARCHAR(32) NOT NULL,
+                      source VARCHAR(32) NULL,
+                      note TEXT NULL,
+                      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                      PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
+                    )
+                """)
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO data_fetch_audit (
+                        task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
+                    ) VALUES
+                        ('fetch_fund_flow', 'stock_fund_flow', 'ALL', '20240101', 'needs_fallback', 'tushare', 'primary source returned empty', '2024-01-02 10:00:00'),
+                        ('fetch_market_reference', 'stock_top', 'ALL', '20240102', 'done', 'tushare', 'rows=12', '2024-01-02 11:00:00')
+                """)
+            )
+            await session.execute(
+                text("""
+                    INSERT INTO fund_flows (ts_code, trade_date, created_at)
+                    VALUES ('000001.SZ', '20240101', '2024-01-02 10:00:00')
+                """)
+            )
+            await session.commit()
+
+        response = await client.get("/api/v1/market/task-health")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["baseline_trade_date"] == "20240102"
+        assert data["alert_count"] == 1
+        assert data["alerts"][0]["task_name"] == "fetch_fund_flow"
+        assert data["alerts"][0]["status"] == "needs_fallback"
+        assert next(item for item in data["datasets"] if item["dataset"] == "fund_flows") == {
+            "dataset": "fund_flows",
+            "latest_trade_date": "20240101",
+            "baseline_trade_date": "20240102",
+            "current": False,
+        }
