@@ -355,6 +355,7 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useResizeObserver } from '@vueuse/core'
+import { useRoute, useRouter } from 'vue-router'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
@@ -426,6 +427,8 @@ const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
 const PANEL_COLLAPSED_KEY = 'instock_backtest_panel_collapsed'
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
+const route = useRoute()
+const router = useRouter()
 const { panelWidth: configPanelWidth, hydrateWidth: hydrateConfigWidth, startResize: startConfigResize } = useResizablePanel({
   panelRef: configPanelRef,
   storageKey: PANEL_WIDTH_KEY,
@@ -532,6 +535,30 @@ const resolveDateRange = () => {
 const toggleConfigPanel = () => {
   configCollapsed.value = !configCollapsed.value
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, configCollapsed.value ? '1' : '0')
+}
+
+const syncQueryFromState = () => {
+  void router.replace({
+    query: {
+      ...route.query,
+      stock: config.stockCode || undefined,
+      period: config.period || undefined,
+      strategy: config.strategyType || undefined,
+      saved: selectedSavedStrategyId.value || undefined,
+    },
+  })
+}
+
+const hydrateFromQuery = () => {
+  const stock = typeof route.query.stock === 'string' ? route.query.stock : ''
+  const period = typeof route.query.period === 'string' ? route.query.period : ''
+  const strategy = typeof route.query.strategy === 'string' ? route.query.strategy : ''
+  const saved = typeof route.query.saved === 'string' ? route.query.saved : ''
+
+  if (stock) config.stockCode = stock
+  if (period) config.period = period
+  if (strategy) config.strategyType = strategy
+  if (saved) selectedSavedStrategyId.value = saved
 }
 
 const normalizeTemplate = (template: any): StrategyTemplate => ({
@@ -682,6 +709,9 @@ const loadSavedStrategies = async () => {
   try {
     const strategies = await strategyApi.getMyStrategies()
     savedStrategies.value = Array.isArray(strategies) ? strategies.map(normalizeSavedStrategy) : []
+    if (selectedSavedStrategyId.value && selectedSavedStrategy.value) {
+      applySavedStrategyParams(selectedSavedStrategy.value.params)
+    }
   } catch (error) {
     savedStrategies.value = []
     showNotification?.('warning', '已保存策略加载失败')
@@ -807,7 +837,16 @@ watch(
   () => config.strategyType,
   () => {
     applyTemplateDefaults(selectedStrategyTemplate.value)
+    syncQueryFromState()
   }
+)
+
+watch(
+  () => [config.stockCode, config.period, selectedSavedStrategyId.value],
+  () => {
+    syncQueryFromState()
+  },
+  { deep: true }
 )
 
 const initEquityChart = async () => {
@@ -861,6 +900,7 @@ const initEquityChart = async () => {
 onMounted(() => {
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
+  hydrateFromQuery()
   void loadStrategyTemplates()
   void loadSavedStrategies()
 })
