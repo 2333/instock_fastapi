@@ -195,6 +195,16 @@ export const backtestApi = {
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
 
+  getMyConditions: () => api.get('/selection/my-conditions') as Promise<any>,
+
+  createCondition: (condition: { name: string; category: string; description?: string; params?: Record<string, any>; is_active?: boolean }) =>
+    api.post('/selection/my-conditions', condition) as Promise<any>,
+
+  updateCondition: (id: number, condition: Partial<{ name: string; category: string; description: string; params: Record<string, any>; is_active: boolean }>) =>
+    api.put(`/selection/my-conditions/${id}`, condition) as Promise<any>,
+
+  deleteCondition: (id: number) => api.delete(`/selection/my-conditions/${id}`) as Promise<any>,
+
   runSelection: (conditions: any) => api.post('/selection', conditions) as Promise<any>,
 
   getHistory: (params?: { limit?: number }) =>
