@@ -83,6 +83,21 @@
               </button>
             </div>
           </div>
+          <div v-if="backtestHistory.length" class="recent-backtests">
+            <div class="recent-backtests__head">
+              <span class="recent-backtests__label">回测历史</span>
+            </div>
+            <button
+              v-for="item in backtestHistory"
+              :key="item.backtest_id"
+              class="recent-backtests__item recent-backtests__item--history"
+              @click="loadBacktestResult(item.backtest_id)"
+            >
+              <strong>#{{ item.backtest_id }}</strong>
+              <span>{{ item.strategy || item.name || 'backtest' }} / {{ item.code || '--' }}</span>
+            </button>
+          </div>
+
           <div v-if="recentBacktests.length" class="recent-backtests">
             <div class="recent-backtests__head">
               <span class="recent-backtests__label">最近查看</span>
@@ -463,6 +478,7 @@ const loading = ref(false)
 const hasResults = ref(false)
 const currentBacktestId = ref('')
 const recentBacktests = ref<string[]>([])
+const backtestHistory = ref<Array<{ backtest_id: string; name?: string; strategy?: string; code?: string; total_return?: number; max_drawdown?: number }>>([])
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -818,6 +834,16 @@ const loadSavedStrategies = async () => {
   }
 }
 
+const loadBacktestHistory = async () => {
+  try {
+    const items = await backtestApi.getBacktestHistory(8)
+    backtestHistory.value = Array.isArray(items) ? items : []
+  } catch (error) {
+    backtestHistory.value = []
+    showNotification?.('warning', '回测历史加载失败')
+  }
+}
+
 const loadStrategyTemplates = async () => {
   try {
     const templates = await strategyApi.getTemplates()
@@ -1060,6 +1086,7 @@ onMounted(() => {
   hydrateFromQuery()
   void loadStrategyTemplates()
   void loadSavedStrategies()
+  void loadBacktestHistory()
   if (currentBacktestId.value) {
     void loadBacktestResult(currentBacktestId.value)
   }
@@ -1295,6 +1322,19 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.78);
   padding: 6px 10px;
   cursor: pointer;
+}
+
+.recent-backtests__item--history {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border-radius: 12px;
+}
+
+.recent-backtests__item--history span {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.58);
 }
 
 .input-text,
