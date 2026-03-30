@@ -108,13 +108,17 @@
               v-for="item in filteredBacktestHistory"
               :key="item.id"
               class="history-backtests__item"
+              :class="{ 'history-backtests__item--active': item.id === currentBacktestId }"
               @click="loadBacktestResult(item.id)"
             >
               <div class="history-backtests__top">
                 <strong>{{ item.code || item.name }}</strong>
-                <span :class="item.totalReturn !== null && item.totalReturn >= 0 ? 'price-up' : 'price-down'">
-                  {{ formatPercent(item.totalReturn) }}
-                </span>
+                <div class="history-backtests__top-right">
+                  <span v-if="item.id === currentBacktestId" class="history-backtests__badge">当前查看</span>
+                  <span :class="item.totalReturn !== null && item.totalReturn >= 0 ? 'price-up' : 'price-down'">
+                    {{ formatPercent(item.totalReturn) }}
+                  </span>
+                </div>
               </div>
               <div class="history-backtests__meta">
                 <span>{{ item.stockName || item.strategy || item.name }}</span>
@@ -1534,11 +1538,32 @@ onBeforeUnmount(() => {
   text-align: left;
 }
 
+.history-backtests__item--active {
+  border-color: rgba(91, 163, 255, 0.32);
+  background: rgba(91, 163, 255, 0.08);
+}
+
 .history-backtests__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.history-backtests__top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-backtests__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(91, 163, 255, 0.16);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .history-backtests__meta {
