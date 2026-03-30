@@ -295,6 +295,19 @@
                 <strong>{{ row.saved }}</strong>
               </div>
             </div>
+
+            <div v-if="resultCompareRows.length" class="compare-grid compare-grid--metrics">
+              <div class="compare-row compare-row--head">
+                <span>结果</span>
+                <span>当前回测</span>
+                <span>历史记录</span>
+              </div>
+              <div v-for="row in resultCompareRows" :key="row.label" class="compare-row">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.current }}</strong>
+                <strong>{{ row.saved }}</strong>
+              </div>
+            </div>
           </div>
 
           <div class="metrics-grid">
@@ -612,6 +625,20 @@ const compareRows = computed(() => {
     { label: '周期', current: config.period, saved: String(saved.period || '--') },
     { label: '模板', current: config.strategyType, saved: String(saved.strategy_type || saved.template || '--') },
     { label: '参数数量', current: String(Object.keys(strategyParams).length), saved: String(Object.keys(savedParams).length) },
+  ]
+})
+
+const currentHistoryItem = computed(() =>
+  backtestHistory.value.find((item) => item.id === currentBacktestId.value) || null
+)
+
+const resultCompareRows = computed(() => {
+  if (!currentHistoryItem.value) return []
+  return [
+    { label: '总收益', current: formatPercent(metrics.totalReturn), saved: formatPercent(currentHistoryItem.value.totalReturn) },
+    { label: '最大回撤', current: formatPercent(metrics.maxDrawdown), saved: formatPercent(currentHistoryItem.value.maxDrawdown) },
+    { label: '夏普', current: metrics.sharpeRatio.toFixed(2), saved: currentHistoryItem.value.sharpeRatio == null ? '--' : currentHistoryItem.value.sharpeRatio.toFixed(2) },
+    { label: '交易数', current: String(metrics.totalTrades), saved: currentHistoryItem.value.totalTrades == null ? '--' : String(currentHistoryItem.value.totalTrades) },
   ]
 })
 
@@ -1595,6 +1622,10 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 14px;
+}
+
+.compare-grid--metrics {
+  margin-top: 12px;
 }
 
 .compare-row {
