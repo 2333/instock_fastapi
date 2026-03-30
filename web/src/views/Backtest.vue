@@ -331,11 +331,20 @@
               </div>
             </div>
 
+            <div v-if="compareTargetOptions.length" class="compare-target-row">
+              <span class="compare-target-row__label">对照基线</span>
+              <select v-model="selectedCompareBacktestId" class="select-full compare-target-row__select">
+                <option v-for="item in compareTargetOptions" :key="item.id" :value="item.id">
+                  #{{ item.id }} / {{ item.code || item.name }}
+                </option>
+              </select>
+            </div>
+
             <div v-if="resultCompareRows.length" class="compare-grid compare-grid--metrics">
               <div class="compare-row compare-row--head compare-row--delta">
                 <span>结果</span>
                 <span>当前回测</span>
-                <span>历史记录</span>
+                <span>对照历史</span>
                 <span>变化</span>
               </div>
               <div v-for="row in resultCompareRows" :key="row.label" class="compare-row compare-row--delta">
@@ -562,6 +571,7 @@ const recentBacktests = ref<string[]>([])
 const backtestHistory = ref<BacktestHistoryItem[]>([])
 const historyFilter = ref('')
 const historySort = ref<'created' | 'return' | 'drawdown'>('created')
+const selectedCompareBacktestId = ref('')
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -684,9 +694,16 @@ const filteredBacktestHistory = computed(() => {
   return filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
 })
 
-const currentHistoryItem = computed(() =>
-  backtestHistory.value.find((item) => item.id === currentBacktestId.value) || null
+const compareTargetOptions = computed(() =>
+  backtestHistory.value.filter((item) => item.id !== currentBacktestId.value)
 )
+
+const compareTargetHistoryItem = computed(() => {
+  if (selectedCompareBacktestId.value) {
+    return backtestHistory.value.find((item) => item.id === selectedCompareBacktestId.value) || null
+  }
+  return compareTargetOptions.value[0] || null
+})
 
 const formatDelta = (value: number | null | undefined, suffix = '') => {
   if (value === null || value === undefined || Number.isNaN(value)) return '--'
@@ -694,38 +711,38 @@ const formatDelta = (value: number | null | undefined, suffix = '') => {
 }
 
 const resultCompareRows = computed(() => {
-  if (!currentHistoryItem.value) return []
-  const totalReturnDelta = currentHistoryItem.value.totalReturn == null ? null : metrics.totalReturn - currentHistoryItem.value.totalReturn
-  const drawdownDelta = currentHistoryItem.value.maxDrawdown == null ? null : metrics.maxDrawdown - currentHistoryItem.value.maxDrawdown
-  const sharpeDelta = currentHistoryItem.value.sharpeRatio == null ? null : metrics.sharpeRatio - currentHistoryItem.value.sharpeRatio
-  const tradeDelta = currentHistoryItem.value.totalTrades == null ? null : metrics.totalTrades - currentHistoryItem.value.totalTrades
+  if (!compareTargetHistoryItem.value) return []
+  const totalReturnDelta = compareTargetHistoryItem.value.totalReturn == null ? null : metrics.totalReturn - compareTargetHistoryItem.value.totalReturn
+  const drawdownDelta = compareTargetHistoryItem.value.maxDrawdown == null ? null : metrics.maxDrawdown - compareTargetHistoryItem.value.maxDrawdown
+  const sharpeDelta = compareTargetHistoryItem.value.sharpeRatio == null ? null : metrics.sharpeRatio - compareTargetHistoryItem.value.sharpeRatio
+  const tradeDelta = compareTargetHistoryItem.value.totalTrades == null ? null : metrics.totalTrades - compareTargetHistoryItem.value.totalTrades
 
   return [
     {
       label: '总收益',
       current: formatPercent(metrics.totalReturn),
-      saved: formatPercent(currentHistoryItem.value.totalReturn),
+      saved: formatPercent(compareTargetHistoryItem.value.totalReturn),
       delta: formatDelta(totalReturnDelta, '%'),
       deltaTone: totalReturnDelta == null ? '' : totalReturnDelta >= 0 ? 'price-up' : 'price-down',
     },
     {
       label: '最大回撤',
       current: formatPercent(metrics.maxDrawdown),
-      saved: formatPercent(currentHistoryItem.value.maxDrawdown),
+      saved: formatPercent(compareTargetHistoryItem.value.maxDrawdown),
       delta: formatDelta(drawdownDelta, '%'),
       deltaTone: drawdownDelta == null ? '' : drawdownDelta <= 0 ? 'price-up' : 'price-down',
     },
     {
       label: '夏普',
       current: metrics.sharpeRatio.toFixed(2),
-      saved: currentHistoryItem.value.sharpeRatio == null ? '--' : currentHistoryItem.value.sharpeRatio.toFixed(2),
+      saved: compareTargetHistoryItem.value.sharpeRatio == null ? '--' : compareTargetHistoryItem.value.sharpeRatio.toFixed(2),
       delta: formatDelta(sharpeDelta),
       deltaTone: sharpeDelta == null ? '' : sharpeDelta >= 0 ? 'price-up' : 'price-down',
     },
     {
       label: '交易数',
       current: String(metrics.totalTrades),
-      saved: currentHistoryItem.value.totalTrades == null ? '--' : String(currentHistoryItem.value.totalTrades),
+      saved: compareTargetHistoryItem.value.totalTrades == null ? '--' : String(compareTargetHistoryItem.value.totalTrades),
       delta: tradeDelta == null ? '--' : `${tradeDelta > 0 ? '+' : ''}${tradeDelta}`,
       deltaTone: '',
     },
@@ -1766,6 +1783,23 @@ onBeforeUnmount(() => {
   margin-top: 16px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding-top: 14px;
+}
+
+.compare-target-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.compare-target-row__label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+}
+
+.compare-target-row__select {
+  max-width: 320px;
 }
 
 .compare-grid--metrics {
