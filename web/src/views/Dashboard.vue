@@ -468,7 +468,7 @@ const staleDatasetNames = computed(() => {
 })
 const topAlert = computed(() => taskAlerts.value[0] || null)
 const topAlertDatasetLabel = computed(() => {
-  if (topAlert.value) return humanizeTaskName(topAlert.value.taskName)
+  if (topAlert.value) return `${humanizeTaskName(topAlert.value.taskName)} / ${humanizeTaskEntity(topAlert.value.entityType, topAlert.value.entityKey)}`
   if (staleDatasets.value[0]) return humanizeDatasetName(staleDatasets.value[0].dataset)
   return '已对齐'
 })
@@ -485,7 +485,7 @@ const healthToneClass = computed(() => {
 const topAlertSummary = computed(() => {
   if (!topAlert.value) return ''
 
-  const parts = [humanizeTaskName(topAlert.value.taskName)]
+  const parts = [humanizeTaskName(topAlert.value.taskName), humanizeTaskEntity(topAlert.value.entityType, topAlert.value.entityKey)]
   if (topAlert.value.tradeDate) {
     parts.push(`交易日 ${formatDisplayDate(topAlert.value.tradeDate)}`)
   }
@@ -541,6 +541,17 @@ const humanizeTaskName = (value: string) => {
     fetch_north_bound: '北向资金抓取',
   }
   return labels[value] || value.replace(/^fetch_/, '').replace(/_/g, ' ')
+}
+
+const humanizeTaskEntity = (entityType: string, entityKey: string) => {
+  const entityLabels: Record<string, string> = {
+    stock_list: entityKey === 'ETF' ? 'ETF 列表' : 'A 股列表',
+    stock_fund_flow: '个股资金流',
+    sector_fund_flow: entityKey === 'industry' ? '行业资金流' : '板块资金流',
+    stock_top: '龙虎榜',
+    block_trade: '大宗交易',
+  }
+  return entityLabels[entityType] || entityKey || entityType || '--'
 }
 
 const formatDisplayDate = (value: string, withTime = false) => {
