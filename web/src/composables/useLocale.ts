@@ -14,7 +14,7 @@ const locale = ref<Locale>(initial)
 
 const messages: Record<Locale, Record<string, string>> = {
   zh: {
-    nav_dashboard: '仪表盘',
+    nav_dashboard: '首页',
     nav_workspace: '工作台',
     nav_stocks: '股票',
     nav_patterns: '形态',
@@ -102,7 +102,7 @@ const messages: Record<Locale, Record<string, string>> = {
     tv_data_level_bj: '北交所符号在 TradingView widget 中的覆盖度需要逐个标的验证。',
   },
   en: {
-    nav_dashboard: 'Dashboard',
+    nav_dashboard: 'Home',
     nav_workspace: 'Workspace',
     nav_stocks: 'Stocks',
     nav_patterns: 'Patterns',
