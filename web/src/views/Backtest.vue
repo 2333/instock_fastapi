@@ -104,6 +104,14 @@
                 </select>
               </div>
             </div>
+            <div class="history-filter-actions">
+              <button class="btn btn-secondary btn-small" @click="filterByCurrentStock" :disabled="!config.stockCode">
+                只看当前股票
+              </button>
+              <button class="btn btn-secondary btn-small" @click="historyFilter = ''" :disabled="!historyFilter">
+                清空筛选
+              </button>
+            </div>
             <button
               v-for="item in filteredBacktestHistory"
               :key="item.id"
@@ -774,6 +782,11 @@ const clearRecentBacktests = () => {
   recentBacktests.value = []
   window.localStorage.removeItem(RECENT_BACKTESTS_KEY)
   showNotification?.('info', '已清空最近查看记录')
+}
+
+const filterByCurrentStock = () => {
+  if (!config.stockCode) return
+  historyFilter.value = config.stockCode
 }
 
 const buildShareQuery = () => ({
@@ -1495,6 +1508,12 @@ onBeforeUnmount(() => {
 
 .history-filter-row {
   margin-bottom: 4px;
+}
+
+.history-filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .history-filter,
