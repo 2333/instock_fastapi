@@ -221,6 +221,9 @@ export const marketApi = {
 
   getNorthBoundFunds: (date?: string, limit?: number) =>
     api.get('/market/north-bound', { params: { date, limit } }) as Promise<any>,
+
+  getTaskHealth: (alertLimit?: number) =>
+    api.get('/market/task-health', { params: { alert_limit: alertLimit } }) as Promise<any>,
 }
 
 export const attentionApi = {
