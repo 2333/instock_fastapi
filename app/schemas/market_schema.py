@@ -60,24 +60,6 @@ class StockListQuery(BaseModel):
     keyword: str | None = Field(None, description="搜索关键词(代码/名称)")
 
 
-class MarketTaskHealthItem(BaseModel):
-    task_name: str
-    entity_type: str
-    entity_key: str
-    latest_trade_date: str | None = None
-    audit_trade_date: str | None = None
-    audit_status: str | None = None
-    audit_source: str | None = None
-    audit_note: str | None = None
-    updated_at: str | None = None
-    current: bool = False
-
-
-class MarketTaskHealthResponse(BaseModel):
-    market_trade_date: str | None = None
-    items: list[MarketTaskHealthItem]
-
-
 class MarketTaskDatasetStatus(BaseModel):
     """关键市场数据表的新鲜度摘要"""
 

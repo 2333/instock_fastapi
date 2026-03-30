@@ -156,7 +156,14 @@ async def test_indicator_and_market_endpoints(client):
                 return_value={
                     "baseline_trade_date": "20240102",
                     "datasets": [{"dataset": "daily_bars", "latest_trade_date": "20240102", "baseline_trade_date": "20240102", "current": True}],
-                    "alerts": [{"task_name": "fetch_fund_flow", "status": "needs_fallback"}],
+                    "alerts": [
+                        {
+                            "task_name": "fetch_fund_flow",
+                            "entity_type": "stock_fund_flow",
+                            "entity_key": "ALL",
+                            "status": "needs_fallback",
+                        }
+                    ],
                     "alert_count": 1,
                 }
             ),

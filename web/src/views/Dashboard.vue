@@ -24,6 +24,49 @@
       <span>{{ loadWarnings.join(' / ') }}</span>
     </div>
 
+    <section class="health-strip">
+      <div class="card-header health-strip__header">
+        <div>
+          <span class="card-kicker">数据任务健康</span>
+          <h2>关键更新状态</h2>
+        </div>
+        <span :class="healthToneClass">{{ healthToneLabel }}</span>
+      </div>
+
+      <div class="metric-strip metric-strip--compact metric-strip--health">
+        <div class="metric-block">
+          <span class="metric-value">{{ staleDatasetCount }}</span>
+          <span class="metric-label">滞后数据集</span>
+        </div>
+        <div class="metric-block">
+          <span class="metric-value" :class="{ 'metric-value--negative': activeAlertCount > 0 }">
+            {{ activeAlertCount }}
+          </span>
+          <span class="metric-label">活动告警</span>
+        </div>
+        <div class="metric-block">
+          <span class="metric-value metric-value--small">{{ baselineTradeDateLabel }}</span>
+          <span class="metric-label">基准交易日</span>
+        </div>
+        <div class="metric-block">
+          <span class="metric-value metric-value--small">{{ topAlertDatasetLabel }}</span>
+          <span class="metric-label">最高优先提示</span>
+        </div>
+      </div>
+
+      <p class="card-description health-strip__description">
+        <template v-if="topAlertSummary">
+          {{ topAlertSummary }}
+        </template>
+        <template v-else-if="staleDatasetNames.length">
+          当前滞后数据集：{{ staleDatasetNames.join(' / ') }}。
+        </template>
+        <template v-else>
+          关键市场数据已对齐到基准交易日，首页暂未发现需要优先处理的更新异常。
+        </template>
+      </p>
+    </section>
+
     <div class="card-grid">
       <section class="workbench-card">
         <div class="card-header">
@@ -227,7 +270,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { attentionApi, patternApi, selectionApi } from '@/api'
+import { attentionApi, marketApi, patternApi, selectionApi } from '@/api'
 
 interface AttentionEntry {
   code: string
@@ -252,6 +295,24 @@ interface PatternEntry {
   patternName: string
 }
 
+interface MarketTaskDatasetStatus {
+  dataset: string
+  latestTradeDate: string
+  baselineTradeDate: string
+  current: boolean
+}
+
+interface MarketTaskHealthAlert {
+  taskName: string
+  entityType: string
+  entityKey: string
+  tradeDate: string
+  status: string
+  source: string
+  note: string
+  updatedAt: string
+}
+
 const loading = ref(false)
 const lastSyncedAt = ref('')
 const loadWarnings = ref<string[]>([])
@@ -260,6 +321,10 @@ const attentionItems = ref<AttentionEntry[]>([])
 const screeningItems = ref<ScreeningEntry[]>([])
 const validationItems = ref<ScreeningEntry[]>([])
 const patternItems = ref<PatternEntry[]>([])
+const taskDatasets = ref<MarketTaskDatasetStatus[]>([])
+const taskAlerts = ref<MarketTaskHealthAlert[]>([])
+const taskHealthBaselineTradeDate = ref('')
+const taskAlertCount = ref(0)
 
 const normalizeList = <T>(response: unknown, fallback: T[] = []): T[] => {
   if (Array.isArray(response)) return response as T[]
@@ -306,6 +371,24 @@ const normalizePatternEntry = (item: any): PatternEntry => ({
   confidence: coerceNumber(item?.confidence),
   signal: String(item?.pattern_type || item?.signal || 'neutral'),
   patternName: String(item?.pattern_name || item?.type || ''),
+})
+
+const normalizeTaskDatasetStatus = (item: any): MarketTaskDatasetStatus => ({
+  dataset: String(item?.dataset || '--'),
+  latestTradeDate: String(item?.latest_trade_date || ''),
+  baselineTradeDate: String(item?.baseline_trade_date || ''),
+  current: Boolean(item?.current),
+})
+
+const normalizeTaskAlert = (item: any): MarketTaskHealthAlert => ({
+  taskName: String(item?.task_name || '--'),
+  entityType: String(item?.entity_type || ''),
+  entityKey: String(item?.entity_key || ''),
+  tradeDate: String(item?.trade_date || ''),
+  status: String(item?.status || ''),
+  source: String(item?.source || ''),
+  note: String(item?.note || ''),
+  updatedAt: String(item?.updated_at || ''),
 })
 
 const signalKey = (signal: string) => {
@@ -370,6 +453,49 @@ const latestValidationItems = computed(() => {
 
 const latestScreeningCount = computed(() => latestScreeningGroup.value.items.length)
 const latestValidationCount = computed(() => latestValidationGroup.value.items.length)
+const staleDatasets = computed(() => taskDatasets.value.filter((item) => !item.current))
+const staleDatasetCount = computed(() => staleDatasets.value.length)
+const activeAlertCount = computed(() => {
+  return taskAlertCount.value > 0 ? taskAlertCount.value : taskAlerts.value.length
+})
+const baselineTradeDateLabel = computed(() => {
+  return taskHealthBaselineTradeDate.value ? formatDisplayDate(taskHealthBaselineTradeDate.value) : '--'
+})
+const staleDatasetNames = computed(() => {
+  return staleDatasets.value
+    .slice(0, 3)
+    .map((item) => humanizeDatasetName(item.dataset))
+})
+const topAlert = computed(() => taskAlerts.value[0] || null)
+const topAlertDatasetLabel = computed(() => {
+  if (topAlert.value) return humanizeTaskName(topAlert.value.taskName)
+  if (staleDatasets.value[0]) return humanizeDatasetName(staleDatasets.value[0].dataset)
+  return '已对齐'
+})
+const healthToneLabel = computed(() => {
+  if (activeAlertCount.value > 0) return '需处理'
+  if (staleDatasetCount.value > 0) return '有滞后'
+  return '正常'
+})
+const healthToneClass = computed(() => {
+  if (activeAlertCount.value > 0) return 'signal-badge signal-badge--bearish'
+  if (staleDatasetCount.value > 0) return 'signal-badge signal-badge--neutral'
+  return 'signal-badge signal-badge--bullish'
+})
+const topAlertSummary = computed(() => {
+  if (!topAlert.value) return ''
+
+  const parts = [humanizeTaskName(topAlert.value.taskName)]
+  if (topAlert.value.tradeDate) {
+    parts.push(`交易日 ${formatDisplayDate(topAlert.value.tradeDate)}`)
+  }
+  if (topAlert.value.note) {
+    parts.push(topAlert.value.note)
+  } else {
+    parts.push(`状态 ${topAlert.value.status}`)
+  }
+  return parts.join('，')
+})
 
 const lastSyncedLabel = computed(() => {
   return lastSyncedAt.value ? formatDisplayDate(lastSyncedAt.value, true) : '--'
@@ -391,6 +517,27 @@ const latestAttentionDateLabel = computed(() => {
   const latest = attentionItems.value[0]?.createdAt
   return latest ? formatDisplayDate(latest) : '--'
 })
+
+const humanizeDatasetName = (value: string) => {
+  const labels: Record<string, string> = {
+    daily_bars: '日线行情',
+    fund_flows: '资金流向',
+    stock_top: '龙虎榜',
+    block_trades: '大宗交易',
+    north_bound: '北向资金',
+  }
+  return labels[value] || value.replace(/_/g, ' ')
+}
+
+const humanizeTaskName = (value: string) => {
+  const labels: Record<string, string> = {
+    fetch_fund_flow: '资金流抓取',
+    fetch_market_reference: '市场参考抓取',
+    fetch_block_trades: '大宗交易抓取',
+    fetch_north_bound: '北向资金抓取',
+  }
+  return labels[value] || value.replace(/^fetch_/, '').replace(/_/g, ' ')
+}
 
 const formatDisplayDate = (value: string, withTime = false) => {
   if (!value) return '--'
@@ -445,9 +592,10 @@ const refreshWorkbench = async () => {
     selectionApi.getScreeningHistory({ limit: 60 }),
     selectionApi.getHistory({ limit: 60 }),
     patternApi.getTodayPatterns({ limit: 120, min_confidence: 60 }),
+    marketApi.getTaskHealth(5),
   ])
 
-  const [attentionResult, screeningResult, validationResult, patternResult] = results
+  const [attentionResult, screeningResult, validationResult, patternResult, taskHealthResult] = results
 
   if (attentionResult.status === 'fulfilled') {
     attentionItems.value = normalizeList(attentionResult.value).map(normalizeAttentionEntry)
@@ -479,6 +627,20 @@ const refreshWorkbench = async () => {
     patternItems.value = []
     loadWarnings.value.push('形态摘要')
     console.error('Failed to fetch pattern summary:', patternResult.reason)
+  }
+
+  if (taskHealthResult.status === 'fulfilled') {
+    taskHealthBaselineTradeDate.value = String(taskHealthResult.value?.baseline_trade_date || '')
+    taskAlertCount.value = coerceNumber(taskHealthResult.value?.alert_count)
+    taskDatasets.value = normalizeList(taskHealthResult.value?.datasets).map(normalizeTaskDatasetStatus)
+    taskAlerts.value = normalizeList(taskHealthResult.value?.alerts).map(normalizeTaskAlert)
+  } else {
+    taskHealthBaselineTradeDate.value = ''
+    taskAlertCount.value = 0
+    taskDatasets.value = []
+    taskAlerts.value = []
+    loadWarnings.value.push('任务健康')
+    console.error('Failed to fetch task health summary:', taskHealthResult.reason)
   }
 
   lastSyncedAt.value = new Date().toISOString()
@@ -589,10 +751,78 @@ onMounted(() => {
   }
 }
 
+.health-strip {
+  display: grid;
+  grid-template-columns: 1.2fr auto 1fr;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid rgba(89, 211, 140, 0.18);
+  border-radius: 14px;
+  background: rgba(89, 211, 140, 0.06);
+
+  &--warning {
+    border-color: rgba(255, 184, 77, 0.24);
+    background: rgba(255, 184, 77, 0.08);
+  }
+}
+
+.health-strip__summary,
+.health-strip__metrics,
+.health-strip__alert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.health-kicker {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.health-strip__summary strong,
+.health-strip__alert strong {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.health-strip__summary span,
+.health-strip__metrics span,
+.health-strip__alert span {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.health-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(18, 24, 38, 0.98), rgba(13, 18, 29, 0.98)),
+    rgba(16, 19, 28, 0.92);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.18);
+}
+
+.health-strip__header {
+  align-items: center;
+}
+
+.health-strip__description {
+  min-height: 0;
+}
+
+.metric-strip--health {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .workbench-card {
@@ -662,6 +892,10 @@ onMounted(() => {
   font-size: 26px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
+}
+
+.metric-value--small {
+  font-size: 20px;
 }
 
 .metric-value--positive {
@@ -765,6 +999,10 @@ onMounted(() => {
   .card-grid {
     grid-template-columns: 1fr;
   }
+
+  .health-strip {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -778,7 +1016,8 @@ onMounted(() => {
   }
 
   .metric-strip,
-  .metric-strip--compact {
+  .metric-strip--compact,
+  .metric-strip--health {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
