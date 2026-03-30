@@ -314,15 +314,17 @@
             </div>
 
             <div v-if="resultCompareRows.length" class="compare-grid compare-grid--metrics">
-              <div class="compare-row compare-row--head">
+              <div class="compare-row compare-row--head compare-row--delta">
                 <span>结果</span>
                 <span>当前回测</span>
                 <span>历史记录</span>
+                <span>变化</span>
               </div>
-              <div v-for="row in resultCompareRows" :key="row.label" class="compare-row">
+              <div v-for="row in resultCompareRows" :key="row.label" class="compare-row compare-row--delta">
                 <span>{{ row.label }}</span>
                 <strong>{{ row.current }}</strong>
                 <strong>{{ row.saved }}</strong>
+                <strong :class="row.deltaTone">{{ row.delta }}</strong>
               </div>
             </div>
           </div>
@@ -668,13 +670,47 @@ const currentHistoryItem = computed(() =>
   backtestHistory.value.find((item) => item.id === currentBacktestId.value) || null
 )
 
+const formatDelta = (value: number | null | undefined, suffix = '') => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--'
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}${suffix}`
+}
+
 const resultCompareRows = computed(() => {
   if (!currentHistoryItem.value) return []
+  const totalReturnDelta = currentHistoryItem.value.totalReturn == null ? null : metrics.totalReturn - currentHistoryItem.value.totalReturn
+  const drawdownDelta = currentHistoryItem.value.maxDrawdown == null ? null : metrics.maxDrawdown - currentHistoryItem.value.maxDrawdown
+  const sharpeDelta = currentHistoryItem.value.sharpeRatio == null ? null : metrics.sharpeRatio - currentHistoryItem.value.sharpeRatio
+  const tradeDelta = currentHistoryItem.value.totalTrades == null ? null : metrics.totalTrades - currentHistoryItem.value.totalTrades
+
   return [
-    { label: '总收益', current: formatPercent(metrics.totalReturn), saved: formatPercent(currentHistoryItem.value.totalReturn) },
-    { label: '最大回撤', current: formatPercent(metrics.maxDrawdown), saved: formatPercent(currentHistoryItem.value.maxDrawdown) },
-    { label: '夏普', current: metrics.sharpeRatio.toFixed(2), saved: currentHistoryItem.value.sharpeRatio == null ? '--' : currentHistoryItem.value.sharpeRatio.toFixed(2) },
-    { label: '交易数', current: String(metrics.totalTrades), saved: currentHistoryItem.value.totalTrades == null ? '--' : String(currentHistoryItem.value.totalTrades) },
+    {
+      label: '总收益',
+      current: formatPercent(metrics.totalReturn),
+      saved: formatPercent(currentHistoryItem.value.totalReturn),
+      delta: formatDelta(totalReturnDelta, '%'),
+      deltaTone: totalReturnDelta == null ? '' : totalReturnDelta >= 0 ? 'price-up' : 'price-down',
+    },
+    {
+      label: '最大回撤',
+      current: formatPercent(metrics.maxDrawdown),
+      saved: formatPercent(currentHistoryItem.value.maxDrawdown),
+      delta: formatDelta(drawdownDelta, '%'),
+      deltaTone: drawdownDelta == null ? '' : drawdownDelta <= 0 ? 'price-up' : 'price-down',
+    },
+    {
+      label: '夏普',
+      current: metrics.sharpeRatio.toFixed(2),
+      saved: currentHistoryItem.value.sharpeRatio == null ? '--' : currentHistoryItem.value.sharpeRatio.toFixed(2),
+      delta: formatDelta(sharpeDelta),
+      deltaTone: sharpeDelta == null ? '' : sharpeDelta >= 0 ? 'price-up' : 'price-down',
+    },
+    {
+      label: '交易数',
+      current: String(metrics.totalTrades),
+      saved: currentHistoryItem.value.totalTrades == null ? '--' : String(currentHistoryItem.value.totalTrades),
+      delta: tradeDelta == null ? '--' : `${tradeDelta > 0 ? '+' : ''}${tradeDelta}`,
+      deltaTone: '',
+    },
   ]
 })
 
@@ -1679,6 +1715,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 6px 0;
   color: rgba(255, 255, 255, 0.72);
+}
+
+.compare-row--delta {
+  grid-template-columns: 120px 1fr 1fr 100px;
 }
 
 .compare-row--head {
