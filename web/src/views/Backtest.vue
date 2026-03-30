@@ -108,6 +108,9 @@
               <button class="btn btn-secondary btn-small" @click="filterByCurrentStock" :disabled="!config.stockCode">
                 只看当前股票
               </button>
+              <button class="btn btn-secondary btn-small" @click="filterByCurrentStrategy" :disabled="!config.strategyType">
+                只看当前模板
+              </button>
               <button class="btn btn-secondary btn-small" @click="historyFilter = ''" :disabled="!historyFilter">
                 清空筛选
               </button>
@@ -787,6 +790,11 @@ const clearRecentBacktests = () => {
 const filterByCurrentStock = () => {
   if (!config.stockCode) return
   historyFilter.value = config.stockCode
+}
+
+const filterByCurrentStrategy = () => {
+  if (!config.strategyType) return
+  historyFilter.value = config.strategyType
 }
 
 const buildShareQuery = () => ({
