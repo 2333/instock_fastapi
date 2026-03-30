@@ -821,6 +821,7 @@ const buildShareQuery = () => ({
   strategy: config.strategyType || undefined,
   saved: selectedSavedStrategyId.value || undefined,
   bt: currentBacktestId.value || undefined,
+  cbt: selectedCompareBacktestId.value || undefined,
 })
 
 const syncQueryFromState = () => {
@@ -856,12 +857,14 @@ const hydrateFromQuery = () => {
   const strategy = typeof route.query.strategy === 'string' ? route.query.strategy : ''
   const saved = typeof route.query.saved === 'string' ? route.query.saved : ''
   const backtestId = typeof route.query.bt === 'string' ? route.query.bt : ''
+  const compareBacktestId = typeof route.query.cbt === 'string' ? route.query.cbt : ''
 
   if (stock) config.stockCode = stock
   if (period) config.period = period
   if (strategy) config.strategyType = strategy
   if (saved) selectedSavedStrategyId.value = saved
   if (backtestId) currentBacktestId.value = backtestId
+  if (compareBacktestId) selectedCompareBacktestId.value = compareBacktestId
 }
 
 const normalizeTemplate = (template: any): StrategyTemplate => ({
@@ -1065,6 +1068,14 @@ const loadBacktestHistory = async () => {
     backtestHistory.value = items
       .map(normalizeBacktestHistoryItem)
       .filter((item: BacktestHistoryItem) => item.id)
+
+    if (selectedCompareBacktestId.value) {
+      const exists = backtestHistory.value.some((item) => item.id === selectedCompareBacktestId.value)
+      if (!exists) selectedCompareBacktestId.value = ''
+    }
+    if (!selectedCompareBacktestId.value && compareTargetOptions.value.length) {
+      selectedCompareBacktestId.value = compareTargetOptions.value[0].id
+    }
   } catch (error) {
     backtestHistory.value = []
     showNotification?.('warning', '回测历史加载失败')
@@ -1253,7 +1264,7 @@ watch(
 )
 
 watch(
-  () => [config.stockCode, config.period, selectedSavedStrategyId.value],
+  () => [config.stockCode, config.period, selectedSavedStrategyId.value, selectedCompareBacktestId.value],
   () => {
     syncQueryFromState()
   },
