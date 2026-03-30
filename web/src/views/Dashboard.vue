@@ -489,10 +489,13 @@ const topAlertSummary = computed(() => {
   if (topAlert.value.tradeDate) {
     parts.push(`交易日 ${formatDisplayDate(topAlert.value.tradeDate)}`)
   }
+  if (topAlert.value.source) {
+    parts.push(`来源 ${humanizeTaskSource(topAlert.value.source)}`)
+  }
   if (topAlert.value.note) {
     parts.push(topAlert.value.note)
   } else {
-    parts.push(`状态 ${topAlert.value.status}`)
+    parts.push(`状态 ${humanizeTaskStatus(topAlert.value.status)}`)
   }
   return parts.join('，')
 })
@@ -552,6 +555,26 @@ const humanizeTaskEntity = (entityType: string, entityKey: string) => {
     block_trade: '大宗交易',
   }
   return entityLabels[entityType] || entityKey || entityType || '--'
+}
+
+const humanizeTaskStatus = (value: string) => {
+  const labels: Record<string, string> = {
+    done: '完成',
+    nodata: '无数据',
+    needs_fallback: '需要降级/补救',
+    failed: '失败',
+  }
+  return labels[value] || value || '--'
+}
+
+const humanizeTaskSource = (value: string) => {
+  const labels: Record<string, string> = {
+    tushare: 'Tushare',
+    baostock: 'BaoStock',
+    eastmoney: '东方财富',
+    mixed: '混合来源',
+  }
+  return labels[value] || value || '--'
 }
 
 const formatDisplayDate = (value: string, withTime = false) => {
