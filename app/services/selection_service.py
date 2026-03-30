@@ -50,6 +50,44 @@ class SelectionService:
                 "value_type": "enum",
                 "operators": ["="],
             },
+            # Technical indicators
+            {
+                "key": "rsiMin",
+                "label": "RSI 下限",
+                "value_type": "number",
+                "operators": [">="],
+                "description": "RSI 指标最小值 (0-100)",
+            },
+            {
+                "key": "rsiMax",
+                "label": "RSI 上限",
+                "value_type": "number",
+                "operators": ["<="],
+                "description": "RSI 指标最大值 (0-100)",
+            },
+            {
+                "key": "macdBullish",
+                "label": "MACD 看涨",
+                "value_type": "boolean",
+                "operators": ["="],
+                "description": "是否要求 MACD 金叉/柱状图为正",
+            },
+            {
+                "key": "macdBearish",
+                "label": "MACD 看跌",
+                "value_type": "boolean",
+                "operators": ["="],
+                "description": "是否要求 MACD 死叉/柱状图为负",
+            },
+            # Patterns (coming soon)
+            {
+                "key": "pattern",
+                "label": "形态筛选",
+                "value_type": "enum",
+                "operators": ["="],
+                "description": "形态类型（即将推出）",
+                "coming_soon": True,
+            },
         ]
         return payload
 
@@ -76,6 +114,8 @@ class SelectionService:
     def _format_condition_value(key: str, value: Any) -> str | int | float | bool:
         if key in {"priceMin", "priceMax", "changeMin", "changeMax"}:
             return round(float(value), 4)
+        if key in {"rsiMin", "rsiMax"}:
+            return round(float(value), 1)
         return value
 
     @staticmethod
@@ -106,6 +146,7 @@ class SelectionService:
         evidence: list[dict[str, Any]] = []
         summary_parts: list[str] = []
 
+        # Basic price and change conditions
         if conditions.get("priceMin") is not None:
             value = float(conditions["priceMin"])
             summary_parts.append(f"Close >= {value:.2f}")
@@ -167,6 +208,73 @@ class SelectionService:
                 }
             )
 
+        # RSI conditions
+        rsi_value = row.get("rsi")
+        if rsi_value is not None:
+            rsi = float(rsi_value)
+            if conditions.get("rsiMin") is not None:
+                value = float(conditions["rsiMin"])
+                matched = rsi >= value
+                evidence.append(
+                    self._build_condition_evidence(
+                        key="rsi",
+                        label="RSI",
+                        operator=">=",
+                        condition=value,
+                        actual_value=rsi,
+                    )
+                )
+                if matched:
+                    summary_parts.append(f"RSI >= {value:.0f}")
+            if conditions.get("rsiMax") is not None:
+                value = float(conditions["rsiMax"])
+                matched = rsi <= value
+                evidence.append(
+                    self._build_condition_evidence(
+                        key="rsi",
+                        label="RSI",
+                        operator="<=",
+                        condition=value,
+                        actual_value=rsi,
+                    )
+                )
+                if matched:
+                    summary_parts.append(f"RSI <= {value:.0f}")
+
+        # MACD conditions
+        macd_value = row.get("macd")
+        macd_signal = row.get("macd_signal")
+        if macd_value is not None and conditions.get("macdBullish"):
+            # Bullish: MACD > signal (golden cross tendency)
+            matched = macd_value > macd_signal if macd_signal is not None else False
+            evidence.append(
+                {
+                    "key": "macd",
+                    "label": "MACD",
+                    "value": round(float(macd_value), 4),
+                    "operator": "> signal (bullish)",
+                    "condition": True,
+                    "matched": matched,
+                }
+            )
+            if matched:
+                summary_parts.append("MACD bullish")
+        if macd_value is not None and conditions.get("macdBearish"):
+            # Bearish: MACD < signal (dead cross tendency)
+            matched = macd_value < macd_signal if macd_signal is not None else False
+            evidence.append(
+                {
+                    "key": "macd",
+                    "label": "MACD",
+                    "value": round(float(macd_value), 4),
+                    "operator": "< signal (bearish)",
+                    "condition": True,
+                    "matched": matched,
+                }
+            )
+            if matched:
+                summary_parts.append("MACD bearish")
+
         if summary_parts:
             summary = "; ".join(summary_parts[:3])
         else:
@@ -209,6 +317,10 @@ class SelectionService:
         change_min = conditions.get("changeMin")
         change_max = conditions.get("changeMax")
         market = conditions.get("market")
+        rsi_min = conditions.get("rsiMin")
+        rsi_max = conditions.get("rsiMax")
+        macd_bullish = conditions.get("macdBullish")
+        macd_bearish = conditions.get("macdBearish")
 
         where_sql = [
             "s.list_status = 'L'",
@@ -234,24 +346,89 @@ class SelectionService:
         elif market == "sz":
             where_sql.append("(s.symbol LIKE '0%' OR s.symbol LIKE '3%')")
 
-        sql = text(f"""
-            SELECT
-                s.ts_code,
-                s.symbol AS code,
-                s.name AS stock_name,
-                db.trade_date,
-                db.close,
-                db.pct_chg,
-                db.vol,
-                db.amount
+        # Build base query with optional indicator joins
+        select_fields = """
+            s.ts_code,
+            s.symbol AS code,
+            s.name AS stock_name,
+            db.trade_date,
+            db.close,
+            db.pct_chg,
+            db.vol,
+            db.amount
+        """
+
+        from_clause = """
             FROM stocks s
             JOIN daily_bars db ON s.ts_code = db.ts_code
-            WHERE {" AND ".join(where_sql)}
+            WHERE {where_clause}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT :limit
-            """)
+        """.format(
+            where_clause=" AND ".join(where_sql)
+        )
+
+        # If indicator filters are active, we need to join indicators table
+        if rsi_min is not None or rsi_max is not None or macd_bullish or macd_bearish:
+            # Add indicator joins using conditional aggregation or subqueries
+            select_fields += """,
+            COALESCE(MAX(CASE WHEN i.indicator_name = 'RSI' THEN i.indicator_value END), 0) AS rsi,
+            COALESCE(MAX(CASE WHEN i.indicator_name = 'MACD' THEN i.indicator_value END), 0) AS macd,
+            COALESCE(MAX(CASE WHEN i.indicator_name = 'MACD_SIGNAL' THEN i.indicator_value END), 0) AS macd_signal
+            """
+            from_clause = """
+            FROM stocks s
+            JOIN daily_bars db ON s.ts_code = db.ts_code
+            LEFT JOIN indicators i ON s.ts_code = i.ts_code AND i.trade_date = db.trade_date
+            WHERE {where_clause}
+            GROUP BY s.ts_code, s.symbol, s.name, db.trade_date, db.close, db.pct_chg, db.vol, db.amount
+            ORDER BY db.pct_chg DESC NULLS LAST
+            LIMIT :limit
+            """.format(
+                where_clause=" AND ".join(where_sql)
+            )
+        else:
+            from_clause = """
+            FROM stocks s
+            JOIN daily_bars db ON s.ts_code = db.ts_code
+            WHERE {where_clause}
+            ORDER BY db.pct_chg DESC NULLS LAST
+            LIMIT :limit
+            """.format(
+                where_clause=" AND ".join(where_sql)
+            )
+
+        sql = text(f"SELECT{select_fields}{from_clause}")
         params["limit"] = limit
         rows = (await self.db.execute(sql, params)).mappings().all()
+
+        # Apply indicator filters that couldn't be done in SQL
+        filtered_rows = []
+        for row in rows:
+            include = True
+            if rsi_min is not None:
+                rsi = float(row.get("rsi") or 0)
+                if rsi < rsi_min:
+                    include = False
+            if rsi_max is not None and include:
+                rsi = float(row.get("rsi") or 0)
+                if rsi > rsi_max:
+                    include = False
+            if macd_bullish and include:
+                macd = float(row.get("macd") or 0)
+                macd_sig = float(row.get("macd_signal") or 0)
+                if macd <= macd_sig:
+                    include = False
+            if macd_bearish and include:
+                macd = float(row.get("macd") or 0)
+                macd_sig = float(row.get("macd_signal") or 0)
+                if macd >= macd_sig:
+                    include = False
+            if include:
+                filtered_rows.append(row)
+
+        # Limit after filtering
+        rows = filtered_rows[:limit]
 
         results: list[dict] = []
         for row in rows:
@@ -263,7 +440,7 @@ class SelectionService:
                 signal = "buy"
             elif pct <= -2:
                 signal = "sell"
-            reason = self._build_reason(conditions, row)
+            reason = self._build_reason(conditions, dict(row))
             results.append(
                 {
                     "ts_code": row["ts_code"],

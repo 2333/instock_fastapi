@@ -457,38 +457,117 @@
 
 ## 10. 综合选股接口 (Selection)
 
-### 10.1 获取选股条件
+### 10.1 获取筛选元数据
+
+**GET** `/api/v1/screening/metadata`
+
+获取客户端构建筛选 UI 所需的元数据，包括可用的筛选字段及其类型。
+
+**响应示例**:
+
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "OK",
+  "data": {
+    "markets": ["沪市", "深市", "创业板", "科创板"],
+    "indicators": ["macd", "kdj", "boll", "rsi"],
+    "strategies": ["放量上涨", "均线多头", "停机坪"],
+    "filter_fields": [
+      {
+        "key": "priceMin",
+        "label": "最低价格",
+        "value_type": "number",
+        "operators": [">="]
+      },
+      {
+        "key": "rsiMin",
+        "label": "RSI 下限",
+        "value_type": "number",
+        "operators": [">="],
+        "description": "RSI 指标最小值 (0-100)"
+      },
+      {
+        "key": "macdBullish",
+        "label": "MACD 看涨",
+        "value_type": "boolean",
+        "operators": ["="],
+        "description": "是否要求 MACD 金叉/柱状图为正"
+      }
+    ]
+  },
+  "timestamp": "2026-03-30T12:00:00"
+}
+```
+
+### 10.2 获取选股条件
 
 **GET** `/api/v1/selection/conditions`
 
-获取可用的选股条件列表。
+获取可用的选股条件列表（静态模板）。
 
-### 10.2 获取我的选股条件
+**响应示例**:
 
-**GET** `/api/v1/selection/my-conditions`
+```json
+{
+  "markets": ["沪市", "深市", "创业板", "科创板"],
+  "indicators": ["macd", "kdj", "boll", "rsi"],
+  "strategies": ["放量上涨", "均线多头", "停机坪"]
+}
+```
 
 ### 10.3 运行综合选股
 
 **POST** `/api/v1/selection`
 
-根据多个条件进行综合选股。
+根据多个条件进行综合选股。支持价格、涨跌幅、市场范围、技术指标（RSI、MACD）等筛选。
 
 **请求体**:
 
 ```json
 {
-  "price_min": 5,
-  "price_max": 100,
-  "pe_max": 30,
-  "market_cap_min": 50,
-  "change_min": -5,
-  "change_max": 10
+  "filters": {
+    "price_min": 5,
+    "price_max": 100,
+    "change_min": -5,
+    "change_max": 10,
+    "market": "sz",
+    "rsi_min": 30,
+    "rsi_max": 70,
+    "macd_bullish": true
+  },
+  "scope": {
+    "limit": 100
+  }
 }
 ```
+
+**筛选字段说明**:
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| price_min / price_max | number | 价格范围（元） |
+| change_min / change_max | number | 日涨跌幅范围（%） |
+| market | string | 市场：`sh`(沪市)、`sz`(深市) |
+| rsi_min / rsi_max | number | RSI 相对强弱指标范围（0-100） |
+| macd_bullish | boolean | 是否只选 MACD 看涨（金叉倾向） |
+| macd_bearish | boolean | 是否只选 MACD 看跌（死叉倾向） |
+
+**响应格式**：参考 `SelectionRunResponse`，返回列表项包含 `reason_summary`（命中原因摘要）和 `evidence`（结构化证据列表）。
 
 ### 10.4 获取选股历史
 
 **GET** `/api/v1/selection/history`
+
+获取历史选股结果。
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| date | string | 否 | 交易日期 |
+| limit | int | 否 | 返回条数，默认 50 |
 
 ### 10.5 管理我的选股条件
 

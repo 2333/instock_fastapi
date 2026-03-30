@@ -24,6 +24,13 @@ class SelectionFilters(BaseModel):
     market: str | None = Field(
         None, description="Market filter: 'sh' for Shanghai, 'sz' for Shenzhen"
     )
+    # Technical indicators
+    rsi_min: float | None = Field(None, alias="rsiMin")
+    rsi_max: float | None = Field(None, alias="rsiMax")
+    macd_bullish: bool | None = Field(None, alias="macdBullish")
+    macd_bearish: bool | None = Field(None, alias="macdBearish")
+    # Pattern filters (future)
+    pattern: str | None = Field(None, description="Pattern name to filter by")
 
     model_config = ConfigDict(populate_by_name=True)
 
