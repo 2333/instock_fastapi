@@ -123,6 +123,39 @@ async def test_run_backtest_returns_minimal_report_structure():
 
 
 @pytest.mark.asyncio
+async def test_list_results_returns_recent_history_summary():
+    query_result = Mock()
+    row = MagicMock()
+    row._mapping = {
+        "id": 12,
+        "name": "ma_crossover-000001",
+        "created_at": "2024-01-03T10:00:00",
+        "result_data": {
+            "summary": {"total_return": 12.3, "max_drawdown": -4.5},
+            "meta": {"strategy": "ma_crossover", "code": "000001"},
+        },
+    }
+    query_result.fetchall.return_value = [row]
+    db = Mock()
+    db.execute = AsyncMock(return_value=query_result)
+    service = BacktestService(db=db)
+
+    result = await service.list_results(user_id=7, limit=5)
+
+    assert result == [
+        {
+            "backtest_id": "12",
+            "name": "ma_crossover-000001",
+            "created_at": "2024-01-03T10:00:00",
+            "strategy": "ma_crossover",
+            "code": "000001",
+            "total_return": 12.3,
+            "max_drawdown": -4.5,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_result_returns_completed_payload_for_owner():
     query_result = Mock()
     row = MagicMock()

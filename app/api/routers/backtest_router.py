@@ -21,6 +21,16 @@ async def run_backtest(
     return await service.run_backtest(params, user_id=current_user.id)
 
 
+@router.get("/backtest/history")
+async def list_backtest_results(
+    limit: int = 10,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    service = BacktestService(db)
+    return await service.list_results(user_id=current_user.id, limit=limit)
+
+
 @router.get("/backtest/{backtest_id}")
 async def get_backtest_result(
     backtest_id: str,

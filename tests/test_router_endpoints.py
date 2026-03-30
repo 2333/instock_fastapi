@@ -70,6 +70,10 @@ async def test_backtest_endpoints(client, current_user_override):
             new=AsyncMock(return_value={"id": "bt-1", "status": "success"}),
         ),
         patch(
+            "app.api.routers.backtest_router.BacktestService.list_results",
+            new=AsyncMock(return_value=[{"backtest_id": "12", "name": "demo", "strategy": "ma_crossover"}]),
+        ),
+        patch(
             "app.api.routers.backtest_router.BacktestService.get_result",
             new=AsyncMock(return_value={"id": "bt-1", "status": "done"}),
         ),
@@ -78,10 +82,13 @@ async def test_backtest_endpoints(client, current_user_override):
             "/api/v1/backtest",
             json={"strategy": "enter", "start_date": "20240101", "end_date": "20240131"},
         )
+        history_response = await client.get("/api/v1/backtest/history")
         get_response = await client.get("/api/v1/backtest/bt-1")
 
     assert run_response.status_code == 200
     assert run_response.json()["id"] == "bt-1"
+    assert history_response.status_code == 200
+    assert history_response.json()[0]["backtest_id"] == "12"
     assert get_response.json()["status"] == "done"
 
 
