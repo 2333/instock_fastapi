@@ -65,6 +65,15 @@
           关键市场数据已对齐到基准交易日，首页暂未发现需要优先处理的更新异常。
         </template>
       </p>
+
+      <div v-if="staleDatasetNames.length || alertBadgeLabels.length" class="health-strip__tags">
+        <span v-for="label in staleDatasetNames" :key="`stale-${label}`" class="health-tag health-tag--stale">
+          滞后：{{ label }}
+        </span>
+        <span v-for="label in alertBadgeLabels" :key="`alert-${label}`" class="health-tag health-tag--alert">
+          告警：{{ label }}
+        </span>
+      </div>
     </section>
 
     <div class="card-grid">
@@ -466,6 +475,11 @@ const staleDatasetNames = computed(() => {
     .slice(0, 3)
     .map((item) => humanizeDatasetName(item.dataset))
 })
+const alertBadgeLabels = computed(() => {
+  return taskAlerts.value
+    .slice(0, 2)
+    .map((item) => `${humanizeTaskName(item.taskName)} / ${humanizeTaskEntity(item.entityType, item.entityKey)}`)
+})
 const topAlert = computed(() => taskAlerts.value[0] || null)
 const topAlertDatasetLabel = computed(() => {
   if (topAlert.value) return `${humanizeTaskName(topAlert.value.taskName)} / ${humanizeTaskEntity(topAlert.value.entityType, topAlert.value.entityKey)}`
@@ -815,6 +829,29 @@ onMounted(() => {
 
 .health-strip__description {
   min-height: 0;
+}
+
+.health-strip__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.health-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.health-tag--stale {
+  background: rgba(255, 184, 77, 0.12);
+}
+
+.health-tag--alert {
+  background: rgba(255, 123, 123, 0.14);
 }
 
 .metric-strip--health {
