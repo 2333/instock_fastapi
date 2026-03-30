@@ -80,6 +80,17 @@
               </button>
             </div>
           </div>
+          <div v-if="recentBacktests.length" class="recent-backtests">
+            <span class="recent-backtests__label">最近查看</span>
+            <button
+              v-for="backtestId in recentBacktests"
+              :key="backtestId"
+              class="recent-backtests__item"
+              @click="loadBacktestResult(backtestId)"
+            >
+              #{{ backtestId }}
+            </button>
+          </div>
         </div>
 
         <div class="config-section">
@@ -445,6 +456,7 @@ interface SavedStrategy {
 const loading = ref(false)
 const hasResults = ref(false)
 const currentBacktestId = ref('')
+const recentBacktests = ref<string[]>([])
 const equityChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
@@ -455,6 +467,7 @@ const configPanelRef = ref<HTMLElement | null>(null)
 const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
 const PANEL_COLLAPSED_KEY = 'instock_backtest_panel_collapsed'
+const RECENT_BACKTESTS_KEY = 'instock_backtest_recent_ids'
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 const route = useRoute()
 const router = useRouter()
@@ -577,6 +590,13 @@ const resolveDateRange = () => {
 const toggleConfigPanel = () => {
   configCollapsed.value = !configCollapsed.value
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, configCollapsed.value ? '1' : '0')
+}
+
+const rememberBacktestId = (backtestId: string) => {
+  const normalized = String(backtestId || '').trim()
+  if (!normalized) return
+  recentBacktests.value = [normalized, ...recentBacktests.value.filter((item) => item !== normalized)].slice(0, 6)
+  window.localStorage.setItem(RECENT_BACKTESTS_KEY, JSON.stringify(recentBacktests.value))
 }
 
 const buildShareQuery = () => ({
@@ -873,6 +893,7 @@ const applyBacktestResult = (result: any) => {
   hasResults.value = true
   if (result?.backtest_id) {
     currentBacktestId.value = String(result.backtest_id)
+    rememberBacktestId(currentBacktestId.value)
     syncQueryFromState()
   }
 }
@@ -885,6 +906,7 @@ const loadBacktestResult = async (backtestId: string) => {
     currentBacktestId.value = normalizedBacktestId
     if (result?.status === 'completed') {
       applyBacktestResult(result)
+      rememberBacktestId(normalizedBacktestId)
       showNotification?.('info', `已加载历史回测结果 #${normalizedBacktestId}`)
     }
   } catch (error) {
@@ -1012,6 +1034,7 @@ const initEquityChart = async () => {
 onMounted(() => {
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
+  recentBacktests.value = JSON.parse(window.localStorage.getItem(RECENT_BACKTESTS_KEY) || '[]')
   hydrateFromQuery()
   void loadStrategyTemplates()
   void loadSavedStrategies()
@@ -1202,6 +1225,28 @@ onBeforeUnmount(() => {
 .config-action {
   display: flex;
   align-items: flex-end;
+}
+
+.recent-backtests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.recent-backtests__label {
+  width: 100%;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.recent-backtests__item {
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .input-text,
