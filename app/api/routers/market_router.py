@@ -48,15 +48,6 @@ async def get_north_bound_funds(
     return await service.get_north_bound_funds(date, limit)
 
 
-@router.get("/market/task-health")
-async def get_market_task_health(
-    alert_limit: int = Query(10, ge=1, le=50, description="返回的异常任务条数"),
-    db: AsyncSession = Depends(get_db),
-):
-    service = MarketDataService(db)
-    return await service.get_task_health(alert_limit)
-
-
 @router.get("/market/task-health", response_model=MarketTaskHealthResponse)
 async def get_task_health(
     alert_limit: int = Query(10, ge=1, le=50, description="返回的未恢复告警条数"),
