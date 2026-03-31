@@ -144,3 +144,6 @@ class AttentionResponse(BaseModel):
     created_at: datetime | None = None
     ts_code: str | None = None
     stock_name: str | None = None
+    group: str = Field(default="watch", description="Watchlist group")
+    notes: str | None = None
+    alert_conditions: dict[str, Any] | None = Field(default_factory=dict, description="Alert thresholds")

@@ -146,6 +146,9 @@ class Attention(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    group: Mapped[str] = mapped_column(String(50), default="watch", nullable=False, comment="Watchlist group: watch, observe, long-term")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True, comment="User notes for this stock")
+    alert_conditions: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Alert thresholds: price_min, price_max, rsi_min, rsi_max")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

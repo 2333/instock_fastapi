@@ -3,14 +3,14 @@
     <div class="page-header">
       <div class="header-left">
         <h1>我的关注</h1>
-        <p class="subtitle">关注您感兴趣的股票</p>
+        <p class="subtitle">关注您感兴趣的股票，设置提醒条件</p>
       </div>
       <div class="header-right">
         <div class="search-box">
-          <input 
-            type="text" 
-            v-model="searchQuery" 
-            placeholder="搜索股票代码..." 
+          <input
+            type="text"
+            v-model="searchQuery"
+            placeholder="搜索股票代码..."
             class="search-input"
             @keyup.enter="addStock"
           >
@@ -32,24 +32,76 @@
     </div>
 
     <div v-else class="stock-grid">
-      <div 
-        v-for="stock in attentionList" 
-        :key="stock.ts_code"
+      <div
+        v-for="stock in attentionList"
+        :key="stock.id"
         class="stock-card"
-        @click="$router.push(`/stock/${stock.code}`)"
+        :class="{ 'card-editing': editingId === stock.id }"
       >
-        <div class="stock-header">
-          <div class="stock-code">{{ stock.code }}</div>
-          <button 
-            class="btn-remove" 
-            @click.stop="removeStock(stock.code)"
-            title="取消关注"
-          >
-            ×
-          </button>
+        <div class="card-header">
+          <div class="stock-info">
+            <span class="stock-code">{{ stock.code }}</span>
+            <span class="group-badge" :class="stock.group">{{ groupLabel(stock.group) }}</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-icon" @click.stop="toggleEdit(stock)" title="编辑">
+              ✏️
+            </button>
+            <button class="btn-icon" @click.stop="removeStock(stock.id)" title="取消关注">
+              ×
+            </button>
+          </div>
         </div>
+
         <div class="stock-name">{{ stock.stock_name || '未知' }}</div>
-        <div class="stock-date">{{ formatDate(stock.created_at) }}</div>
+
+        <!-- Edit Panel -->
+        <div v-if="editingId === stock.id" class="edit-panel">
+          <div class="form-group">
+            <label>分组</label>
+            <select v-model="editForm.group" class="form-select">
+              <option value="watch">自选</option>
+              <option value="observe">观察</option>
+              <option value="long-term">长期关注</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>备注</label>
+            <textarea v-model="editForm.notes" class="form-textarea" placeholder="添加备注..." rows="2"></textarea>
+          </div>
+          <div class="form-group">
+            <label>提醒条件（可选）</label>
+            <div class="alert-fields">
+              <div class="field-row">
+                <span class="field-label">价格区间</span>
+                <div class="field-inputs">
+                  <input type="number" step="0.01" v-model.number="editForm.alert_price_min" placeholder="最低" class="input-mini">
+                  <span>-</span>
+                  <input type="number" step="0.01" v-model.number="editForm.alert_price_max" placeholder="最高" class="input-mini">
+                </div>
+              </div>
+              <div class="field-row">
+                <span class="field-label">RSI 区间</span>
+                <div class="field-inputs">
+                  <input type="number" v-model.number="editForm.alert_rsi_min" placeholder="最小" min="0" max="100" class="input-mini">
+                  <span>-</span>
+                  <input type="number" v-model.number="editForm.alert_rsi_max" placeholder="最大" min="0" max="100" class="input-mini">
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="edit-actions">
+            <button class="btn btn-small btn-secondary" @click="cancelEdit">取消</button>
+            <button class="btn btn-small btn-primary" @click="saveEdit(stock.id)">保存</button>
+          </div>
+        </div>
+
+        <div v-else class="card-summary">
+          <div v-if="stock.notes" class="notes-preview">{{ stock.notes }}</div>
+          <div v-if="hasAlerts(stock)" class="alerts-badge">
+            🔔 提醒已设置
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -59,15 +111,65 @@
 import { ref, onMounted } from 'vue'
 import { attentionApi } from '@/api'
 
+interface AttentionItem {
+  id: number
+  ts_code: string
+  code: string
+  stock_name: string | null
+  created_at: string | null
+  group: string
+  notes: string | null
+  alert_conditions: Record<string, any> | null
+}
+
 const loading = ref(false)
 const searchQuery = ref('')
-const attentionList = ref<any[]>([])
+const attentionList = ref<AttentionItem[]>([])
+const editingId = ref<number | null>(null)
+const editForm = ref<{
+  group: string
+  notes: string
+  alert_price_min: number | null
+  alert_price_max: number | null
+  alert_rsi_min: number | null
+  alert_rsi_max: number | null
+}>({
+  group: 'watch',
+  notes: '',
+  alert_price_min: null,
+  alert_price_max: null,
+  alert_rsi_min: null,
+  alert_rsi_max: null,
+})
+
+const groupLabel = (group: string) => {
+  const labels: Record<string, string> = {
+    watch: '自选',
+    observe: '观察',
+    'long-term': '长期关注',
+  }
+  return labels[group] || group
+}
+
+const hasAlerts = (stock: AttentionItem) => {
+  const ac = stock.alert_conditions
+  if (!ac) return false
+  return !!(
+    ac.price_min != null ||
+    ac.price_max != null ||
+    ac.rsi_min != null ||
+    ac.rsi_max != null
+  )
+}
 
 const fetchAttention = async () => {
   loading.value = true
   try {
     const data = await attentionApi.getList()
-    attentionList.value = data || []
+    attentionList.value = (data || []).map((item: any) => ({
+      ...item,
+      alert_conditions: item.alert_conditions || null,
+    }))
   } catch (e) {
     console.error('Failed to fetch attention list:', e)
   } finally {
@@ -77,9 +179,9 @@ const fetchAttention = async () => {
 
 const addStock = async () => {
   if (!searchQuery.value) return
-  
+
   try {
-    await attentionApi.add(searchQuery.value)
+    await attentionApi.add(searchQuery.value, 'watch')
     searchQuery.value = ''
     await fetchAttention()
   } catch (e) {
@@ -87,19 +189,58 @@ const addStock = async () => {
   }
 }
 
-const removeStock = async (code: string) => {
+const removeStock = async (id: number) => {
+  if (!confirm('确定取消关注该股票？')) return
   try {
-    await attentionApi.remove(code)
-    await fetchAttention()
+    const stock = attentionList.value.find(s => s.id === id)
+    if (stock) {
+      await attentionApi.remove(stock.code)
+      await fetchAttention()
+    }
   } catch (e) {
     console.error('Failed to remove attention:', e)
   }
 }
 
-const formatDate = (dateStr: string) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('zh-CN')
+const toggleEdit = (stock: AttentionItem) => {
+  if (editingId.value === stock.id) {
+    editingId.value = null
+  } else {
+    editingId.value = stock.id
+    editForm.value = {
+      group: stock.group || 'watch',
+      notes: stock.notes || '',
+      alert_price_min: stock.alert_conditions?.price_min ?? null,
+      alert_price_max: stock.alert_conditions?.price_max ?? null,
+      alert_rsi_min: stock.alert_conditions?.rsi_min ?? null,
+      alert_rsi_max: stock.alert_conditions?.rsi_max ?? null,
+    }
+  }
+}
+
+const cancelEdit = () => {
+  editingId.value = null
+}
+
+const saveEdit = async (id: number) => {
+  try {
+    const updates: any = {}
+    if (editForm.value.group) updates.group = editForm.value.group
+    if (editForm.value.notes !== undefined) updates.notes = editForm.value.notes || null
+    const alertCond: any = {}
+    if (editForm.value.alert_price_min != null) alertCond.price_min = editForm.value.alert_price_min
+    if (editForm.value.alert_price_max != null) alertCond.price_max = editForm.value.alert_price_max
+    if (editForm.value.alert_rsi_min != null) alertCond.rsi_min = editForm.value.alert_rsi_min
+    if (editForm.value.alert_rsi_max != null) alertCond.rsi_max = editForm.value.alert_rsi_max
+    if (Object.keys(alertCond).length > 0) updates.alert_conditions = alertCond
+
+    await attentionApi.update(id, updates)
+    editingId.value = null
+    await fetchAttention()
+  } catch (e) {
+    console.error('Failed to update attention:', e)
+    alert('保存失败')
+  }
 }
 
 onMounted(() => {
@@ -182,6 +323,30 @@ onMounted(() => {
   }
 }
 
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+}
+
 .loading-state,
 .empty-state {
   display: flex;
@@ -215,7 +380,7 @@ onMounted(() => {
 
 .stock-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
 }
 
@@ -224,20 +389,31 @@ onMounted(() => {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
   padding: 16px;
-  cursor: pointer;
   transition: all 0.2s;
+  position: relative;
 
   &:hover {
-    background: rgba(41, 98, 255, 0.1);
-    border-color: rgba(41, 98, 255, 0.3);
+    background: rgba(41, 98, 255, 0.08);
+    border-color: rgba(41, 98, 255, 0.25);
+  }
+
+  &.card-editing {
+    border-color: rgba(41, 98, 255, 0.5);
+    background: rgba(41, 98, 255, 0.06);
   }
 }
 
-.stock-header {
+.card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.stock-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .stock-code {
@@ -246,20 +422,20 @@ onMounted(() => {
   color: #fff;
 }
 
-.btn-remove {
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 23, 68, 0.1);
-  color: #FF1744;
-  font-size: 16px;
-  cursor: pointer;
-  transition: all 0.2s;
+.group-badge {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 500;
 
-  &:hover {
-    background: rgba(255, 23, 68, 0.2);
-  }
+  &.watch { background: rgba(41, 98, 255, 0.15); color: #9ab7ff; }
+  &.observe { background: rgba(255, 152, 0, 0.15); color: #FFB74D; }
+  &.long-term { background: rgba(0, 200, 83, 0.15); color: #69F0AE; }
+}
+
+.card-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .stock-name {
@@ -268,8 +444,114 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 
-.stock-date {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+.card-summary {
+  .notes-preview {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .alerts-badge {
+    font-size: 12px;
+    color: #FFD54F;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+.edit-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.form-group {
+  margin-bottom: 12px;
+
+  label {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 6px;
+  }
+}
+
+.form-select,
+.form-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+
+  &:focus {
+    outline: none;
+    border-color: #2962FF;
+  }
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 50px;
+}
+
+.alert-fields {
+  .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .field-label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    width: 70px;
+  }
+
+  .field-inputs {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    .input-mini {
+      flex: 1;
+      min-width: 0;
+      padding: 6px 8px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 12px;
+
+      &:focus {
+        outline: none;
+        border-color: #2962FF;
+      }
+    }
+  }
+}
+
+.edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+
+  .btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
 }
 </style>
