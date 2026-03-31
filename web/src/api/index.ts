@@ -195,6 +195,8 @@ export const backtestApi = {
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
 
+  getTemplates: () => api.get('/selection/templates') as Promise<any>,
+
   getMyConditions: () => api.get('/selection/my-conditions') as Promise<any>,
 
   createCondition: (condition: { name: string; category: string; description?: string; params?: Record<string, any>; is_active?: boolean }) =>

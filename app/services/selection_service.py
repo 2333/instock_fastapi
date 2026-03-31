@@ -91,6 +91,80 @@ class SelectionService:
         ]
         return payload
 
+    @staticmethod
+    def get_templates() -> list[dict[str, Any]]:
+        """Return predefined screening condition templates."""
+        return [
+            {
+                "id": "low-psi-oversold",
+                "name": "低位反弹",
+                "description": "价格低位 + RSI 超卖 + MACD 转多头",
+                "icon": "📈",
+                "filters": {
+                    "priceMin": 2.0,
+                    "priceMax": 15.0,
+                    "rsiMin": 0,
+                    "rsiMax": 30,
+                    "macdBullish": True,
+                },
+            },
+            {
+                "id": "strong-breakout",
+                "name": "强势突破",
+                "description": "价格突破 + 量增 + RSI 强势",
+                "icon": "🚀",
+                "filters": {
+                    "priceMin": 5.0,
+                    "changeMin": 5.0,
+                    "rsiMin": 50,
+                    "rsiMax": 80,
+                },
+            },
+            {
+                "id": "high-quality-blue",
+                "name": "优质蓝筹",
+                "description": "低估值 + 价格稳定 + 市场龙头",
+                "icon": "🏦",
+                "filters": {
+                    "priceMin": 5.0,
+                    "priceMax": 20.0,
+                    "changeMin": -2.0,
+                    "changeMax": 3.0,
+                },
+            },
+            {
+                "id": "speculative-momentum",
+                "name": "题材 momentum",
+                "description": "中小盘 + 活跃 + 涨跌波动大",
+                "icon": "🔥",
+                "filters": {
+                    "priceMin": 3.0,
+                    "priceMax": 30.0,
+                    "changeMin": -5.0,
+                    "changeMax": 10.0,
+                },
+            },
+            {
+                "id": "macd-golden-cross",
+                "name": "MACD 金叉池",
+                "description": "仅筛选 MACD 看涨信号",
+                "icon": "✨",
+                "filters": {
+                    "macdBullish": True,
+                },
+            },
+            {
+                "id": "rsi-neutral",
+                "name": "RSI 中性区间",
+                "description": "排除超买超卖，寻找正常波动股",
+                "icon": "🎯",
+                "filters": {
+                    "rsiMin": 30,
+                    "rsiMax": 70,
+                },
+            },
+        ]
+
     async def _resolve_trade_date(self, date: str | None) -> str | None:
         if not self.db:
             return None

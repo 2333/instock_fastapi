@@ -19,6 +19,8 @@ from app.schemas.selection_schema import (
     SelectionHistoryResponse,
     SelectionRequest,
     SelectionResponse,
+    ScreeningTemplate,
+    ScreeningTemplateListResponse,
 )
 from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
@@ -35,6 +37,13 @@ async def get_selection_conditions() -> SelectionConditionsMetaResponse:
 @router.get("/screening/metadata", response_model=ScreeningMetadataResponse)
 async def get_screening_metadata() -> ScreeningMetadataResponse:
     return ScreeningMetadataResponse(data=SelectionService.get_screening_metadata())
+
+
+@router.get("/selection/templates", response_model=ScreeningTemplateListResponse)
+async def get_selection_templates() -> ScreeningTemplateListResponse:
+    """Return predefined screening condition templates for quick actions."""
+    templates = SelectionService.get_templates()
+    return ScreeningTemplateListResponse(data=templates)
 
 
 @router.get("/selection/my-conditions", response_model=list[SelectionConditionResponse])
