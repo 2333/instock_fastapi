@@ -195,6 +195,28 @@
                 <option value="score">按评分排序</option>
                 <option value="date">按日期排序</option>
               </select>
+              <button
+                v-if="!compareMode"
+                class="btn btn-secondary"
+                @click="enableCompareMode"
+              >
+                对比结果
+              </button>
+              <button
+                v-else
+                class="btn btn-primary"
+                :disabled="selectedHistoryIds.size < 2"
+                @click="startCompare"
+              >
+                对比选中 ({{ selectedHistoryIds.size }})
+              </button>
+              <button
+                v-if="compareMode"
+                class="btn btn-secondary"
+                @click="exitCompareMode"
+              >
+                取消
+              </button>
             </div>
           </div>
 
@@ -202,6 +224,14 @@
             <table class="results-table">
               <thead>
                 <tr>
+                  <th v-if="compareMode" style="width: 48px;">
+                    <input
+                      type="checkbox"
+                      :checked="allCurrentSelectionIdsSelected"
+                      @change="toggleSelectAll"
+                      title="全选"
+                    />
+                  </th>
                   <th>代码</th>
                   <th>名称</th>
                   <th>评分</th>
@@ -211,11 +241,19 @@
                 </tr>
               </thead>
               <tbody>
-                <tr 
-                  v-for="stock in sortedResults" 
+                <tr
+                  v-for="stock in sortedResults"
                   :key="stock.code"
-                  @click="openStockDetail(stock)"
+                  :class="{ 'row-selected': compareMode && selectedHistoryIds.has(extractSelectionId(stock)) }"
+                  @click="compareMode ? handleRowClick(stock) : openStockDetail(stock)"
                 >
+                  <td v-if="compareMode" @click.stop>
+                    <input
+                      type="checkbox"
+                      :checked="selectedHistoryIds.has(extractSelectionId(stock))"
+                      @change="toggleSelection(extractSelectionId(stock))"
+                    />
+                  </td>
                   <td class="stock-code">{{ stock.code }}</td>
                   <td class="stock-name">{{ stock.name || '-' }}</td>
                   <td>{{ stock.score }}</td>
@@ -243,6 +281,53 @@
           </div>
         </template>
       </main>
+    </div>
+  </div>
+
+  <!-- Comparison Modal -->
+  <div v-if="showCompareModal" class="modal-overlay" @click.self="showCompareModal = false">
+    <div class="modal-content comparison-modal">
+      <div class="modal-header">
+        <h3>对比结果 ({{ comparisonResults.length }} 个筛选)</h3>
+        <button class="close-btn" @click="showCompareModal = false">×</button>
+      </div>
+      <div class="modal-body">
+        <div v-if="comparisonResults.length === 0" class="empty-state">
+          无数据
+        </div>
+        <div v-else class="comparison-grid">
+          <div
+            v-for="item in comparisonResults"
+            :key="item.history_id"
+            class="comparison-card"
+          >
+            <div class="card-header">
+              <div class="card-title">筛选 {{ item.history_id.slice(-8) }}</div>
+              <div class="card-subtitle">{{ formatDisplayDate(item.trade_date) }}</div>
+            </div>
+            <div class="card-stats">
+              <div class="stat">
+                <span class="stat-label">股票数</span>
+                <span class="stat-value">{{ item.total }}</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">平均分</span>
+                <span class="stat-value">{{ item.avg_score?.toFixed(2) }}</span>
+              </div>
+            </div>
+            <div class="card-top-stocks">
+              <h4>Top 5</h4>
+              <ul>
+                <li v-for="stock in item.top_stocks" :key="stock.code">
+                  <span class="stock-code">{{ stock.code }}</span>
+                  <span class="stock-name">{{ stock.name }}</span>
+                  <span class="stock-score">{{ stock.score?.toFixed(2) }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -301,6 +386,17 @@ const myConditions = ref<Array<{ id: number; name: string; category: string; par
 const templates = ref<Array<{ id: string; name: string; description: string; icon: string; filters: Record<string, any> }>>([])
 const templatesLoading = ref(false)
 const templatesCollapsed = ref(false)
+// Comparison mode state
+const compareMode = ref(false)
+const selectedHistoryIds = ref<Set<string>>(new Set())
+const showCompareModal = ref(false)
+const comparisonResults = ref<Array<{
+  history_id: string
+  trade_date: string | null
+  total: number
+  avg_score: number | null
+  top_stocks: StockResult[]
+}>>([])
 const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
 const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
 const TEMPLATES_COLLAPSED_KEY = 'instock_templates_collapsed'
@@ -555,6 +651,72 @@ const saveCriteria = async () => {
     await fetchMyConditions()
   } catch (e) {
     showNotification?.('error', '保存失败')
+  }
+}
+
+// Comparison functionality
+const extractSelectionId = (stock: any): string => {
+  return stock.selection_id || stock.selectionId || ''
+}
+
+const enableCompareMode = () => {
+  compareMode.value = true
+  selectedHistoryIds.value = new Set()
+}
+
+const exitCompareMode = () => {
+  compareMode.value = false
+  selectedHistoryIds.value = new Set()
+}
+
+const toggleSelection = (selId: string) => {
+  const newSet = new Set(selectedHistoryIds.value)
+  if (newSet.has(selId)) {
+    newSet.delete(selId)
+  } else if (newSet.size < 4) {
+    newSet.add(selId)
+  }
+  selectedHistoryIds.value = newSet
+}
+
+const toggleSelectAll = () => {
+  const allIds = Array.from(new Set(results.value.map(extractSelectionId)))
+  if (allCurrentSelectionIdsSelected.value) {
+    selectedHistoryIds.value = new Set()
+  } else {
+    // Select up to 4
+    selectedHistoryIds.value = new Set(allIds.slice(0, 4))
+  }
+}
+
+const allCurrentSelectionIdsSelected = computed(() => {
+  const uniqueIds = new Set(results.value.map(extractSelectionId))
+  if (uniqueIds.size === 0) return false
+  return uniqueIds.size > 0 && Array.from(uniqueIds).every(id => selectedHistoryIds.value.has(id))
+})
+
+const handleRowClick = (stock: any) => {
+  const selId = extractSelectionId(stock)
+  if (!selId) return
+  toggleSelection(selId)
+}
+
+const startCompare = async () => {
+  if (selectedHistoryIds.value.size < 2) return
+  try {
+    const response = await selectionApi.compareScreeningResults(Array.from(selectedHistoryIds.value))
+    comparisonResults.value = (response?.data || []).map((item: any) => ({
+      ...item,
+      top_stocks: (item.top_stocks || []).map((s: any) => ({
+        ...s,
+        code: s.code || s.ts_code?.split('.')[0],
+        name: s.stock_name,
+      })),
+    }))
+    showCompareModal.value = true
+  } catch (e) {
+    console.error('Comparison failed:', e)
+    showNotification?.('error', '对比失败')
   }
 }
 
@@ -1095,4 +1257,169 @@ onMounted(async () => {
     color: #FF1744;
   }
 }
+
+// Comparison modal styles
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal-content {
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  max-width: 1200px;
+  width: 100%;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+
+  h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    line-height: 1;
+
+    &:hover {
+      color: rgba(255, 255, 255, 0.9);
+    }
+  }
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.comparison-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card-header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .card-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.card-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .stat-label {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: #2962FF;
+    }
+  }
+}
+
+.card-top-stocks {
+  h4 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+
+    .stock-code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .stock-name {
+      flex: 1;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .stock-score {
+      font-size: 13px;
+      font-weight: 600;
+      color: #9ab7ff;
+    }
+  }
+}
+
+// Row selection style
+.row-selected {
+  background: rgba(41, 98, 255, 0.12) !important;
+}
+
+.results-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 </style>
