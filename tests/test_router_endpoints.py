@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.build_info import get_build_info
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_provider
 from app.database import get_db
 from app.main import app
 
@@ -292,6 +292,7 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         yield fake_db
 
     app.dependency_overrides[get_db] = override_router_db
+    app.dependency_overrides[get_provider] = lambda: None  # 强制回退到父类实现以便patch生效
 
     try:
         with (
@@ -404,6 +405,7 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
             screening_history_response = await client.get("/api/v1/screening/history")
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_provider, None)
 
     assert conditions.json()["markets"] == ["沪市", "深市", "创业板", "科创板"]
     assert screening_metadata.json()["data"]["filter_fields"][0]["key"] == "priceMin"
