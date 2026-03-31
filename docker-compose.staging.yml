@@ -1,0 +1,81 @@
+# 预发布环境 Docker Compose
+# 复用生产数据库和 Redis，前后端用测试新代码
+# 用法: docker compose -f docker-compose.staging.yml up --build -d
+
+services:
+  app:
+    image: ${IMAGE_NAMESPACE:-instock}/instock-app:staging
+    build:
+      context: .
+      args:
+        APP_VERSION: staging
+        APP_GIT_SHA: local-staging
+    container_name: instock_staging_app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://instock:instock_pass@host.docker.internal:5432/instock
+      - SYNC_DATABASE_URL=postgresql+psycopg2://instock:instock_pass@host.docker.internal:5432/instock
+      - REDIS_HOST=host.docker.internal
+      - REDIS_PORT=6380
+      - APP_PORT=8000
+      - UVICORN_WORKERS=1
+      - PYTHONPATH=/app
+      - APP_VERSION=staging
+      - APP_GIT_SHA=local-staging
+      - SECRET_KEY=dev-secret-key-change-in-production-12345678901234567890
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+      - CRAWLER_PROXY_ENABLED=false
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN}
+      - TUSHARE_HTTP_URL=${TUSHARE_HTTP_URL:-https://api.tushare.pro}
+      - FUND_FLOW_STOCK_SOURCE=eastmoney
+      - FUND_FLOW_SECTOR_SOURCE=tushare
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./app:/app/app
+      - ./core:/app/core
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - app_staging_logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - instock_staging_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    image: ${IMAGE_NAMESPACE:-instock}/instock-frontend:staging
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: staging
+        APP_GIT_SHA: local-staging
+    container_name: instock_staging_frontend
+    environment:
+      - VITE_API_URL=http://localhost:8001
+    ports:
+      - "3002:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - instock_staging_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  instock_staging_network:
+    driver: bridge
+
+volumes:
+  app_staging_logs:

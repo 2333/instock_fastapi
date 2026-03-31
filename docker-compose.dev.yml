@@ -1,0 +1,122 @@
+# 测试/开发环境 Docker Compose
+# 与生产环境隔离：不同端口、不同容器名、不同数据卷
+# 用法: docker compose -f docker-compose.dev.yml up -d
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.13.1-pg16
+    container_name: instock_dev_postgres
+    environment:
+      POSTGRES_PASSWORD: instock_pass
+      POSTGRES_USER: instock
+      POSTGRES_DB: instock
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U instock"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - instock_dev_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: instock_dev_redis
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis_dev_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - instock_dev_network
+
+  app:
+    image: ${IMAGE_NAMESPACE:-instock}/instock-app:dev
+    build:
+      context: .
+      args:
+        APP_VERSION: dev
+        APP_GIT_SHA: local-dev
+    container_name: instock_dev_app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://instock:instock_pass@postgres:5432/instock
+      - SYNC_DATABASE_URL=postgresql+psycopg2://instock:instock_pass@postgres:5432/instock
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - APP_PORT=8000
+      - UVICORN_WORKERS=1
+      - PYTHONPATH=/app
+      - APP_VERSION=dev
+      - APP_GIT_SHA=local-dev
+      - SECRET_KEY=dev-secret-key-change-in-production-12345678901234567890
+      - LOG_LEVEL=DEBUG
+      - DEBUG=true
+      - CRAWLER_PROXY_ENABLED=false
+      - TUSHARE_TOKEN=${TUSHARE_TOKEN}
+      - TUSHARE_HTTP_URL=${TUSHARE_HTTP_URL:-https://api.tushare.pro}
+      - FUND_FLOW_STOCK_SOURCE=eastmoney
+      - FUND_FLOW_SECTOR_SOURCE=tushare
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./core:/app/core
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - app_dev_logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - instock_dev_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    image: ${IMAGE_NAMESPACE:-instock}/instock-frontend:dev
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: dev
+        APP_GIT_SHA: local-dev
+    container_name: instock_dev_frontend
+    environment:
+      - VITE_API_URL=http://localhost:8001
+    ports:
+      - "3002:80"
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - instock_dev_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  instock_dev_network:
+    driver: bridge
+
+volumes:
+  postgres_dev_data:
+  redis_dev_data:
+  app_dev_logs:
