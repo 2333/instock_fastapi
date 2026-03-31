@@ -273,6 +273,36 @@
           </router-link>
         </div>
       </section>
+
+      <section class="workbench-card">
+        <div class="card-header">
+          <div>
+            <span class="card-kicker">最近查看</span>
+            <h2>最近浏览的股票</h2>
+          </div>
+        </div>
+
+        <div v-if="recentViewedStocks.length === 0" class="empty-hint">
+          暂无最近查看的股票记录
+        </div>
+
+        <div v-else class="list-stack">
+          <router-link
+            v-for="item in recentViewedStocks"
+            :key="item.code"
+            :to="`/stock/${item.code}`"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.code }}</strong>
+              <span>{{ item.name }}</span>
+            </div>
+            <div class="row-meta">
+              <span>{{ formatCompactDateRelative(item.viewedAt) }}</span>
+            </div>
+          </router-link>
+        </div>
+      </section>
     </div>
   </div>
 </template>
@@ -334,6 +364,7 @@ const taskDatasets = ref<MarketTaskDatasetStatus[]>([])
 const taskAlerts = ref<MarketTaskHealthAlert[]>([])
 const taskHealthBaselineTradeDate = ref('')
 const taskAlertCount = ref(0)
+const recentViewedStocks = ref<Array<{ code: string; name: string; viewedAt: string }>>([])
 
 const normalizeList = <T>(response: unknown, fallback: T[] = []): T[] => {
   if (Array.isArray(response)) return response as T[]
@@ -626,6 +657,21 @@ const buildStockLink = (code: string, screeningDate?: string) => ({
   query: screeningDate ? { screening_date: screeningDate } : undefined,
 })
 
+const formatCompactDateRelative = (isoString: string) => {
+  const date = new Date(isoString)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+
+  if (diffMins < 1) return '刚刚'
+  if (diffMins < 60) return `${diffMins}分钟前`
+  if (diffHours < 24) return `${diffHours}小时前`
+  if (diffDays < 7) return `${diffDays}天前`
+  return formatDisplayDate(isoString)
+}
+
 const signalLabel = (signal: string) => {
   const key = signalKey(signal)
   if (key === 'bullish') return '看涨'
@@ -699,7 +745,19 @@ const refreshWorkbench = async () => {
   loading.value = false
 }
 
+const loadRecentViewed = () => {
+  try {
+    const stored = localStorage.getItem('recently_viewed_stocks')
+    if (stored) {
+      recentViewedStocks.value = JSON.parse(stored).slice(0, 5)
+    }
+  } catch (e) {
+    recentViewedStocks.value = []
+  }
+}
+
 onMounted(() => {
+  loadRecentViewed()
   refreshWorkbench()
 })
 </script>
@@ -1049,5 +1107,12 @@ onMounted(() => {
   .metric-strip--health {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.empty-hint {
+  text-align: center;
+  padding: 24px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
 }
 </style>
