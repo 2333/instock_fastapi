@@ -40,6 +40,9 @@ class TushareProvider:
         self.config = config or TushareConfig()
         self.token = (self.config.token or os.getenv("TUSHARE_TOKEN") or "").strip()
         self.http_url = os.getenv("TUSHARE_HTTP_URL", "http://lianghua.nanyangqiankun.top")
+        self._compat_http_url = os.getenv(
+            "TUSHARE_COMPAT_HTTP_URL", "http://lianghua.nanyangqiankun.top"
+        )
         self._compat_enabled = False
         requested_inflight = max(1, int(self.config.max_inflight))
         class_inflight = max(1, int(os.getenv("TUSHARE_MAX_INFLIGHT", "1")))
@@ -109,9 +112,11 @@ class TushareProvider:
         """兼容部分渠道 token：注入私有 token 与自定义网关地址后重试。"""
         try:
             pro._DataApi__token = self.token
-            pro._DataApi__http_url = self.http_url
+            pro._DataApi__http_url = self._compat_http_url
             self._compat_enabled = True
-            logger.warning("已启用 Tushare 兼容模式，http_url=%s", self.http_url)
+            logger.warning(
+                "已启用 Tushare 兼容模式，http_url=%s", self._compat_http_url
+            )
         except Exception as exc:
             logger.error("启用 Tushare 兼容模式失败: %s", exc)
 
