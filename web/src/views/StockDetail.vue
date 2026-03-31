@@ -353,6 +353,27 @@ const formatDisplayDate = (value?: string | null) => {
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
 }
 
+// Record recently viewed stock
+const recordRecentView = () => {
+  if (!stockInfo.value?.code || !stockInfo.value?.name) return
+  const recentKey = 'recently_viewed_stocks'
+  try {
+    const existing: Array<{ code: string; name: string; viewedAt: string }> = JSON.parse(localStorage.getItem(recentKey) || '[]')
+    const filtered = existing.filter((item) => item.code !== stockInfo.value.code)
+    const updated = [
+      {
+        code: stockInfo.value.code,
+        name: stockInfo.value.name,
+        viewedAt: new Date().toISOString(),
+      },
+      ...filtered,
+    ].slice(0, 10) // keep last 10
+    localStorage.setItem(recentKey, JSON.stringify(updated))
+  } catch (e) {
+    // ignore
+  }
+}
+
 const toQueryDate = (value: unknown) => {
   if (Array.isArray(value)) return String(value[0] || '').trim()
   return String(value || '').trim()
@@ -536,6 +557,7 @@ const fetchStockDetail = async (
     const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
 
     stockInfo.value = stockData
+    recordRecentView()
     adjustFallbackActive.value = stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
     patterns.value = (patternsData || [])
       .map((pattern: any, index: number) => ({
