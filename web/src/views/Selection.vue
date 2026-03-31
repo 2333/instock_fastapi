@@ -43,6 +43,25 @@
           </div>
           <button class="templates-toggle" @click="templatesCollapsed = true">收起模板</button>
         </div>
+
+        <div v-if="recentTemplates.length && !templatesCollapsed" class="panel-section recent-templates-section">
+          <div class="section-heading">
+            <h3>最近使用</h3>
+            <p class="section-hint">快速重新应用最近使用的模板</p>
+          </div>
+          <div class="recent-templates-grid">
+            <button
+              v-for="tpl in recentTemplates"
+              :key="tpl.id"
+              class="template-card recent-template-card"
+              @click="applyTemplate(tpl)"
+            >
+              <span class="template-icon">{{ tpl.icon }}</span>
+              <span class="template-name">{{ tpl.name }}</span>
+            </button>
+          </div>
+        </div>
+
         <div v-else class="templates-collapsed-bar">
           <button class="btn btn-small" @click="templatesCollapsed = false">展开快捷模板</button>
         </div>
@@ -386,6 +405,7 @@ const myConditions = ref<Array<{ id: number; name: string; category: string; par
 const templates = ref<Array<{ id: string; name: string; description: string; icon: string; filters: Record<string, any> }>>([])
 const templatesLoading = ref(false)
 const templatesCollapsed = ref(false)
+const recentTemplates = ref<Array<{ id: string; name: string; icon: string; filters: Record<string, any> }>>([])
 // Comparison mode state
 const compareMode = ref(false)
 const selectedHistoryIds = ref<Set<string>>(new Set())
@@ -608,8 +628,20 @@ const fetchTemplates = async () => {
       ...tpl,
       filters: tpl.filters || {},
     }))
+    // Load recent templates from localStorage
+    const recentKey = 'selection_recent_templates'
+    try {
+      const stored = localStorage.getItem(recentKey)
+      if (stored) {
+        const recentIds = JSON.parse(stored) as string[]
+        recentTemplates.value = templates.value.filter((tpl: any) => recentIds.includes(tpl.id))
+      }
+    } catch (e) {
+      recentTemplates.value = []
+    }
   } catch (e) {
     templates.value = []
+    recentTemplates.value = []
   } finally {
     templatesLoading.value = false
   }
@@ -619,6 +651,22 @@ const applyTemplate = (tpl: { id: string; name: string; filters: Record<string, 
   // Merge template filters into criteria, overriding existing values
   Object.assign(criteria, tpl.filters)
   showNotification?.('info', `已应用模板：${tpl.name}`)
+  // Record to recent templates
+  const recentKey = 'selection_recent_templates'
+  try {
+    const stored = localStorage.getItem(recentKey)
+    const recentIds: string[] = stored ? JSON.parse(stored) : []
+    const filtered = recentIds.filter((id) => id !== tpl.id)
+    const updated = [tpl.id, ...filtered].slice(0, 5)
+    localStorage.setItem(recentKey, JSON.stringify(updated))
+    // Update local recentTemplates
+    const tplData = templates.value.find((t: any) => t.id === tpl.id)
+    if (tplData && !recentTemplates.value.find((t: any) => t.id === tpl.id)) {
+      recentTemplates.value = [tplData, ...recentTemplates.value].slice(0, 5)
+    }
+  } catch (e) {
+    // ignore
+  }
 }
 
 const loadSavedCondition = (cond: { id: number; name: string; params: Record<string, any> }) => {
@@ -943,6 +991,30 @@ onMounted(async () => {
   border: 1px solid rgba(41, 98, 255, 0.15);
   border-radius: 12px;
   text-align: center;
+}
+
+.recent-templates-section {
+  background: rgba(255, 152, 0, 0.06);
+  border: 1px solid rgba(255, 152, 0, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+
+  .recent-templates-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+
+  .recent-template-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+
+    &:hover {
+      background: rgba(255, 152, 0, 0.12);
+      border-color: rgba(255, 152, 0, 0.3);
+    }
+  }
 }
 
 .section-heading {
