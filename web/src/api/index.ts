@@ -219,6 +219,9 @@ export const selectionApi = {
 
   getScreeningHistory: (params?: { date?: string; limit?: number }) =>
     api.get('/screening/history', { params }) as Promise<any>,
+
+  compareScreeningResults: (historyIds: string[]) =>
+    api.post('/screening/compare', { history_ids: historyIds }) as Promise<any>,
 }
 
 export const fundFlowApi = {

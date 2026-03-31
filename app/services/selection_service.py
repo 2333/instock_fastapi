@@ -573,3 +573,74 @@ class SelectionService:
             }
             for row in rows
         ]
+
+    async def compare_results(self, history_ids: list[str]) -> list[dict[str, Any]]:
+        """Compare multiple screening result sets by selection_id."""
+        if not self.db or not history_ids:
+            return []
+
+        # Fetch aggregated data for each selection_id
+        sql = text("""
+            SELECT
+                sr.selection_id,
+                COUNT(*) AS total,
+                AVG(sr.score) AS avg_score,
+                MAX(sr.trade_date) AS trade_date
+            FROM selection_results sr
+            WHERE sr.selection_id = ANY(:ids)
+            GROUP BY sr.selection_id
+        """)
+        result = await self.db.execute(sql, {"ids": history_ids})
+        aggregates = {row["selection_id"]: dict(row) for row in result.mappings().all()}
+
+        # Fetch top stocks for each selection_id (top 5 by score)
+        sql_top = text("""
+            SELECT
+                sr.selection_id,
+                sr.ts_code,
+                split_part(sr.ts_code, '.', 1) AS code,
+                s.name AS stock_name,
+                sr.trade_date,
+                sr.score
+            FROM selection_results sr
+            LEFT JOIN stocks s ON s.ts_code = sr.ts_code
+            WHERE sr.selection_id = ANY(:ids)
+            AND sr.score IS NOT NULL
+            ORDER BY sr.selection_id, sr.score DESC
+        """)
+        top_rows = (await self.db.execute(sql_top, {"ids": history_ids})).mappings().all()
+
+        # Organize top stocks by selection_id
+        top_by_selection: dict[str, list[dict[str, Any]]] = {}
+        for row in top_rows:
+            sel_id = row["selection_id"]
+            if sel_id not in top_by_selection:
+                top_by_selection[sel_id] = []
+            if len(top_by_selection[sel_id]) < 5:
+                top_by_selection[sel_id].append({
+                    "selection_id": sel_id,
+                    "ts_code": row["ts_code"],
+                    "code": row["code"],
+                    "stock_name": row["stock_name"],
+                    "trade_date": row["trade_date"],
+                    "date": row["trade_date"],
+                    "score": float(row["score"] or 0),
+                    "signal": "hold",
+                    "reason_summary": None,
+                })
+
+        # Build response items
+        comparison_items: list[dict[str, Any]] = []
+        for sel_id in history_ids:
+            agg = aggregates.get(sel_id)
+            if not agg:
+                continue
+            comparison_items.append({
+                "history_id": sel_id,
+                "trade_date": agg["trade_date"],
+                "total": int(agg["total"]),
+                "avg_score": round(float(agg["avg_score"] or 0), 4),
+                "top_stocks": top_by_selection.get(sel_id, []),
+            })
+
+        return comparison_items

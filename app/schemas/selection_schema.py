@@ -284,3 +284,29 @@ class ScreeningHistoryResponse(BaseModel):
     message: str = "OK"
     data: ScreeningHistoryData
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ScreeningComparisonRequest(BaseModel):
+    """Request to compare multiple screening history results."""
+
+    history_ids: list[str] = Field(min_length=2, max_length=4)
+
+
+class ScreeningComparisonItem(BaseModel):
+    """One result set in a comparison."""
+
+    history_id: str
+    trade_date: str | None
+    total: int
+    avg_score: float | None
+    top_stocks: list[SelectionHistoryItem] = Field(default_factory=list)
+
+
+class ScreeningComparisonResponse(BaseModel):
+    """Response for screening comparison."""
+
+    success: bool = True
+    code: str = "SUCCESS"
+    message: str = "OK"
+    data: list[ScreeningComparisonItem] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)

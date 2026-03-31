@@ -21,6 +21,8 @@ from app.schemas.selection_schema import (
     SelectionResponse,
     ScreeningTemplate,
     ScreeningTemplateListResponse,
+    ScreeningComparisonRequest,
+    ScreeningComparisonResponse,
 )
 from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
@@ -198,3 +200,15 @@ async def get_screening_history(
     return ScreeningHistoryResponse(
         data=ScreeningHistoryData(trade_date=date, limit=limit, items=items, total=len(items))
     )
+
+
+@router.post("/screening/compare", response_model=ScreeningComparisonResponse)
+async def compare_screening_results(
+    request: ScreeningComparisonRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningComparisonResponse:
+    """Compare multiple screening history result sets."""
+    service = SelectionService(db)
+    results = await service.compare_results(request.history_ids)
+    return ScreeningComparisonResponse(data=results)
