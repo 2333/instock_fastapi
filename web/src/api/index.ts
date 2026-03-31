@@ -255,7 +255,11 @@ export const marketApi = {
 export const attentionApi = {
   getList: () => api.get('/attention') as Promise<any>,
 
-  add: (code: string) => api.post('/attention', { code }) as Promise<any>,
+  add: (code: string, group?: string, notes?: string, alertConditions?: Record<string, any>) =>
+    api.post('/attention', { code, group, notes, alert_conditions: alertConditions }) as Promise<any>,
+
+  update: (id: number, updates: { group?: string; notes?: string; alert_conditions?: Record<string, any> }) =>
+    api.put(`/attention/${id}`, updates) as Promise<any>,
 
   remove: (code: string) => api.delete(`/attention/${code}`) as Promise<any>,
 }
