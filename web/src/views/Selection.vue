@@ -23,6 +23,29 @@
         class="criteria-panel"
         :style="{ width: `${criteriaPanelWidth}px` }"
       >
+        <div v-if="!templatesCollapsed" class="panel-section templates-section">
+          <div class="section-heading">
+            <h3>快捷模板</h3>
+            <p class="section-hint">一键应用常用筛选组合</p>
+          </div>
+          <div v-if="templatesLoading" class="templates-loading">加载中...</div>
+          <div v-else class="templates-grid">
+            <button
+              v-for="tpl in templates"
+              :key="tpl.id"
+              class="template-card"
+              @click="applyTemplate(tpl)"
+            >
+              <span class="template-icon">{{ tpl.icon }}</span>
+              <span class="template-name">{{ tpl.name }}</span>
+              <span class="template-desc">{{ tpl.description }}</span>
+            </button>
+          </div>
+          <button class="templates-toggle" @click="templatesCollapsed = true">收起模板</button>
+        </div>
+        <div v-else class="templates-collapsed-bar">
+          <button class="btn btn-small" @click="templatesCollapsed = false">展开快捷模板</button>
+        </div>
         <div class="panel-section">
           <div class="section-heading">
             <h3>当前可用筛选</h3>
@@ -275,8 +298,12 @@ const screeningSummary = ref({
 const criteriaPanelRef = ref<HTMLElement | null>(null)
 const criteriaCollapsed = ref(false)
 const myConditions = ref<Array<{ id: number; name: string; category: string; params: Record<string, any> }>>([])
+const templates = ref<Array<{ id: string; name: string; description: string; icon: string; filters: Record<string, any> }>>([])
+const templatesLoading = ref(false)
+const templatesCollapsed = ref(false)
 const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
 const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
+const TEMPLATES_COLLAPSED_KEY = 'instock_templates_collapsed'
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 const { panelWidth: criteriaPanelWidth, hydrateWidth: hydrateCriteriaWidth, startResize: startCriteriaResize } = useResizablePanel({
   panelRef: criteriaPanelRef,
@@ -477,6 +504,27 @@ const fetchMyConditions = async () => {
   }
 }
 
+const fetchTemplates = async () => {
+  templatesLoading.value = true
+  try {
+    const response = await selectionApi.getTemplates()
+    templates.value = (response?.data || []).map((tpl: any) => ({
+      ...tpl,
+      filters: tpl.filters || {},
+    }))
+  } catch (e) {
+    templates.value = []
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+const applyTemplate = (tpl: { id: string; name: string; filters: Record<string, any> }) => {
+  // Merge template filters into criteria, overriding existing values
+  Object.assign(criteria, tpl.filters)
+  showNotification?.('info', `已应用模板：${tpl.name}`)
+}
+
 const loadSavedCondition = (cond: { id: number; name: string; params: Record<string, any> }) => {
   // 加载参数到criteria
   const canonical = canonicalFilterKeys.reduce<Record<string, any>>((acc, key) => {
@@ -520,9 +568,11 @@ onMounted(async () => {
     fetchMyConditions(),
     fetchScreeningMetadata(),
     fetchResults(),
+    fetchTemplates(),
   ])
   hydrateCriteriaWidth()
   criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
+  templatesCollapsed.value = window.localStorage.getItem(TEMPLATES_COLLAPSED_KEY) === '1'
 })
 
 </script>
@@ -648,6 +698,89 @@ onMounted(async () => {
     font-weight: 600;
     color: rgba(255, 255, 255, 0.8);
   }
+}
+
+.templates-section {
+  background: rgba(41, 98, 255, 0.06);
+  border: 1px solid rgba(41, 98, 255, 0.15);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+
+  .templates-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .template-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: rgba(41, 98, 255, 0.15);
+      border-color: rgba(41, 98, 255, 0.35);
+    }
+
+    .template-icon {
+      font-size: 20px;
+      margin-bottom: 2px;
+    }
+
+    .template-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .template-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.5);
+      line-height: 1.4;
+    }
+  }
+
+  .templates-loading {
+    text-align: center;
+    padding: 24px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+  }
+
+  .templates-toggle {
+    width: 100%;
+    padding: 8px;
+    background: transparent;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+  }
+}
+
+.templates-collapsed-bar {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: rgba(41, 98, 255, 0.06);
+  border: 1px solid rgba(41, 98, 255, 0.15);
+  border-radius: 12px;
+  text-align: center;
 }
 
 .section-heading {

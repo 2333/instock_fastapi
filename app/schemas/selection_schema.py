@@ -247,6 +247,26 @@ class ScreeningRunResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ScreeningTemplate(BaseModel):
+    """Predefined screening template for quick actions."""
+
+    id: str
+    name: str
+    description: str
+    icon: str
+    filters: dict[str, Any]
+
+
+class ScreeningTemplateListResponse(BaseModel):
+    """Response for GET /selection/templates."""
+
+    success: bool = True
+    code: str = "SUCCESS"
+    message: str = "OK"
+    data: list[ScreeningTemplate] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ScreeningHistoryData(BaseModel):
     """Structured payload for screening history queries."""
 
