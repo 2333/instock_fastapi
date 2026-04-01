@@ -311,6 +311,7 @@
 1. `P0b-01` 首页 4 卡片联调验收 — 当前最主要收尾项
 2. 非功能性验证 — 扫描性能 / 数据稳定性 / 结果正确性抽查
    - 执行入口已确认：可复用 `tests/conftest.py` 的 ASGI client 与现有 router 测试夹具，先补一个最小筛选接口基线测试/脚本，再记录结果
+   - 建议固定 quick suite：`pytest tests/test_screening_baseline.py tests/test_api.py::TestMarketTaskHealthAPI tests/test_selection_market_services.py -q`，覆盖三块非功能验收基座的快速回归
 3. `P0b-06` 形态筛选条件集成 — Phase 0b 剩余明确功能项
 
 **然后进入 Phase 1：**
