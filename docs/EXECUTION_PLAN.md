@@ -186,12 +186,15 @@
 
 #### P1-02：回测报告结构化 [-]
 - **文件**：`app/services/backtest_service.py`, `app/schemas/`
-- **现状**：回测引擎有基础实现，需确认输出是否完整
+- **现状**：基础结构化报告已落地，包含 performance / benchmark / risk / equity_curve / trades，且已覆盖兼容旧 payload 的回退逻辑
+- **已完成**：
+  - [x] 输出 schema 化 JSON 结构（`BacktestReport` / `BacktestBenchmarkSummary` / `BacktestRiskSummary`）
+  - [x] 报告包含：收益曲线、最大回撤、胜率、盈亏比、年化收益率
+  - [x] 风险摘要包含：最大连续亏损天数、最大单日损失、风险等级、风险说明
+  - [x] 已有测试覆盖：`tests/test_backtest_report_structure.py`
 - **待做**：
-  - [ ] 确认回测报告输出包含：收益曲线、最大回撤、胜率、盈亏比、年化收益率
-  - [ ] 增加基准对比（沪深 300 / 上证指数）
-  - [ ] 输出 schema 化的 JSON 结构（为未来 AI 解读预留）
-  - [ ] 关键风险摘要（最大连续亏损天数、最大单日损失等）
+  - [ ] 将代理基准升级为真实指数基准（沪深 300 / 上证指数）
+  - [ ] 继续完善前端回测结果页的结构化展示与解释文案
 - **验收**：回测结果页展示完整的报告，数据可信且可解释
 
 #### P1-03：策略参数对比 [-]
