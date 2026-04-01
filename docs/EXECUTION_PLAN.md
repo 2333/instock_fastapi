@@ -137,6 +137,9 @@
 - **已验证**：
   - [x] `tests/test_market_summary.py` 已覆盖 `GET /api/v1/market/summary`
   - [x] `tests/test_selection_today_summary.py` 已覆盖 `GET /api/v1/selection/today-summary`
+  - [x] `web/src/views/Dashboard.vue` 已直接消费 `marketApi.getSummary()`、`selectionApi.getTodaySummary()`、`backtestApi.getBacktestHistory()`、`attentionApi.getList()`
+- **当前缺口**：
+  - [ ] 缺少前端工作台级联调 / E2E 验收入口；当前验证主要停留在 API 和静态代码接线层
 - **验收**：打开首页能看到 4 张卡片，每张卡片数据来自真实 API，点击可跳转到对应功能页
 
 #### P0b-02：筛选条件保存/加载 [x]
