@@ -271,7 +271,8 @@
 ### 待补充
 - [ ] fund_flow_service 测试
 - [ ] indicator_service 测试
-- [ ] 选股引擎端到端测试（真实条件 → 真实结果 → 验证证据正确性）
+- [-] 选股引擎端到端测试（真实条件 → 真实结果 → 验证证据正确性）
+  - 已新增最小基线：`tests/test_screening_baseline.py`，对 `/api/v1/screening/run` 连续执行 3 次并记录耗时 / 返回数量 / trade_date 一致性
 - [ ] 回测报告结构测试
 - [ ] 前端 E2E 测试（至少覆盖扫描 → 结果 → 详情主线）
 
