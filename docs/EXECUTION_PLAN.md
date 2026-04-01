@@ -96,7 +96,7 @@
 
 | 时间 | 范围 | 结果 | 备注 |
 |------|------|------|------|
-| 2026-04-02 05:58 CST | quick suite（screening baseline + task health + selection market services） | 运行中 | 作为三块非功能验收基座的首次组合回归 |
+| 2026-04-02 05:58 CST | quick suite（screening baseline + task health + selection market services） | 运行中 | 首次组合回归，目标覆盖 13 项测试，作为三块非功能验收基座的首条正式记录 |
 
 > 2026-04-02 heartbeat 备注：仓库内暂未发现现成的性能 / 压测 / 稳定性专项脚本或验收说明；当前“待验证”不是单纯还没执行，而是**验证资产本身尚未建立**。
 >
