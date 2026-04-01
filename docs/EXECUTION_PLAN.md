@@ -144,12 +144,16 @@
   - [x] 本轮 heartbeat 已清理 `__pycache__` 并重新验证，`grep -R --exclude-dir='__pycache__' "selection_service_with_provider" app tests` 无结果
 - **验收**：`grep -R --exclude-dir='__pycache__' "selection_service_with_provider" app tests` 无结果
 
-#### P0b-06：形态筛选条件集成 [ ]
-- **文件**：`app/schemas/selection_schema.py`（line 92-98 标注 "coming soon"）
+#### P0b-06：形态筛选条件集成 [-]
+- **文件**：`app/schemas/selection_schema.py`, `app/services/selection_service.py`, `web/src/views/Selection.vue`
+- **现状**：单形态筛选链路已打通，前端已提供形态下拉，后端 schema / metadata / SQL 筛选 / 命中证据已支持 `pattern`
+- **已完成**：
+  - [x] 在筛选条件中支持单形态过滤（如 `HAMMER`、`HEAD_SHOULDERS`、`DOUBLE_BOTTOM`）
+  - [x] 前端筛选面板已增加形态条件选项
+  - [x] 今日摘要中已返回保存条件里的 `pattern`
 - **待做**：
-  - [ ] 在筛选条件中支持形态过滤（如"出现双底"、"头肩底"）
-  - [ ] 将 `pattern_service` 的形态结果作为筛选条件
-  - [ ] 前端筛选面板增加形态条件选项
+  - [ ] 评估是否需要支持多形态组合、形态分组或更细的 pattern_service 结果映射
+  - [ ] 补充更贴近 PRD 文案的端到端验收说明（如“MACD 金叉 + 头肩底”组合演示）
 - **验收**：用户可选择"MACD 金叉 + 头肩底形态"组合条件进行扫描
 
 ---
