@@ -133,12 +133,13 @@
 - `selection_router GET /screening/history` + `POST /screening/compare`
 - 前端已集成历史查看和对比功能
 
-#### P0b-05：清理废弃代码 [ ]
+#### P0b-05：清理废弃代码 [x]
 - **文件**：`app/services/selection_service_with_provider.py`
-- **待做**：
-  - [ ] 确认无引用后删除 `selection_service_with_provider.py`
-  - [ ] 清理相关 import
-- **验收**：`grep -r "selection_service_with_provider" app/` 无结果
+- **已完成**：
+  - [x] 已删除 `selection_service_with_provider.py`
+  - [x] 源码 / 测试中的相关 import 已清理
+  - [x] 本轮 heartbeat 已清理 `__pycache__` 并重新验证，`grep -R --exclude-dir='__pycache__' "selection_service_with_provider" app tests` 无结果
+- **验收**：`grep -R --exclude-dir='__pycache__' "selection_service_with_provider" app tests` 无结果
 
 #### P0b-06：形态筛选条件集成 [ ]
 - **文件**：`app/schemas/selection_schema.py`（line 92-98 标注 "coming soon"）
@@ -153,7 +154,7 @@
 ## Phase 0 整体 DoD（进入 Phase 1 的门槛）
 
 - [x] 扫描 → 筛选 → 验证 主线完整可用
-- [ ] 首页市场概览 4 卡片可展示
+- [-] 首页市场概览 4 卡片可展示
 - [x] 筛选条件可保存/加载/复用
 - [x] 关注列表可从扫描结果中添加
 - [ ] 全市场扫描响应时间 < 30s
@@ -274,9 +275,9 @@
 ## 下一步执行建议（优先级排序）
 
 **立即可做（Phase 0b 收尾）：**
-1. `P0b-01` 首页 4 卡片 — 这是 Phase 0 → Phase 1 的唯一阻塞项
-2. `P0b-05` 清理废弃代码 — 10 分钟小任务
-3. 非功能性验证 — 扫描性能 / 数据稳定性 / 结果正确性抽查
+1. `P0b-01` 首页 4 卡片联调验收 — 当前最主要收尾项
+2. 非功能性验证 — 扫描性能 / 数据稳定性 / 结果正确性抽查
+3. `P0b-06` 形态筛选条件集成 — Phase 0b 剩余明确功能项
 
 **然后进入 Phase 1：**
 4. `P1-01` 筛选条件 → 策略打通 — Phase 1 的起手式
