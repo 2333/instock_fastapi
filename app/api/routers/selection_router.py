@@ -26,7 +26,6 @@ from app.schemas.selection_schema import (
 )
 from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
-from app.services.selection_service_with_provider import SelectionServiceWithProvider
 
 router = APIRouter()
 
@@ -140,7 +139,7 @@ async def run_selection(
     provider: MarketDataProvider = Depends(get_provider),
 ) -> SelectionResponse:
     """Selection endpoint using provider-based service."""
-    service = SelectionServiceWithProvider(db=db, provider=provider)
+    service = SelectionService(db=db, provider=provider)
     conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
     if request.scope.market and "market" not in conditions:
         conditions["market"] = request.scope.market
@@ -157,7 +156,7 @@ async def run_screening(
     provider: MarketDataProvider = Depends(get_provider),
 ) -> ScreeningRunResponse:
     """Main screening endpoint with provider-based service."""
-    service = SelectionServiceWithProvider(db=db, provider=provider)
+    service = SelectionService(db=db, provider=provider)
     conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
     if request.scope.market and "market" not in conditions:
         conditions["market"] = request.scope.market
