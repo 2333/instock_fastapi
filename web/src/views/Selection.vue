@@ -292,6 +292,9 @@
                     <button class="detail-link" @click.stop="openStockDetail(stock)">
                       查看验证
                     </button>
+                    <button class="watchlist-link" @click.stop="addToWatchlist(stock.code)">
+                      加入关注
+                    </button>
                   </td>
                   <td>{{ stock.date || stock.trade_date }}</td>
                 </tr>
@@ -354,7 +357,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { selectionApi } from '@/api'
+import { attentionApi, selectionApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface ScreeningEvidenceItem {
@@ -553,6 +556,17 @@ const openStockDetail = (stock: StockResult) => {
       screening_date: stock.trade_date || stock.date || '',
     },
   })
+}
+
+const addToWatchlist = async (code: string) => {
+  if (!code) return
+  try {
+    await attentionApi.add(code, 'watch')
+    showNotification?.('success', `已加入关注: ${code}`)
+  } catch (e) {
+    console.error('Failed to add to watchlist:', e)
+    showNotification?.('error', '加入关注失败')
+  }
 }
 
 const fetchResults = async () => {
@@ -1311,6 +1325,21 @@ onMounted(async () => {
   color: #9ab7ff;
   font-size: 12px;
   cursor: pointer;
+  margin-right: 6px;
+}
+
+.watchlist-link {
+  padding: 6px 10px;
+  border: 1px solid rgba(0, 200, 83, 0.35);
+  border-radius: 999px;
+  background: rgba(0, 200, 83, 0.1);
+  color: #69F0AE;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(0, 200, 83, 0.2);
+  }
 }
 
 .macd-badge {
