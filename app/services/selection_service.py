@@ -3,10 +3,19 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.providers.market_data_provider import MarketDataProvider
+
 
 class SelectionService:
-    def __init__(self, db: AsyncSession | None = None):
+    """Unified selection service with optional provider support.
+
+    If provider is supplied, screening uses MarketDataProvider;
+    otherwise falls back to direct SQL queries.
+    """
+
+    def __init__(self, db: AsyncSession | None = None, provider: MarketDataProvider | None = None):
         self.db = db
+        self.provider = provider
 
     @staticmethod
     def get_conditions() -> dict[str, Any]:
@@ -379,8 +388,25 @@ class SelectionService:
     async def run_selection(
         self, conditions: dict[str, Any], date: str | None, limit: int = 300
     ) -> list[dict]:
-        if not self.db:
-            return []
+        # If provider is available, delegate to provider-based implementation
+        if self.provider:
+            try:
+                results = await self._run_selection_with_provider(conditions, date, limit)
+                if results:
+                    return results
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Provider-based selection failed, falling back to SQL: %s", exc
+                )
+
+        # SQL-based implementation (default fallback)
+        return await self._run_selection_with_sql(conditions, date, limit)
+
+    async def _run_selection_with_sql(
+        self, conditions: dict[str, Any], date: str | None, limit: int = 300
+    ) -> list[dict]:
+        """Execute screening using direct SQL queries."""
 
         trade_date = await self._resolve_trade_date(date)
         if not trade_date:
@@ -644,3 +670,192 @@ class SelectionService:
             })
 
         return comparison_items
+
+    async def _run_selection_with_provider(
+        self, conditions: dict[str, Any], date: str | None, limit: int = 300
+    ) -> list[dict]:
+        """Execute screening using MarketDataProvider.
+
+        Falls back to SQL if provider is not available or returns empty.
+        """
+        if not self.provider:
+            return []
+
+        import logging
+        import pandas as pd
+        from datetime import date as date_cls
+
+        logger = logging.getLogger(__name__)
+
+        price_min = conditions.get("priceMin")
+        price_max = conditions.get("priceMax")
+        change_min = conditions.get("changeMin")
+        change_max = conditions.get("changeMax")
+        market = conditions.get("market")
+        rsi_min = conditions.get("rsiMin")
+        rsi_max = conditions.get("rsiMax")
+        macd_bullish = conditions.get("macdBullish", False)
+        macd_bearish = conditions.get("macdBearish", False)
+
+        # Resolve target date
+        if date:
+            target_date = date_cls.fromisoformat(date)
+        else:
+            target_date = await self.provider.get_latest_trade_date()
+
+        # Get stock list (with market filter)
+        markets_map = {
+            "sh": ["沪市"],
+            "sz": ["深市"],
+            "创业板": ["创业板"],
+            "科创板": ["科创板"],
+        }
+        market_filters = markets_map.get(market) if market else None
+        stock_list_df = await self.provider.get_stock_list(
+            markets=market_filters,
+            active_only=True,
+        )
+        if stock_list_df.empty:
+            return []
+
+        codes = stock_list_df["code"].tolist()
+
+        # Get daily bars
+        bars_df = await self.provider.get_daily_bars(
+            codes=codes,
+            start_date=target_date,
+            end_date=target_date,
+            adjusted=True,
+        )
+        if bars_df.empty:
+            return []
+
+        # Apply price/change filters
+        filtered = bars_df.copy()
+        if price_min is not None:
+            filtered = filtered[filtered["close"] >= price_min]
+        if price_max is not None:
+            filtered = filtered[filtered["close"] <= price_max]
+        if change_min is not None:
+            filtered = filtered[filtered["pct_chg"] >= change_min]
+        if change_max is not None:
+            filtered = filtered[filtered["pct_chg"] <= change_max]
+
+        if filtered.empty:
+            return []
+
+        # If no indicator filters needed, return basic results
+        if not (rsi_min or rsi_max or macd_bullish or macd_bearish):
+            return self._format_provider_results(filtered, conditions, target_date, limit)
+
+        # Get technical indicators for filtered stocks
+        try:
+            final_codes = filtered["code"].unique().tolist()
+            technicals_df = await self.provider.get_technicals(
+                code=None,
+                indicators=["rsi", "macd", "macd_signal"],
+                start_date=target_date,
+                end_date=target_date,
+            )
+            if not technicals_df.empty:
+                # Merge and filter by indicators
+                merged = filtered.merge(
+                    technicals_df[["code", "rsi", "macd", "macd_signal"]],
+                    on="code",
+                    how="left",
+                )
+                if rsi_min is not None:
+                    merged = merged[(merged["rsi"].notna()) & (merged["rsi"] >= rsi_min)]
+                if rsi_max is not None:
+                    merged = merged[(merged["rsi"].notna()) & (merged["rsi"] <= rsi_max)]
+                if macd_bullish:
+                    merged = merged[
+                        (merged["macd"].notna())
+                        & (merged["macd_signal"].notna())
+                        & (merged["macd"] > merged["macd_signal"])
+                    ]
+                if macd_bearish:
+                    merged = merged[
+                        (merged["macd"].notna())
+                        & (merged["macd_signal"].notna())
+                        & (merged["macd"] < merged["macd_signal"])
+                    ]
+                return self._format_provider_results(merged, conditions, target_date, limit)
+        except Exception as exc:
+            logger.warning("Indicator fetch via provider failed: %s", exc)
+
+        return self._format_provider_results(filtered, conditions, target_date, limit)
+
+    def _format_provider_results(
+        self, df, conditions: dict[str, Any], trade_date, limit: int
+    ) -> list[dict]:
+        """Format provider DataFrame results into standard screening output."""
+        results = []
+        for _, row in df.head(limit).iterrows():
+            pct = float(row.get("pct_chg", 0))
+            close = float(row.get("close", 0))
+            amount = float(row.get("amount", 0))
+            ts_code = str(row.get("ts_code", row.get("code", "")))
+            code = str(row.get("code", ts_code.split(".")[0]))
+            stock_name = str(row.get("stock_name", row.get("name", "")))
+            date_str = str(trade_date).replace("-", "")
+
+            # Build evidence
+            evidence = []
+            if conditions.get("priceMin") is not None:
+                evidence.append({
+                    "key": "close", "label": "Close",
+                    "value": close, "operator": ">=",
+                    "condition": float(conditions["priceMin"]),
+                    "matched": close >= float(conditions["priceMin"]),
+                })
+            if conditions.get("priceMax") is not None:
+                evidence.append({
+                    "key": "close", "label": "Close",
+                    "value": close, "operator": "<=",
+                    "condition": float(conditions["priceMax"]),
+                    "matched": close <= float(conditions["priceMax"]),
+                })
+            if conditions.get("changeMin") is not None:
+                evidence.append({
+                    "key": "change_rate", "label": "Daily change",
+                    "value": round(pct, 4), "operator": ">=",
+                    "condition": float(conditions["changeMin"]),
+                    "matched": pct >= float(conditions["changeMin"]),
+                })
+            if conditions.get("changeMax") is not None:
+                evidence.append({
+                    "key": "change_rate", "label": "Daily change",
+                    "value": round(pct, 4), "operator": "<=",
+                    "condition": float(conditions["changeMax"]),
+                    "matched": pct <= float(conditions["changeMax"]),
+                })
+
+            if evidence:
+                summary = "; ".join(
+                    f"{e['label']} {e['operator']} {e['condition']}" for e in evidence
+                )
+            else:
+                summary = f"Included in screening (pct_chg={pct:.2f}%)"
+
+            score = round(pct * 5 + min(amount / 1e8, 20), 4)
+            signal = "buy" if pct >= 2 else ("sell" if pct <= -2 else "hold")
+
+            results.append({
+                "ts_code": ts_code,
+                "code": code,
+                "stock_name": stock_name,
+                "score": score,
+                "signal": signal,
+                "trade_date": date_str,
+                "date": date_str,
+                "close": close,
+                "change_rate": pct,
+                "amount": amount,
+                "reason_summary": summary,
+                "evidence": evidence,
+                "reason": {"summary": summary, "evidence": evidence},
+            })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results
