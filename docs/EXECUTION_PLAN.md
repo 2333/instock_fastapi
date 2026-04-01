@@ -116,6 +116,9 @@
 - **待做**：
   - [ ] 实际联调确认 4 张卡片在真实登录态/真实数据下展示稳定
   - [ ] 校正 Dashboard 文案与 PRD 验收描述，避免计划文档继续落后于代码
+- **已验证**：
+  - [x] `tests/test_market_summary.py` 已覆盖 `GET /api/v1/market/summary`
+  - [x] `tests/test_selection_today_summary.py` 已覆盖 `GET /api/v1/selection/today-summary`
 - **验收**：打开首页能看到 4 张卡片，每张卡片数据来自真实 API，点击可跳转到对应功能页
 
 #### P0b-02：筛选条件保存/加载 [x]
