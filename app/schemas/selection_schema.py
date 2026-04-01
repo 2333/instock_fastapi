@@ -47,7 +47,10 @@ class ScreeningScope(BaseModel):
 
 
 class ScreeningEvidenceItem(BaseModel):
-    """Minimal structured evidence attached to one screening result."""
+    """Structured hit evidence per PRD Section 2.2.
+
+    Each item explains why one specific condition was satisfied.
+    """
 
     key: str
     label: str
@@ -55,6 +58,9 @@ class ScreeningEvidenceItem(BaseModel):
     operator: str | None = None
     condition: str | int | float | bool | None = None
     matched: bool = True
+    condition_id: str | None = Field(None, description="Machine-readable condition identifier")
+    condition_name: str | None = Field(None, description="Human-readable condition name")
+    description: str | None = Field(None, description="Condition explanation")
 
 
 class ScreeningReason(BaseModel):

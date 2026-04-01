@@ -209,6 +209,9 @@ class SelectionService:
         operator: str,
         condition: Any,
         actual_value: Any,
+        condition_id: str | None = None,
+        condition_name: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         return {
             "key": key,
@@ -219,6 +222,9 @@ class SelectionService:
             "operator": operator,
             "condition": SelectionService._format_condition_value(key, condition),
             "matched": True,
+            "condition_id": condition_id,
+            "condition_name": condition_name or label,
+            "description": description or f"{label} {operator} {condition}",
         }
 
     def _build_reason(self, conditions: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
@@ -240,6 +246,9 @@ class SelectionService:
                     operator=">=",
                     condition=value,
                     actual_value=close,
+                    condition_id="price_min",
+                    condition_name="最低价格",
+                    description=f"收盘价不低于 {value:.2f}",
                 )
             )
         if conditions.get("priceMax") is not None:
@@ -252,6 +261,9 @@ class SelectionService:
                     operator="<=",
                     condition=value,
                     actual_value=close,
+                    condition_id="price_max",
+                    condition_name="最高价格",
+                    description=f"收盘价不高于 {value:.2f}",
                 )
             )
         if conditions.get("changeMin") is not None:
@@ -264,6 +276,9 @@ class SelectionService:
                     operator=">=",
                     condition=value,
                     actual_value=pct,
+                    condition_id="change_min",
+                    condition_name="最小涨跌幅",
+                    description=f"日涨跌幅不低于 {value:.2f}%",
                 )
             )
         if conditions.get("changeMax") is not None:
@@ -276,6 +291,9 @@ class SelectionService:
                     operator="<=",
                     condition=value,
                     actual_value=pct,
+                    condition_id="change_max",
+                    condition_name="最大涨跌幅",
+                    description=f"日涨跌幅不高于 {value:.2f}%",
                 )
             )
         if conditions.get("market"):
@@ -288,6 +306,10 @@ class SelectionService:
                     "operator": "=",
                     "condition": str(conditions["market"]),
                     "matched": market_value == str(conditions["market"]),
+                    "condition_id": "market",
+                    "condition_id": "market",
+                    "condition_name": "市场范围",
+                    "description": f"股票属于 {conditions['market']} 市场",
                 }
             )
 
@@ -305,6 +327,9 @@ class SelectionService:
                         operator=">=",
                         condition=value,
                         actual_value=rsi,
+                        condition_id="rsi_min",
+                        condition_name="RSI 下限",
+                        description=f"RSI 不低于 {value:.0f}",
                     )
                 )
                 if matched:
@@ -319,6 +344,9 @@ class SelectionService:
                         operator="<=",
                         condition=value,
                         actual_value=rsi,
+                        condition_id="rsi_max",
+                        condition_name="RSI 上限",
+                        description=f"RSI 不高于 {value:.0f}",
                     )
                 )
                 if matched:
@@ -338,6 +366,9 @@ class SelectionService:
                     "operator": "> signal (bullish)",
                     "condition": True,
                     "matched": matched,
+                    "condition_id": "macd_bullish",
+                    "condition_name": "MACD 看涨",
+                    "description": "MACD 线位于信号线上方（金叉倾向）",
                 }
             )
             if matched:
@@ -353,6 +384,9 @@ class SelectionService:
                     "operator": "< signal (bearish)",
                     "condition": True,
                     "matched": matched,
+                    "condition_id": "macd_bearish",
+                    "condition_name": "MACD 看跌",
+                    "description": "MACD 线位于信号线下方（死叉倾向）",
                 }
             )
             if matched:
