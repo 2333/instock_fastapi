@@ -90,7 +90,7 @@
 |------|------|------|
 | 全市场扫描响应时间 | < 30s（5000 股 × 3 条件） | [ ] 待验证 |
 | 数据更新稳定性 | 连续 5 个交易日 100% | [-] 已有验证基座，待形成连续记录 |
-| 扫描结果正确性 | 抽查 10 只命中股票，证据与实际数据一致 | [ ] 待验证 |
+| 扫描结果正确性 | 抽查 10 只命中股票，证据与实际数据一致 | [-] 已有验证基座，待形成抽查记录 |
 
 > 2026-04-02 heartbeat 备注：仓库内暂未发现现成的性能 / 压测 / 稳定性专项脚本或验收说明；当前“待验证”不是单纯还没执行，而是**验证资产本身尚未建立**。
 >
@@ -98,6 +98,7 @@
 > 1. **扫描性能**：从仓库根目录准备一组固定筛选条件（例如 `priceMin + changeMin + macdBullish`），对主筛选接口连续执行 3 次，记录总耗时 / 返回数量 / trade_date，以最慢一次作为基线。
 > 2. **数据更新稳定性**：基于 `market/task-health` 与 scheduler 相关表，连续抽查最近 5 个交易日的 latest trade_date 是否与基准交易日一致，并记录异常数据集。
 > 3. **结果正确性**：从一次真实筛选结果中抽样 10 只股票，逐只比对返回 evidence 与 daily_bars / indicators / patterns 中的实际值是否一致。
+> 已确认可复用基座：`tests/test_selection_market_services.py`（指标/筛选证据）、`tests/test_selection_schema.py`（结构化 reason/evidence）、`tests/test_selection_today_summary.py`（pattern 命中与摘要口径）、`tests/test_indicator_pattern_quality.py`（指标/形态计算质量）。下一步不是从零定义正确性，而是把这些自动化校验补成“10 只真实样本人工抽查记录”。
 > 4. **输出物**：把验证过程、样本、结果和结论回写到 `docs/EXECUTION_PLAN.md` 或单独验收记录中，再决定是否通过门槛。
 > 已确认可复用基座：`/api/v1/market/task-health`、`tests/test_api.py::TestMarketTaskHealthAPI`、`tests/test_scheduler.py`。下一步不是从零设计稳定性检查，而是把“单次健康判断”扩成“最近 5 个交易日连续记录”。
 
