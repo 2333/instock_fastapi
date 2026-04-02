@@ -143,7 +143,10 @@
   - [ ] `web/package.json` 当前仅提供 `dev / build / typecheck / lint / preview`，未发现 Playwright / Cypress / Vitest 等前端联调测试资产
 - **当前判断**：
   - [x] 本地手工联调路径具备基础前提：后端 `.env` 已提供本地数据库/API 运行配置，前端无额外 `.env` 依赖
-  - [ ] 因此 Dashboard 收尾更适合优先走“手工联调记录”而不是先补测试框架
+  - [x] 本地运行环境已具备最小条件：后端 `.venv` 可用，前端 `node_modules` / `package-lock.json` / `npm` 均已就绪
+  - [x] 因此 Dashboard 收尾更适合优先走“手工联调记录”而不是先补测试框架
+- **下一步动作**：
+  - [ ] 直接启动本地前后端，执行一次 Dashboard 手工联调并记录结果
 - **验收**：打开首页能看到 4 张卡片，每张卡片数据来自真实 API，点击可跳转到对应功能页
 
 #### P0b-02：筛选条件保存/加载 [x]
