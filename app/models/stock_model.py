@@ -428,3 +428,20 @@ class NorthBoundFund(Base):
     sz_net_inflow: Mapped[Decimal | None] = mapped_column(Numeric(30, 2), nullable=True)
     total_net_inflow: Mapped[Decimal | None] = mapped_column(Numeric(30, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BacktestTask(Base):
+    __tablename__ = "backtest_tasks"
+    __table_args__ = (Index("ix_backtest_tasks_user_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    backtest_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
