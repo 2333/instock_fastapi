@@ -10,6 +10,16 @@
           {{ criteriaCollapsed ? '展开条件' : '收起条件' }}
         </button>
         <button class="btn btn-secondary" @click="saveCriteria">保存条件</button>
+        <button class="btn btn-secondary" @click="saveCurrentStrategy" :disabled="savingStrategy">
+          {{ savingStrategy ? '保存中...' : '保存为策略' }}
+        </button>
+        <button
+          class="btn btn-primary"
+          @click="saveStrategyAndGoBacktest"
+          :disabled="savingStrategy || !hasResults"
+        >
+          {{ savingStrategy ? '保存中...' : '保存并去回测' }}
+        </button>
         <button class="btn btn-primary" @click="runSelection" :disabled="loading">
           {{ loading ? '运行中...' : '开始筛选' }}
         </button>
@@ -156,6 +166,23 @@
               </label>
             </div>
             <p class="field-hint">MACD 柱状图是否为正（看涨）或为负（看跌）</p>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-heading">
+            <h3>形态条件</h3>
+            <p>把 K 线形态纳入筛选，和价格、涨跌幅、指标一起组合使用。</p>
+          </div>
+          <div class="criteria-group">
+            <label>形态</label>
+            <select v-model="criteria.pattern" class="filter-select criteria-select">
+              <option value="">不限形态</option>
+              <option v-for="pattern in patternOptions" :key="pattern.value" :value="pattern.value">
+                {{ pattern.label }}
+              </option>
+            </select>
+            <p class="field-hint">命中后会写入结果证据，例如锤子线、头肩底、双底等。</p>
           </div>
         </div>
 
@@ -357,7 +384,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
-import { attentionApi, selectionApi } from '@/api'
+import { attentionApi, selectionApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface ScreeningEvidenceItem {
@@ -409,6 +436,7 @@ const templates = ref<Array<{ id: string; name: string; description: string; ico
 const templatesLoading = ref(false)
 const templatesCollapsed = ref(false)
 const recentTemplates = ref<Array<{ id: string; name: string; icon: string; filters: Record<string, any> }>>([])
+const savingStrategy = ref(false)
 // Comparison mode state
 const compareMode = ref(false)
 const selectedHistoryIds = ref<Set<string>>(new Set())
@@ -448,6 +476,7 @@ const criteria = reactive({
   rsiMax: null as number | null,
   macdBullish: false,
   macdBearish: false,
+  pattern: '' as string,
   volumeRatioMin: null as number | null,
   volumeRatioMax: null as number | null,
 })
@@ -457,13 +486,29 @@ const canonicalFilterKeys = [
   'changeMin', 'changeMax',
   'market',
   'rsiMin', 'rsiMax',
-  'macdBullish', 'macdBearish'
+  'macdBullish', 'macdBearish',
+  'pattern',
 ] as const
-const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围', 'RSI', 'MACD']
+const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围', 'RSI', 'MACD', '形态']
 const marketLabelMap: Record<string, string> = {
   sh: '沪市',
   sz: '深市',
 }
+const patternOptions = [
+  { label: '锤子线', value: 'HAMMER' },
+  { label: '倒锤子线', value: 'INVERTED_HAMMER' },
+  { label: '十字星', value: 'DOJI' },
+  { label: '看涨吞没', value: 'BULLISH_ENGULFING' },
+  { label: '看跌吞没', value: 'BEARISH_ENGULFING' },
+  { label: '看涨孕线', value: 'BULLISH_HARAMI' },
+  { label: '看跌孕线', value: 'BEARISH_HARAMI' },
+  { label: '头肩底', value: 'INVERSE_HEAD_SHOULDERS' },
+  { label: '头肩顶', value: 'HEAD_SHOULDERS' },
+  { label: '双底', value: 'DOUBLE_BOTTOM' },
+  { label: '双顶', value: 'DOUBLE_TOP' },
+  { label: 'MA 金叉', value: 'MA_GOLDEN_CROSS' },
+  { label: 'MA 死叉', value: 'MA_DEATH_CROSS' },
+]
 const unavailableFilterGroups = [
   { title: '价格扩展', items: ['市值范围'] },
   { title: '涨跌扩展', items: ['周涨跌幅'] },
@@ -485,7 +530,7 @@ const marketOptions = computed(() => {
     : [
         { value: 'sh' as const, label: '沪市' },
         { value: 'sz' as const, label: '深市' },
-      ]
+    ]
 })
 
 const supportedFiltersDescription = computed(() => {
@@ -498,6 +543,7 @@ const supportedFiltersDescription = computed(() => {
             if (item.key === 'market') return '市场范围'
             if (item.key.startsWith('rsi')) return 'RSI'
             if (item.key.startsWith('macd')) return 'MACD'
+            if (item.key === 'pattern') return '形态'
             return item.label
           })
         )
@@ -518,6 +564,11 @@ const sortedResults = computed(() => {
   })
   return sorted
 })
+
+const getTopBacktestStockCode = () => {
+  const topStock = sortedResults.value.find((stock) => String(stock.code || '').trim())
+  return String(topStock?.code || '').trim()
+}
 
 const formatDisplayDate = (value?: string | null) => {
   if (!value) return '-'
@@ -541,6 +592,37 @@ const buildCanonicalFilters = () => {
     }
     return acc
   }, {})
+}
+
+const buildSelectionStrategyParams = () => {
+  const selectionFilters = buildCanonicalFilters()
+  const selectionScope = {
+    market: criteria.market || undefined,
+    limit: 100,
+  }
+
+  return {
+    source: 'selection',
+    template_name: 'selection_bridge',
+    selection_filters: selectionFilters,
+    selection_scope: selectionScope,
+    entry_rules: {
+      mode: 'screening_match',
+      inherits: ['selection_filters', 'selection_scope'],
+      filters: selectionFilters,
+      scope: selectionScope,
+    },
+    exit_rules: {
+      mode: 'configurable',
+      rules: [
+        { name: 'take_profit_pct', label: '止盈百分比', type: 'number' },
+        { name: 'stop_loss_pct', label: '止损百分比', type: 'number' },
+        { name: 'max_hold_days', label: '最大持有天数', type: 'number' },
+      ],
+    },
+    backtest_config: {},
+    strategy_params: {},
+  }
 }
 
 const formatEvidence = (item: ScreeningEvidenceItem) => {
@@ -714,6 +796,53 @@ const saveCriteria = async () => {
   } catch (e) {
     showNotification?.('error', '保存失败')
   }
+}
+
+const saveAsStrategy = async (goToBacktest = false) => {
+  const suggestedName = `筛选策略-${new Date().toLocaleDateString()}`
+  const name = window.prompt('为策略命名：', suggestedName)
+  if (!name?.trim()) return
+
+  savingStrategy.value = true
+  try {
+    const created = await strategyApi.createMyStrategyFromSelection({
+      name: name.trim(),
+      description: '由筛选条件生成的策略模板',
+      params: buildSelectionStrategyParams(),
+      is_active: true,
+    })
+    const savedStrategyId = String(created?.id || '')
+    if (goToBacktest && savedStrategyId) {
+      const stockCode = getTopBacktestStockCode()
+      if (!stockCode) {
+        showNotification?.('warning', '当前没有可带入回测的股票结果，请先运行筛选')
+        return
+      }
+      await router.push({
+        path: '/backtest',
+        query: {
+          saved: savedStrategyId,
+          stock: stockCode,
+        },
+      })
+      showNotification?.('success', `策略已保存，已带着当前结果 Top1(${stockCode}) 进入回测页`)
+      return
+    }
+    showNotification?.('success', '策略已保存，筛选到策略的桥接配置已建立')
+  } catch (e) {
+    console.error('Failed to save strategy from selection:', e)
+    showNotification?.('error', '保存策略失败')
+  } finally {
+    savingStrategy.value = false
+  }
+}
+
+const saveCurrentStrategy = () => {
+  void saveAsStrategy(false)
+}
+
+const saveStrategyAndGoBacktest = () => {
+  void saveAsStrategy(true)
 }
 
 // Comparison functionality

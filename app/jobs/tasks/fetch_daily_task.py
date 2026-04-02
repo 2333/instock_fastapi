@@ -328,6 +328,108 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: list[dict])
     return count
 
 
+async def save_daily_bars_batch(
+    session: AsyncSession,
+    data: dict[str, list[dict]],
+) -> int:
+    """批量保存多只股票的日线数据（来自 fetch_daily_by_date）。
+
+    data: {ts_code: [bar_dict, ...]}
+    """
+    all_values = []
+    for ts_code, bars in data.items():
+        for bar in bars:
+            bar_date = bar.get("date")
+            if not bar_date:
+                continue
+            date_str = bar_date.replace("-", "")
+            try:
+                trade_date_dt = datetime.strptime(bar_date, "%Y-%m-%d").date()
+            except ValueError:
+                trade_date_dt = None
+
+            close = bar.get("close", 0) or 0
+            change = bar.get("change", 0) or 0
+            pre_close = bar.get("pre_close")
+            if pre_close in (None, ""):
+                pre_close = close - change
+
+            all_values.append(
+                {
+                    "ts_code": ts_code,
+                    "trade_date": date_str,
+                    "trade_date_dt": trade_date_dt,
+                    "open": bar.get("open", 0) or 0,
+                    "high": bar.get("high", 0) or 0,
+                    "low": bar.get("low", 0) or 0,
+                    "close": close,
+                    "pre_close": pre_close or 0,
+                    "change": change,
+                    "pct_chg": bar.get("change_pct", 0) or 0,
+                    "vol": bar.get("volume", 0) or 0,
+                    "amount": bar.get("amount", 0) or 0,
+                }
+            )
+
+    if not all_values:
+        return 0
+
+    # 分批写入，每批 2000 行
+    batch_size = 2000
+    total = 0
+    for i in range(0, len(all_values), batch_size):
+        chunk = all_values[i : i + batch_size]
+        global _supports_daily_bar_upsert
+        if _supports_daily_bar_upsert:
+            daily_bar_insert = insert(DailyBar)
+            stmt = daily_bar_insert.values(chunk).on_conflict_do_update(
+                constraint="uq_daily_bars_ts_code_trade_date",
+                set_={
+                    "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
+                    "open": daily_bar_insert.excluded.open,
+                    "high": daily_bar_insert.excluded.high,
+                    "low": daily_bar_insert.excluded.low,
+                    "close": daily_bar_insert.excluded.close,
+                    "pre_close": daily_bar_insert.excluded.pre_close,
+                    "change": daily_bar_insert.excluded.change,
+                    "pct_chg": daily_bar_insert.excluded.pct_chg,
+                    "vol": daily_bar_insert.excluded.vol,
+                    "amount": daily_bar_insert.excluded.amount,
+                },
+            )
+            try:
+                await session.execute(stmt)
+                total += len(chunk)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                _supports_daily_bar_upsert = False
+                logger.warning("batch upsert 不可用，降级为逐行写入: %s", exc)
+
+    if total > 0:
+        await session.commit()
+        return total
+
+    # 降级：逐行写入
+    count = 0
+    for item in all_values:
+        result = await session.execute(
+            select(DailyBar).where(
+                DailyBar.ts_code == item["ts_code"],
+                DailyBar.trade_date == item["trade_date"],
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in item.items():
+                if k != "ts_code":
+                    setattr(existing, k, v)
+        else:
+            session.add(DailyBar(**item))
+        count += 1
+    await session.commit()
+    return count
+
+
 async def fetch_and_save_stocks():
     """抓取并保存股票列表"""
     proxy_pool = _build_proxy_pool()
@@ -607,47 +709,76 @@ async def _fetch_single_stock(
 
 
 async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
-    """抓取并保存K线数据"""
-    proxy_pool = _build_proxy_pool()
-    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
-    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+    """抓取并保存K线数据
+
+    优化策略：
+    - Tushare 走批量接口（按日期，一次全市场）
+    - Tushare 未覆盖的股票降级到 EastMoney / BaoStock 逐只补
+    """
     tushare_provider = TushareProvider()
 
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(days=days)
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Stock).where(Stock.list_status == "L").order_by(Stock.ts_code)
+        # 构建交易日列表（简单遍历，非交易日 Tushare 返回空自动跳过）
+        from datetime import date as date_type
+
+        trading_days = []
+        current = start_dt.date()
+        end_date = end_dt.date()
+        while current <= end_date:
+            # 周末跳过
+            if current.weekday() < 5:
+                trading_days.append(current.strftime("%Y%m%d"))
+            current += date_type.resolution * 1  # +1 day via timedelta trick
+
+        # 由于 timedelta trick 不好用，改用标准方式
+        from datetime import timedelta as td
+
+        trading_days = []
+        current = start_dt.date()
+        while current <= end_date:
+            if current.weekday() < 5:
+                trading_days.append(current.strftime("%Y%m%d"))
+            current += td(days=1)
+
+        logger.info(
+            "开始批量抓取日线数据: %d 个交易日 (%s ~ %s)",
+            len(trading_days),
+            trading_days[0] if trading_days else "?",
+            trading_days[-1] if trading_days else "?",
         )
-        stocks = result.scalars().all()
-        total = len(stocks)
-        logger.info(f"开始抓取 {total} 只股票的K线数据，并发数: {concurrency}")
 
-        semaphore = asyncio.Semaphore(concurrency)
+        total_saved = 0
+        total_days_ok = 0
 
-        tasks = [
-            _fetch_single_stock(
-                semaphore=semaphore,
-                tushare_provider=tushare_provider,
-                baostock_provider=baostock_provider,
-                em_crawler=em_crawler,
-                stock=stock,
-                start_date=start_date,
-                end_date=end_date,
-                idx=idx,
-                total=total,
-            )
-            for idx, stock in enumerate(stocks, 1)
-        ]
+        for td_str in trading_days:
+            try:
+                batch_data = await tushare_provider.fetch_daily_by_date(td_str)
+                if batch_data:
+                    count = await save_daily_bars_batch(session, batch_data)
+                    total_saved += count
+                    total_days_ok += 1
+                    logger.info(
+                        "[%s] Tushare 批量写入 %d 只股票 (%d 条)",
+                        td_str,
+                        len(batch_data),
+                        count,
+                    )
+                else:
+                    logger.debug("[%s] Tushare 批量无数据（非交易日？）", td_str)
+            except Exception as exc:
+                logger.error("[%s] Tushare 批量抓取异常: %s", td_str, exc)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            # 每天之间间隔 0.5s，避免打爆网关
+            await asyncio.sleep(0.5)
 
-        success = sum(1 for r in results if isinstance(r, tuple) and r[2])
-        failed = total - success
-        logger.info(f"抓取完成: 成功 {success}, 失败 {failed}")
-
-    await em_crawler.close()
+        logger.info(
+            "批量抓取完成: %d 个交易日成功，共写入 %d 条日线",
+            total_days_ok,
+            total_saved,
+        )
 
 
 async def _get_backfill_targets(

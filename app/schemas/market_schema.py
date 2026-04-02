@@ -49,6 +49,34 @@ class MarketIndicesResponse(BaseModel):
     items: list[IndexItem]
 
 
+class MarketIndexSummary(BaseModel):
+    """首页市场温度计使用的指数摘要。"""
+
+    code: str = Field(..., description="指数代码或代理代码")
+    name: str = Field(..., description="指数名称")
+    trade_date: str | None = Field(None, description="对应交易日")
+    current: float | None = Field(None, description="指数点位；代理数据时可为空")
+    change: float | None = Field(None, description="涨跌点数；代理数据时可为空")
+    change_rate: float | None = Field(None, description="涨跌幅(%)")
+    constituent_count: int = Field(0, description="用于计算该摘要的成分数")
+    source: str = Field("proxy", description="数据来源: native / proxy / fallback")
+    note: str | None = Field(None, description="补充说明")
+
+
+class MarketSummaryResponse(BaseModel):
+    """首页市场温度计聚合响应。"""
+
+    trade_date: str | None = Field(None, description="最新可用交易日")
+    total_count: int = Field(0, description="参与统计的股票数")
+    up_count: int = Field(0, description="上涨家数")
+    down_count: int = Field(0, description="下跌家数")
+    flat_count: int = Field(0, description="平盘家数")
+    limit_up_count: int = Field(0, description="涨停家数")
+    limit_down_count: int = Field(0, description="跌停家数")
+    sentiment_summary: str = Field("", description="一句市场情绪摘要")
+    indices: list[MarketIndexSummary] = Field(default_factory=list, description="主要指数摘要")
+
+
 class StockListQuery(BaseModel):
     """股票列表查询参数（用于文档说明）"""
 

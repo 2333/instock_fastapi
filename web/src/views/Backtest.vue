@@ -68,8 +68,39 @@
                 @click="applySavedStrategy"
                 :disabled="!selectedSavedStrategy"
               >
-                加载配置
+                {{ selectedSavedStrategyActionLabel }}
               </button>
+            </div>
+          </div>
+          <p
+            v-if="selectedSavedStrategyHint"
+            class="strategy-hint"
+            :class="selectedSavedStrategyHintTone"
+          >
+            {{ selectedSavedStrategyHint }}
+          </p>
+          <div v-if="selectedSavedStrategyBridgeContext" class="bridge-context">
+            <div class="bridge-context__header">
+              <strong>{{ selectedSavedStrategyBridgeContext.strategyName }}</strong>
+              <span>{{ selectedSavedStrategyBridgeContext.bridgeTemplate }}</span>
+            </div>
+            <div class="bridge-context__grid">
+              <div class="bridge-context__item">
+                <span>筛选条件</span>
+                <strong>{{ selectedSavedStrategyBridgeContext.selectionFilters }}</strong>
+              </div>
+              <div class="bridge-context__item">
+                <span>筛选范围</span>
+                <strong>{{ selectedSavedStrategyBridgeContext.selectionScope }}</strong>
+              </div>
+              <div class="bridge-context__item">
+                <span>入场模式</span>
+                <strong>{{ selectedSavedStrategyBridgeContext.entryMode }}</strong>
+              </div>
+              <div class="bridge-context__item">
+                <span>出场模式</span>
+                <strong>{{ selectedSavedStrategyBridgeContext.exitMode }}</strong>
+              </div>
             </div>
           </div>
           <div class="config-row">
@@ -458,6 +489,22 @@
               </div>
               <div ref="equityChartRef" class="chart-wrapper"></div>
             </div>
+            <div v-if="compareCurvePoints.length" class="card chart-card chart-card--compare">
+              <div class="card-header">
+                <h3>收益曲线对比</h3>
+                <div class="chart-legend">
+                  <span class="legend-item">
+                    <span class="legend-color equity"></span>
+                    当前回测
+                  </span>
+                  <span class="legend-item">
+                    <span class="legend-color benchmark"></span>
+                    对照回测
+                  </span>
+                </div>
+              </div>
+              <div ref="compareChartRef" class="chart-wrapper"></div>
+            </div>
           </div>
 
           <div class="trades-section">
@@ -598,6 +645,16 @@ interface BacktestHistoryItem {
   createdAt?: string
 }
 
+interface BacktestSnapshot {
+  history: BacktestHistoryItem
+  summary: Record<string, any>
+  meta: Record<string, any>
+  equityCurve: { date: string; equity: number; benchmark: number }[]
+  trades: Trade[]
+}
+
+const RUNNABLE_STRATEGY_NAMES = new Set(['ma_crossover', 'rsi_oversold'])
+
 const loading = ref(false)
 const hasResults = ref(false)
 const currentBacktestId = ref('')
@@ -608,16 +665,22 @@ const historySort = ref<'created' | 'return' | 'drawdown'>('created')
 const historyOutcomeFilter = ref<'all' | 'profit' | 'loss'>('all')
 const selectedCompareBacktestId = ref('')
 const equityChartRef = ref<HTMLDivElement>()
+const compareChartRef = ref<HTMLDivElement>()
 const equityChartInstance = shallowRef<any>(null)
+const compareChartInstance = shallowRef<any>(null)
 const equityCurve = ref<{ date: string; equity: number; benchmark: number }[]>([])
+const compareBacktestSnapshot = ref<BacktestSnapshot | null>(null)
 const strategyTemplates = ref<StrategyTemplate[]>([])
 const savedStrategies = ref<SavedStrategy[]>([])
 const selectedSavedStrategyId = ref('')
+const pendingQueryStrategyParams = ref<Record<string, string | number> | null>(null)
 const configPanelRef = ref<HTMLElement | null>(null)
 const configCollapsed = ref(false)
 const PANEL_WIDTH_KEY = 'instock_backtest_panel_width'
 const PANEL_COLLAPSED_KEY = 'instock_backtest_panel_collapsed'
 const RECENT_BACKTESTS_KEY = 'instock_backtest_recent_ids'
+useResizeObserver(equityChartRef, () => equityChartInstance.value?.resize())
+useResizeObserver(compareChartRef, () => compareChartInstance.value?.resize())
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 const route = useRoute()
 const router = useRouter()
@@ -651,6 +714,42 @@ const selectedStrategyTemplate = computed(() =>
 const selectedSavedStrategy = computed(() =>
   savedStrategies.value.find((strategy) => String(strategy.id) === selectedSavedStrategyId.value) || null
 )
+const selectedSavedStrategyIsSelectionDerived = computed(
+  () => isSelectionDerivedStrategy(selectedSavedStrategy.value)
+)
+const selectedSavedStrategyActionLabel = computed(
+  () => (selectedSavedStrategyIsSelectionDerived.value ? '导入上下文' : '加载配置')
+)
+const selectedSavedStrategyHint = computed(() => {
+  if (!selectedSavedStrategy.value) return ''
+  if (selectedSavedStrategyIsSelectionDerived.value) {
+    return '这是一条筛选桥接策略。导入后会保留筛选条件与出场上下文；当前仍需补充股票代码，并选择一个可运行模板后再运行回测。'
+  }
+  return '这是一条可直接加载的普通回测配置，点击后会恢复股票、周期和模板参数。'
+})
+const selectedSavedStrategyHintTone = computed(() =>
+  selectedSavedStrategyIsSelectionDerived.value ? 'strategy-hint--info' : 'strategy-hint--warning'
+)
+const selectedSavedStrategyBridgeContext = computed(() => {
+  if (!selectedSavedStrategyIsSelectionDerived.value || !selectedSavedStrategy.value?.params) return null
+  const canonical = extractCanonicalStrategyPayload(selectedSavedStrategy.value.params as Record<string, any>)
+  const formatBridgeSummary = (value: Record<string, any>) => {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== '')
+    if (!entries.length) return '无'
+    return entries
+      .slice(0, 4)
+      .map(([key, item]) => `${key}=${formatComparableValue(item)}`)
+      .join(' · ')
+  }
+  return {
+    strategyName: selectedSavedStrategy.value.name,
+    bridgeTemplate: canonical.templateName || 'selection_bridge',
+    selectionFilters: formatBridgeSummary(canonical.selectionFilters),
+    selectionScope: formatBridgeSummary(canonical.selectionScope),
+    entryMode: formatComparableValue(canonical.entryRules?.mode || 'screening_match'),
+    exitMode: formatComparableValue(canonical.exitRules?.mode || 'configurable'),
+  }
+})
 
 const metrics = reactive({
   initialCapital: 100000,
@@ -699,17 +798,197 @@ const resultSummaryText = computed(() => {
   return `${returnPart}${tradePart} 当前参数组合没有形成理想结果，建议优先复盘模板与参数设置。`
 })
 
-const compareRows = computed(() => {
-  if (!selectedSavedStrategy.value?.params) return []
-  const saved = selectedSavedStrategy.value.params as Record<string, any>
-  const savedParams = (saved.strategy_params && typeof saved.strategy_params === 'object') ? saved.strategy_params as Record<string, any> : {}
+const toRecord = (value: unknown) => (value && typeof value === 'object' ? value as Record<string, any> : {})
+const isRunnableStrategyTemplate = (name: string) => RUNNABLE_STRATEGY_NAMES.has(name)
+const isSelectionDerivedStrategy = (strategy: SavedStrategy | null) =>
+  toRecord(strategy?.params).source === 'selection'
 
-  return [
-    { label: '股票', current: config.stockCode, saved: String(saved.stock_code || '--') },
-    { label: '周期', current: config.period, saved: String(saved.period || '--') },
-    { label: '模板', current: config.strategyType, saved: String(saved.strategy_type || saved.template || '--') },
-    { label: '参数数量', current: String(Object.keys(strategyParams).length), saved: String(Object.keys(savedParams).length) },
+const extractCanonicalStrategyPayload = (source: Record<string, any> | null | undefined) => {
+  const record = toRecord(source)
+  const backtestConfig = toRecord(record.backtest_config || record.backtestConfig)
+  const selectionFilters = toRecord(record.selection_filters || record.selectionFilters)
+  const selectionScope = toRecord(record.selection_scope || record.selectionScope)
+  const entryRules = toRecord(record.entry_rules || record.entryRules)
+  const exitRules = toRecord(record.exit_rules || record.exitRules)
+  const strategyParams = toRecord(record.strategy_params || record.strategyParams)
+  const legacyBacktestConfig = {
+    strategy_type: record.strategy_type ?? record.strategyType ?? '',
+    stock_code: record.stock_code ?? record.stockCode ?? '',
+    period: record.period ?? '',
+    initial_capital: record.initial_capital ?? record.initialCapital ?? '',
+    position_size: record.position_size ?? record.positionSize ?? '',
+    max_position: record.max_position ?? record.maxPosition ?? '',
+    stop_loss: record.stop_loss ?? record.stopLoss ?? '',
+    take_profit: record.take_profit ?? record.takeProfit ?? '',
+    min_hold_days: record.min_hold_days ?? record.minHoldDays ?? '',
+    commission_rate: record.commission_rate ?? record.commissionRate ?? '',
+    min_commission: record.min_commission ?? record.minCommission ?? '',
+    slippage: record.slippage ?? '',
+  }
+
+  return {
+    source: String(
+      record.source ||
+        (selectionFilters && Object.keys(selectionFilters).length
+          ? 'selection'
+          : backtestConfig && Object.keys(backtestConfig).length
+            ? 'backtest'
+            : 'manual')
+    ),
+    templateName: String(
+      record.template_name ||
+        record.templateName ||
+        backtestConfig.strategy_type ||
+        record.strategy_type ||
+        record.strategyType ||
+        ''
+    ),
+    selectionFilters,
+    selectionScope,
+    entryRules,
+    exitRules,
+    backtestConfig,
+    legacyBacktestConfig,
+    strategyParams,
+    legacyFlat: record,
+  }
+}
+
+const formatComparableValue = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return '--'
+  if (typeof value === 'number') {
+    if (Number.isNaN(value)) return '--'
+    return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  }
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  return String(value)
+}
+
+const normalizeTradeItem = (trade: any): Trade => ({
+  id: Number(trade?.id || 0),
+  date: String(trade?.date || trade?.trade_date || ''),
+  type: String(trade?.type || trade?.signal || ''),
+  price: Number(trade?.price || 0),
+  quantity: Number(trade?.quantity || trade?.qty || 0),
+  profit: Number(trade?.profit || 0),
+  returnPct: Number(trade?.return_pct ?? trade?.returnPct ?? 0),
+  holdDays: Number(trade?.hold_days ?? trade?.holdDays ?? 0),
+})
+
+const normalizeCurvePoint = (point: any) => ({
+  date: String(point?.date || point?.trade_date || ''),
+  equity: Number(point?.equity ?? point?.value ?? 0),
+  benchmark: Number(point?.benchmark ?? point?.baseline ?? point?.benchmark_value ?? 0),
+})
+
+const normalizeBacktestSnapshot = (result: any): BacktestSnapshot => {
+  const data = toRecord(result?.data)
+  const resultData = toRecord(data.result_data)
+  const summary = toRecord(result?.summary || resultData.summary || data.summary)
+  const meta = toRecord(result?.meta || resultData.meta || data.meta)
+  const history: BacktestHistoryItem = {
+    id: String(result?.backtest_id || data.id || data.backtest_id || ''),
+    name: String(data.name || meta.name || resultData.name || ''),
+    startDate: String(data.start_date || data.startDate || resultData.start_date || resultData.startDate || ''),
+    endDate: String(data.end_date || data.endDate || resultData.end_date || resultData.endDate || ''),
+    initialCapital: Number(summary.initial_capital ?? data.initial_capital ?? data.initialCapital ?? 0),
+    finalCapital:
+      summary.final_capital === null || summary.final_capital === undefined
+        ? data.final_capital === null || data.final_capital === undefined
+          ? null
+          : Number(data.final_capital)
+        : Number(summary.final_capital),
+    totalReturn:
+      summary.total_return === null || summary.total_return === undefined
+        ? data.total_return === null || data.total_return === undefined
+          ? null
+          : Number(data.total_return)
+        : Number(summary.total_return),
+    annualReturn:
+      summary.annual_return === null || summary.annual_return === undefined
+        ? data.annual_return === null || data.annual_return === undefined
+          ? null
+          : Number(data.annual_return)
+        : Number(summary.annual_return),
+    maxDrawdown:
+      summary.max_drawdown === null || summary.max_drawdown === undefined
+        ? data.max_drawdown === null || data.max_drawdown === undefined
+          ? null
+          : Number(data.max_drawdown)
+        : Number(summary.max_drawdown),
+    sharpeRatio:
+      summary.sharpe_ratio === null || summary.sharpe_ratio === undefined
+        ? data.sharpe_ratio === null || data.sharpe_ratio === undefined
+          ? null
+          : Number(data.sharpe_ratio)
+        : Number(summary.sharpe_ratio),
+    winRate:
+      summary.win_rate === null || summary.win_rate === undefined
+        ? data.win_rate === null || data.win_rate === undefined
+          ? null
+          : Number(data.win_rate)
+        : Number(summary.win_rate),
+    totalTrades:
+      summary.total_trades === null || summary.total_trades === undefined
+        ? data.total_trades === null || data.total_trades === undefined
+          ? null
+          : Number(data.total_trades)
+        : Number(summary.total_trades),
+    code: String(meta.code || data.code || data.stock_code || ''),
+    stockName: String(meta.name || data.stock_name || ''),
+    strategy: String(meta.strategy || data.strategy || ''),
+    createdAt: String(data.created_at || data.createdAt || ''),
+  }
+
+  const equityCurve = (result?.equity_curve || resultData.equity_curve || data.equity_curve || [])
+    .map(normalizeCurvePoint)
+    .filter((point: { date: string }) => point.date)
+
+  const trades = (result?.trades || resultData.trades || data.trades || [])
+    .map(normalizeTradeItem)
+    .filter((trade: Trade) => trade.date)
+
+  return {
+    history,
+    summary,
+    meta,
+    equityCurve,
+    trades,
+  }
+}
+
+const normalizeCompareCurve = (points: { date: string; equity: number }[]) => {
+  const first = points.find((point) => Number.isFinite(point.equity) && point.equity !== 0)
+  const base = first?.equity || 0
+  if (!points.length) return []
+  if (!base) {
+    return points.map((point) => ({ date: point.date, value: point.equity }))
+  }
+  return points.map((point) => ({ date: point.date, value: (point.equity / base) * 100 }))
+}
+
+const compareRows = computed(() => {
+  const compareParams = compareBacktestSnapshot.value
+    ? extractCanonicalStrategyPayload(compareBacktestSnapshot.value.meta)
+    : selectedSavedStrategy.value?.params && typeof selectedSavedStrategy.value.params === 'object'
+      ? extractCanonicalStrategyPayload(selectedSavedStrategy.value.params as Record<string, any>)
+      : null
+  const compareStrategyParams = compareParams?.strategyParams || {}
+
+  const rows: Array<{ label: string; current: string; saved: string }> = [
+    { label: '股票', current: config.stockCode || '--', saved: compareTargetHistoryItem.value?.code || '--' },
+    { label: '周期', current: config.period || '--', saved: compareTargetHistoryItem.value?.startDate && compareTargetHistoryItem.value?.endDate ? `${compareTargetHistoryItem.value.startDate}-${compareTargetHistoryItem.value.endDate}` : '--' },
+    { label: '模板', current: config.strategyType || '--', saved: compareTargetHistoryItem.value?.strategy || '--' },
+    { label: '初始资金', current: formatComparableValue(config.initialCapital), saved: formatComparableValue(compareTargetHistoryItem.value?.initialCapital) },
   ]
+
+  const paramRows = (selectedStrategyTemplate.value?.parameters || []).slice(0, 5).map((param) => ({
+    label: param.label,
+    current: formatComparableValue(strategyParams[param.name]),
+    saved: formatComparableValue(compareStrategyParams[param.name]),
+  }))
+
+  return [...rows, ...paramRows]
 })
 
 const filteredBacktestHistory = computed(() => {
@@ -735,15 +1014,24 @@ const filteredBacktestHistory = computed(() => {
   return filtered.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
 })
 
-const compareTargetOptions = computed(() =>
-  backtestHistory.value.filter((item) => item.id !== currentBacktestId.value)
-)
-
 const compareTargetHistoryItem = computed(() => {
   if (selectedCompareBacktestId.value) {
-    return backtestHistory.value.find((item) => item.id === selectedCompareBacktestId.value) || null
+    return (
+      backtestHistory.value.find((item) => item.id === selectedCompareBacktestId.value) ||
+      (compareBacktestSnapshot.value?.history?.id === selectedCompareBacktestId.value ? compareBacktestSnapshot.value.history : null) ||
+      null
+    )
   }
-  return compareTargetOptions.value[0] || null
+  return compareBacktestSnapshot.value?.history || backtestHistory.value.find((item) => item.id !== currentBacktestId.value) || null
+})
+
+const compareTargetOptions = computed(() => {
+  const options = backtestHistory.value.filter((item) => item.id !== currentBacktestId.value)
+  const snapshotHistory = compareBacktestSnapshot.value?.history
+  if (snapshotHistory && !options.some((item) => item.id === snapshotHistory.id)) {
+    options.unshift(snapshotHistory)
+  }
+  return options
 })
 
 const formatDelta = (value: number | null | undefined, suffix = '') => {
@@ -788,6 +1076,24 @@ const resultCompareRows = computed(() => {
       deltaTone: '',
     },
   ]
+})
+
+const compareCurvePoints = computed(() => {
+  const compareCurve = compareBacktestSnapshot.value?.equityCurve || []
+  if (!compareCurve.length || !equityCurve.value.length) return []
+
+  const currentSeries = new Map(normalizeCompareCurve(equityCurve.value).map((point) => [point.date, point.value]))
+  const compareSeries = new Map(normalizeCompareCurve(compareCurve).map((point) => [point.date, point.value]))
+  const orderedDates = Array.from(new Set([...equityCurve.value.map((point) => point.date), ...compareCurve.map((point) => point.date)]))
+    .sort((left, right) => left.localeCompare(right))
+
+  return orderedDates
+    .map((date) => ({
+      date,
+      current: currentSeries.get(date),
+      compare: compareSeries.get(date),
+    }))
+    .filter((point) => point.current !== undefined || point.compare !== undefined)
 })
 
 const formatCurrency = (value: number) =>
@@ -855,20 +1161,55 @@ const filterByCurrentStrategy = () => {
   historyFilter.value = config.strategyType
 }
 
-const buildShareQuery = () => ({
-  ...route.query,
-  stock: config.stockCode || undefined,
-  period: config.period || undefined,
-  strategy: config.strategyType || undefined,
-  saved: selectedSavedStrategyId.value || undefined,
-  bt: currentBacktestId.value || undefined,
-  cbt: selectedCompareBacktestId.value || undefined,
-})
+const serializeStrategyParams = (params: Record<string, string | number>) => {
+  const entries = Object.entries(params).filter(([, value]) => value !== '' && value !== undefined && value !== null)
+  if (!entries.length) return undefined
+  return JSON.stringify(Object.fromEntries(entries))
+}
+
+const parseStrategyParams = (value: unknown) => {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string | number> : null
+  } catch (error) {
+    return null
+  }
+}
+
+const buildShareQuery = () => {
+  const query: Record<string, string> = {}
+  if (config.stockCode) query.stock = config.stockCode
+  if (config.period) query.period = config.period
+  if (config.strategyType) query.strategy = config.strategyType
+  if (selectedSavedStrategyId.value) query.saved = selectedSavedStrategyId.value
+  if (currentBacktestId.value) query.bt = currentBacktestId.value
+  if (selectedCompareBacktestId.value) query.cbt = selectedCompareBacktestId.value
+  if (Number.isFinite(config.initialCapital)) query.capital = String(config.initialCapital)
+  if (Number.isFinite(config.positionSize)) query.position = String(config.positionSize)
+  if (Number.isFinite(config.maxPosition)) query.maxPosition = String(config.maxPosition)
+  if (Number.isFinite(config.stopLoss)) query.stopLoss = String(config.stopLoss)
+  if (Number.isFinite(config.takeProfit)) query.takeProfit = String(config.takeProfit)
+  if (Number.isFinite(config.minHoldDays)) query.minHoldDays = String(config.minHoldDays)
+  if (Number.isFinite(config.commissionRate)) query.commissionRate = String(config.commissionRate)
+  if (Number.isFinite(config.minCommission)) query.minCommission = String(config.minCommission)
+  if (Number.isFinite(config.slippage)) query.slippage = String(config.slippage)
+  const serializedParams = serializeStrategyParams(strategyParams)
+  if (serializedParams) query.sp = serializedParams
+  return query
+}
+
+const queriesEqual = (left: Record<string, any>, right: Record<string, any>) => {
+  const leftKeys = Object.keys(left).filter((key) => left[key] !== undefined && left[key] !== null && left[key] !== '')
+  const rightKeys = Object.keys(right).filter((key) => right[key] !== undefined && right[key] !== null && right[key] !== '')
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.sort().every((key) => String(left[key]) === String(right[key]))
+}
 
 const syncQueryFromState = () => {
-  void router.replace({
-    query: buildShareQuery(),
-  })
+  const query = buildShareQuery()
+  if (queriesEqual(query, route.query as Record<string, any>)) return
+  void router.replace({ query })
 }
 
 const copyShareLink = async () => {
@@ -899,6 +1240,16 @@ const hydrateFromQuery = () => {
   const saved = typeof route.query.saved === 'string' ? route.query.saved : ''
   const backtestId = typeof route.query.bt === 'string' ? route.query.bt : ''
   const compareBacktestId = typeof route.query.cbt === 'string' ? route.query.cbt : ''
+  const capital = typeof route.query.capital === 'string' ? Number(route.query.capital) : NaN
+  const position = typeof route.query.position === 'string' ? Number(route.query.position) : NaN
+  const maxPosition = typeof route.query.maxPosition === 'string' ? Number(route.query.maxPosition) : NaN
+  const stopLoss = typeof route.query.stopLoss === 'string' ? Number(route.query.stopLoss) : NaN
+  const takeProfit = typeof route.query.takeProfit === 'string' ? Number(route.query.takeProfit) : NaN
+  const minHoldDays = typeof route.query.minHoldDays === 'string' ? Number(route.query.minHoldDays) : NaN
+  const commissionRate = typeof route.query.commissionRate === 'string' ? Number(route.query.commissionRate) : NaN
+  const minCommission = typeof route.query.minCommission === 'string' ? Number(route.query.minCommission) : NaN
+  const slippage = typeof route.query.slippage === 'string' ? Number(route.query.slippage) : NaN
+  const strategyParamsQuery = parseStrategyParams(route.query.sp)
 
   if (stock) config.stockCode = stock
   if (period) config.period = period
@@ -906,6 +1257,21 @@ const hydrateFromQuery = () => {
   if (saved) selectedSavedStrategyId.value = saved
   if (backtestId) currentBacktestId.value = backtestId
   if (compareBacktestId) selectedCompareBacktestId.value = compareBacktestId
+  if (!Number.isNaN(capital)) config.initialCapital = capital
+  if (!Number.isNaN(position)) config.positionSize = position
+  if (!Number.isNaN(maxPosition)) config.maxPosition = maxPosition
+  if (!Number.isNaN(stopLoss)) config.stopLoss = stopLoss
+  if (!Number.isNaN(takeProfit)) config.takeProfit = takeProfit
+  if (!Number.isNaN(minHoldDays)) config.minHoldDays = minHoldDays
+  if (!Number.isNaN(commissionRate)) config.commissionRate = commissionRate
+  if (!Number.isNaN(minCommission)) config.minCommission = minCommission
+  if (!Number.isNaN(slippage)) config.slippage = slippage
+  if (strategyParamsQuery) {
+    assignStrategyParams(strategyParamsQuery)
+    pendingQueryStrategyParams.value = strategyParamsQuery
+  } else {
+    pendingQueryStrategyParams.value = null
+  }
 }
 
 const normalizeTemplate = (template: any): StrategyTemplate => ({
@@ -1006,13 +1372,26 @@ const assignStrategyParams = (params: Record<string, unknown> | null | undefined
 const pickSavedValue = (saved: Record<string, unknown>, ...keys: string[]) =>
   keys.find((key) => saved[key] !== undefined) ? saved[keys.find((key) => saved[key] !== undefined) as string] : undefined
 
-const applySavedStrategyParams = (params: Record<string, unknown> | null | undefined) => {
-  const saved = params || {}
-  const savedTemplate = String(
-    saved.strategy_type || saved.template || (saved.strategy as Record<string, unknown> | undefined)?.template || ''
-  ).trim()
+const shouldClearStockForSelectionBridge = (params: Record<string, unknown> | null | undefined) => {
+  const canonical = extractCanonicalStrategyPayload(params as Record<string, any> | null | undefined)
+  if (canonical.source !== 'selection') return false
+  const backtestStock = pickSavedValue(canonical.backtestConfig as Record<string, unknown>, 'stock_code', 'stockCode')
+  const routeStock = typeof route.query.stock === 'string' ? route.query.stock.trim() : ''
+  return !String(backtestStock ?? '').trim() && !routeStock
+}
 
-  if (savedTemplate && strategyTemplates.value.some((template) => template.name === savedTemplate)) {
+const applySavedStrategyParams = (params: Record<string, unknown> | null | undefined) => {
+  const canonical = extractCanonicalStrategyPayload(params)
+  const saved = canonical.backtestConfig && Object.keys(canonical.backtestConfig).length
+    ? canonical.backtestConfig
+    : canonical.legacyBacktestConfig
+  const savedRecord = saved as Record<string, unknown>
+  const savedTemplate = String(
+    savedRecord.strategy_type ?? savedRecord.strategyType ?? canonical.templateName ?? ''
+  ).trim()
+  const hasBacktestConfigValues = Object.values(saved).some((value) => value !== '' && value !== null && value !== undefined)
+
+  if (savedTemplate && hasBacktestConfigValues) {
     config.strategyType = savedTemplate
   }
 
@@ -1034,46 +1413,85 @@ const applySavedStrategyParams = (params: Record<string, unknown> | null | undef
   if (period !== undefined) {
     config.period = String(period)
   }
-  if (initialCapital !== undefined) {
+  if (initialCapital !== undefined && initialCapital !== '') {
     config.initialCapital = Number(initialCapital)
   }
-  if (positionSize !== undefined) {
+  if (positionSize !== undefined && positionSize !== '') {
     config.positionSize = Number(positionSize)
   }
-  if (maxPosition !== undefined) {
+  if (maxPosition !== undefined && maxPosition !== '') {
     config.maxPosition = Number(maxPosition)
   }
-  if (stopLoss !== undefined) {
+  if (stopLoss !== undefined && stopLoss !== '') {
     config.stopLoss = Number(stopLoss)
   }
-  if (takeProfit !== undefined) {
+  if (takeProfit !== undefined && takeProfit !== '') {
     config.takeProfit = Number(takeProfit)
   }
-  if (minHoldDays !== undefined) {
+  if (minHoldDays !== undefined && minHoldDays !== '') {
     config.minHoldDays = Number(minHoldDays)
   }
-  if (commissionRate !== undefined) {
+  if (commissionRate !== undefined && commissionRate !== '') {
     config.commissionRate = Number(commissionRate)
   }
-  if (minCommission !== undefined) {
+  if (minCommission !== undefined && minCommission !== '') {
     config.minCommission = Number(minCommission)
   }
-  if (slippage !== undefined) {
+  if (slippage !== undefined && slippage !== '') {
     config.slippage = Number(slippage)
   }
 
-  const nestedStrategy = saved.strategy
-  const nestedParams = nestedStrategy && typeof nestedStrategy === 'object'
-    ? (nestedStrategy as Record<string, unknown>).params
-    : undefined
-  const flatParams = saved.strategy_params
-  assignStrategyParams(
-    flatParams && typeof flatParams === 'object'
-      ? flatParams as Record<string, unknown>
-      : nestedParams && typeof nestedParams === 'object'
-        ? nestedParams as Record<string, unknown>
-        : selectedStrategyTemplate.value?.defaultParams || {}
-  )
+  const savedStrategyParams = Object.keys(canonical.strategyParams).length
+    ? canonical.strategyParams
+    : canonical.legacyFlat.strategy_params && typeof canonical.legacyFlat.strategy_params === 'object'
+      ? canonical.legacyFlat.strategy_params as Record<string, unknown>
+      : selectedStrategyTemplate.value?.defaultParams || {}
+  assignStrategyParams(savedStrategyParams)
+
+  if (shouldClearStockForSelectionBridge(params)) {
+    config.stockCode = ''
+  }
+}
+
+const buildBacktestConfig = () => ({
+  strategy_type: config.strategyType,
+  stock_code: config.stockCode,
+  period: config.period,
+  initial_capital: config.initialCapital,
+  position_size: config.positionSize,
+  max_position: config.maxPosition,
+  stop_loss: config.stopLoss,
+  take_profit: config.takeProfit,
+  min_hold_days: config.minHoldDays,
+  commission_rate: config.commissionRate,
+  min_commission: config.minCommission,
+  slippage: config.slippage,
+})
+
+const buildBacktestCanonicalParams = () => {
+  const bridgePayload = selectedSavedStrategyIsSelectionDerived.value && selectedSavedStrategy.value?.params
+    ? extractCanonicalStrategyPayload(selectedSavedStrategy.value.params as Record<string, any>)
+    : null
+
+  return {
+    source: 'backtest',
+    template_name: config.strategyType,
+    selection_filters: bridgePayload?.selectionFilters || {},
+    selection_scope: bridgePayload?.selectionScope || {},
+    entry_rules: {
+      mode: 'template_signal',
+      template_name: config.strategyType,
+      strategy_params: { ...strategyParams },
+    },
+    exit_rules: {
+      mode: 'fixed_risk',
+      stop_loss_pct: config.stopLoss,
+      take_profit_pct: config.takeProfit,
+      max_hold_days: config.minHoldDays,
+    },
+    backtest_config: buildBacktestConfig(),
+    strategy_params: { ...strategyParams },
+  }
 }
 
 const loadTemplate = () => {
@@ -1092,9 +1510,40 @@ const loadSavedStrategies = async () => {
     if (selectedSavedStrategyId.value && selectedSavedStrategy.value) {
       applySavedStrategyParams(selectedSavedStrategy.value.params)
     }
+    if (pendingQueryStrategyParams.value) {
+      assignStrategyParams(pendingQueryStrategyParams.value)
+      pendingQueryStrategyParams.value = null
+    }
   } catch (error) {
     savedStrategies.value = []
+    if (pendingQueryStrategyParams.value) {
+      assignStrategyParams(pendingQueryStrategyParams.value)
+      pendingQueryStrategyParams.value = null
+    }
     showNotification?.('warning', '已保存策略加载失败')
+  }
+}
+
+const loadCompareBacktestResult = async (backtestId: string) => {
+  const normalizedBacktestId = String(backtestId || '').trim()
+  if (!normalizedBacktestId || normalizedBacktestId === currentBacktestId.value) {
+    compareBacktestSnapshot.value = null
+    return
+  }
+
+  try {
+    const result = await backtestApi.getBacktest(normalizedBacktestId)
+    if (result?.status !== 'completed') {
+      compareBacktestSnapshot.value = null
+      return
+    }
+
+    compareBacktestSnapshot.value = normalizeBacktestSnapshot(result)
+    if (!compareBacktestSnapshot.value.history.id) {
+      compareBacktestSnapshot.value.history.id = normalizedBacktestId
+    }
+  } catch (error) {
+    compareBacktestSnapshot.value = null
   }
 }
 
@@ -1103,6 +1552,8 @@ const loadBacktestHistory = async () => {
     const response = await backtestApi.getBacktestHistory(8)
     const items: any[] = Array.isArray(response?.data)
       ? response.data
+      : Array.isArray(response?.items)
+        ? response.items
       : Array.isArray(response)
         ? response
         : []
@@ -1110,10 +1561,6 @@ const loadBacktestHistory = async () => {
       .map(normalizeBacktestHistoryItem)
       .filter((item: BacktestHistoryItem) => item.id)
 
-    if (selectedCompareBacktestId.value) {
-      const exists = backtestHistory.value.some((item) => item.id === selectedCompareBacktestId.value)
-      if (!exists) selectedCompareBacktestId.value = ''
-    }
     if (!selectedCompareBacktestId.value && compareTargetOptions.value.length) {
       selectedCompareBacktestId.value = compareTargetOptions.value[0].id
     }
@@ -1126,7 +1573,8 @@ const loadBacktestHistory = async () => {
 const loadStrategyTemplates = async () => {
   try {
     const templates = await strategyApi.getTemplates()
-    strategyTemplates.value = Array.isArray(templates) ? templates.map(normalizeTemplate) : []
+    const normalizedTemplates = Array.isArray(templates) ? templates.map(normalizeTemplate) : []
+    strategyTemplates.value = normalizedTemplates.filter((template) => isRunnableStrategyTemplate(template.name))
     if (!strategyTemplates.value.length) return
 
     if (!strategyTemplates.value.some((template) => template.name === config.strategyType)) {
@@ -1150,21 +1598,7 @@ const saveStrategy = async () => {
     const created = await strategyApi.createMyStrategy({
       name: strategyName,
       description: `从回测页保存：${selectedStrategyTemplate.value.displayName}`,
-      params: {
-        strategy_type: config.strategyType,
-        stock_code: config.stockCode,
-        period: config.period,
-        initial_capital: config.initialCapital,
-        position_size: config.positionSize,
-        max_position: config.maxPosition,
-        stop_loss: config.stopLoss,
-        take_profit: config.takeProfit,
-        min_hold_days: config.minHoldDays,
-        commission_rate: config.commissionRate,
-        min_commission: config.minCommission,
-        slippage: config.slippage,
-        strategy_params: { ...strategyParams },
-      },
+      params: buildBacktestCanonicalParams(),
       is_active: true,
     })
     const normalized = normalizeSavedStrategy(created)
@@ -1182,45 +1616,36 @@ const applySavedStrategy = () => {
   configCollapsed.value = false
   window.localStorage.setItem(PANEL_COLLAPSED_KEY, '0')
   applySavedStrategyParams(selectedSavedStrategy.value.params)
+  if (isSelectionDerivedStrategy(selectedSavedStrategy.value)) {
+    showNotification?.('info', '已导入筛选桥接上下文，请补充股票代码并选择可运行模板后运行回测')
+    return
+  }
   showNotification?.('success', `已加载配置：${selectedSavedStrategy.value.name}`)
 }
 
 const applyBacktestResult = (result: any) => {
-  const summary = result?.summary || result?.data?.result_data?.summary || {}
-  const row = result?.data || {}
-  metrics.initialCapital = Number(summary.initial_capital ?? row.initial_capital ?? config.initialCapital)
-  metrics.finalCapital = Number(summary.final_capital ?? row.final_capital ?? config.initialCapital)
-  metrics.totalReturn = Number(summary.total_return ?? row.total_return ?? 0)
-  metrics.annualizedReturn = Number(summary.annual_return ?? row.annual_return ?? 0)
-  metrics.maxDrawdown = Number(summary.max_drawdown ?? row.max_drawdown ?? 0)
-  metrics.sharpeRatio = Number(summary.sharpe_ratio ?? row.sharpe_ratio ?? 0)
-  metrics.winRate = Number(summary.win_rate ?? row.win_rate ?? 0)
-  metrics.totalTrades = Number(summary.total_trades ?? row.total_trades ?? 0)
+  const snapshot = normalizeBacktestSnapshot(result)
+  const summary = snapshot.summary
+  const row = toRecord(result?.data)
+  metrics.initialCapital = Number(summary.initial_capital ?? row.initial_capital ?? snapshot.history.initialCapital ?? config.initialCapital)
+  metrics.finalCapital = Number(summary.final_capital ?? row.final_capital ?? snapshot.history.finalCapital ?? config.initialCapital)
+  metrics.totalReturn = Number(summary.total_return ?? row.total_return ?? snapshot.history.totalReturn ?? 0)
+  metrics.annualizedReturn = Number(summary.annual_return ?? row.annual_return ?? snapshot.history.annualReturn ?? 0)
+  metrics.maxDrawdown = Number(summary.max_drawdown ?? row.max_drawdown ?? snapshot.history.maxDrawdown ?? 0)
+  metrics.sharpeRatio = Number(summary.sharpe_ratio ?? row.sharpe_ratio ?? snapshot.history.sharpeRatio ?? 0)
+  metrics.winRate = Number(summary.win_rate ?? row.win_rate ?? snapshot.history.winRate ?? 0)
+  metrics.totalTrades = Number(summary.total_trades ?? row.total_trades ?? snapshot.history.totalTrades ?? 0)
   metrics.winningTrades = Number(summary.winning_trades ?? 0)
   metrics.profitFactor = Number(summary.profit_factor ?? 0)
   metrics.avgWin = Number(summary.avg_win ?? 0)
   metrics.avgLoss = Number(summary.avg_loss ?? 0)
 
-  equityCurve.value = (result?.equity_curve || result?.data?.result_data?.equity_curve || []).map((item: any) => ({
-    date: String(item.date),
-    equity: Number(item.equity),
-    benchmark: Number(item.benchmark),
-  }))
-
-  trades.value = (result?.trades || result?.data?.result_data?.trades || []).map((trade: any) => ({
-    id: Number(trade.id),
-    date: String(trade.date),
-    type: String(trade.type),
-    price: Number(trade.price),
-    quantity: Number(trade.quantity),
-    profit: Number(trade.profit),
-    returnPct: Number(trade.return_pct ?? trade.returnPct ?? 0),
-    holdDays: Number(trade.hold_days ?? trade.holdDays ?? 0),
-  }))
+  equityCurve.value = snapshot.equityCurve
+  trades.value = snapshot.trades
 
   hasResults.value = true
-  if (result?.backtest_id) {
-    currentBacktestId.value = String(result.backtest_id)
+  if (snapshot.history.id) {
+    currentBacktestId.value = snapshot.history.id
     rememberBacktestId(currentBacktestId.value)
     syncQueryFromState()
   }
@@ -1234,6 +1659,7 @@ const loadBacktestResult = async (backtestId: string) => {
     currentBacktestId.value = normalizedBacktestId
     if (result?.status === 'completed') {
       applyBacktestResult(result)
+      await loadCompareBacktestResult(selectedCompareBacktestId.value)
       rememberBacktestId(normalizedBacktestId)
       showNotification?.('info', `已加载历史回测结果 #${normalizedBacktestId}`)
     }
@@ -1249,18 +1675,22 @@ const replayBacktestFromHistory = async (item: any) => {
       showNotification?.('warning', '无法加载该回测的配置信息')
       return
     }
-    const meta = result?.data?.result_data?.meta || {}
-    const params = meta.strategy_params || {}
+    const snapshot = normalizeBacktestSnapshot(result)
+    const meta = snapshot.meta
+    const params = extractCanonicalStrategyPayload(snapshot.meta)
 
     // Apply strategy template if present
-    if (meta.strategy && strategyTemplates.value.some(t => t.name === meta.strategy)) {
+    if (params.backtestConfig.strategy_type && strategyTemplates.value.some((t) => t.name === params.backtestConfig.strategy_type)) {
+      config.strategyType = params.backtestConfig.strategy_type
+    } else if (meta.strategy && strategyTemplates.value.some((t) => t.name === meta.strategy)) {
       config.strategyType = meta.strategy
     }
 
     // Apply basic config fields
-    if (meta.code) config.stockCode = String(meta.code).trim()
-    if (item.startDate) config.period = String(item.startDate) + ',' + String(item.endDate)
-    if (item.initialCapital) config.initialCapital = Number(item.initialCapital)
+    if (params.backtestConfig.stock_code) config.stockCode = String(params.backtestConfig.stock_code).trim()
+    else if (meta.code) config.stockCode = String(meta.code).trim()
+    if (params.backtestConfig.initial_capital) config.initialCapital = Number(params.backtestConfig.initial_capital)
+    else if (snapshot.history.initialCapital) config.initialCapital = Number(snapshot.history.initialCapital)
 
     // Apply strategy-specific params using existing helper
     applySavedStrategyParams(params)
@@ -1274,6 +1704,11 @@ const replayBacktestFromHistory = async (item: any) => {
 }
 
 const runBacktest = async () => {
+  if (!isRunnableStrategyTemplate(config.strategyType)) {
+    showNotification?.('warning', '当前模板尚未接入回测引擎，请先选择 MA 交叉或 RSI 超卖')
+    return
+  }
+
   loading.value = true
   try {
     const range = resolveDateRange()
@@ -1285,40 +1720,24 @@ const runBacktest = async () => {
       initial_capital: config.initialCapital,
       stock_code: config.stockCode,
     } as any)
-
-    const summary = result?.summary || {}
-    metrics.initialCapital = Number(summary.initial_capital ?? config.initialCapital)
-    metrics.finalCapital = Number(summary.final_capital ?? config.initialCapital)
-    metrics.totalReturn = Number(summary.total_return ?? 0)
-    metrics.annualizedReturn = Number(summary.annual_return ?? 0)
-    metrics.maxDrawdown = Number(summary.max_drawdown ?? 0)
-    metrics.sharpeRatio = Number(summary.sharpe_ratio ?? 0)
-    metrics.winRate = Number(summary.win_rate ?? 0)
-    metrics.totalTrades = Number(summary.total_trades ?? 0)
-    metrics.winningTrades = Number(summary.winning_trades ?? 0)
-    metrics.profitFactor = Number(summary.profit_factor ?? 0)
-    metrics.avgWin = Number(summary.avg_win ?? 0)
-    metrics.avgLoss = Number(summary.avg_loss ?? 0)
-
-    trades.value = (result?.trades || []).map((item: any) => ({
-      id: Number(item.id || 0),
-      date: String(item.date || ''),
-      type: String(item.type || ''),
-      price: Number(item.price || 0),
-      quantity: Number(item.quantity || 0),
-      profit: Number(item.profit || 0),
-      returnPct: Number(item.return_pct || 0),
-      holdDays: Number(item.hold_days || 0),
-    }))
-    equityCurve.value = (result?.equity_curve || []).map((item: any) => ({
-      date: String(item.date || ''),
-      equity: Number(item.equity || 0),
-      benchmark: Number(item.benchmark || 0),
-    }))
+    if (result?.status !== 'completed') {
+      const message = result?.error === 'unsupported_strategy'
+        ? '当前模板尚未接入回测引擎，请切换到可运行模板后重试'
+        : result?.error === 'stock_not_found'
+          ? '未找到对应股票，请检查代码后重试'
+          : result?.error === 'missing_required_params'
+            ? '回测参数不完整，请补充后重试'
+            : '回测执行失败'
+      showNotification?.('warning', message)
+      return
+    }
+    applyBacktestResult(result)
 
     hasResults.value = true
     await initEquityChart()
+    await initCompareEquityChart()
     await loadBacktestHistory()
+    await loadCompareBacktestResult(selectedCompareBacktestId.value)
     showNotification?.('success', '回测完成')
   } catch (e) {
     showNotification?.('error', '回测执行失败')
@@ -1336,9 +1755,74 @@ watch(
 )
 
 watch(
-  () => [config.stockCode, config.period, selectedSavedStrategyId.value, selectedCompareBacktestId.value],
+  () => [
+    config.stockCode,
+    config.period,
+    config.initialCapital,
+    config.positionSize,
+    config.maxPosition,
+    config.stopLoss,
+    config.takeProfit,
+    config.minHoldDays,
+    config.commissionRate,
+    config.minCommission,
+    config.slippage,
+    config.strategyType,
+    selectedSavedStrategyId.value,
+    selectedCompareBacktestId.value,
+    currentBacktestId.value,
+    JSON.stringify(strategyParams),
+  ],
   () => {
     syncQueryFromState()
+  },
+  { deep: true }
+)
+
+watch(
+  () => selectedCompareBacktestId.value,
+  () => {
+    void loadCompareBacktestResult(selectedCompareBacktestId.value)
+    syncQueryFromState()
+  }
+)
+
+watch(
+  () => [equityCurve.value, compareBacktestSnapshot.value],
+  () => {
+    void initEquityChart()
+    void initCompareEquityChart()
+  },
+  { deep: true }
+)
+
+watch(
+  () => route.query,
+  () => {
+    if (queriesEqual(route.query as Record<string, any>, buildShareQuery())) return
+
+    const previousBacktestId = currentBacktestId.value
+    const previousCompareBacktestId = selectedCompareBacktestId.value
+    const previousSavedStrategyId = selectedSavedStrategyId.value
+
+    hydrateFromQuery()
+
+    if (
+      selectedSavedStrategyId.value &&
+      selectedSavedStrategyId.value !== previousSavedStrategyId &&
+      selectedSavedStrategy.value
+    ) {
+      applySavedStrategyParams(selectedSavedStrategy.value.params)
+    }
+
+    if (currentBacktestId.value && currentBacktestId.value !== previousBacktestId) {
+      void loadBacktestResult(currentBacktestId.value)
+      return
+    }
+
+    if (selectedCompareBacktestId.value !== previousCompareBacktestId) {
+      void loadCompareBacktestResult(selectedCompareBacktestId.value)
+    }
   },
   { deep: true }
 )
@@ -1351,7 +1835,7 @@ const initEquityChart = async () => {
     return
   }
 
-  equityChartInstance.value = echarts.init(equityChartRef.value, 'dark', { renderer: 'canvas' })
+  equityChartInstance.value = echarts.getInstanceByDom(equityChartRef.value) || echarts.init(equityChartRef.value, 'dark', { renderer: 'canvas' })
 
   const dates = points.map((p) => p.date)
   const equityData = points.map((p) => p.equity)
@@ -1388,7 +1872,53 @@ const initEquityChart = async () => {
   }
 
   equityChartInstance.value.setOption(option)
-  useResizeObserver(equityChartRef, () => equityChartInstance.value?.resize())
+}
+
+const initCompareEquityChart = async () => {
+  if (!compareChartRef.value) return
+  const points = compareCurvePoints.value
+  if (!points.length) {
+    compareChartInstance.value?.clear()
+    return
+  }
+
+  compareChartInstance.value = echarts.getInstanceByDom(compareChartRef.value) || echarts.init(compareChartRef.value, 'dark', { renderer: 'canvas' })
+
+  const dates = points.map((point) => point.date)
+  const currentData = points.map((point) => point.current ?? null)
+  const compareData = points.map((point) => point.compare ?? null)
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(26, 26, 26, 0.95)',
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      textStyle: { color: 'rgba(255, 255, 255, 0.9)' },
+      formatter: (params: any) => {
+        let html = `<div style="font-weight: 600; margin-bottom: 8px;">${params[0].axisValue}</div>`
+        params.forEach((p: any) => {
+          html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;"><span style="width:10px;height:10px;border-radius:2px;background:${p.color};"></span><span>${p.seriesName}: ${typeof p.value === 'number' ? p.value.toFixed(2) : '--'}</span></div>`
+        })
+        return html
+      },
+    },
+    legend: { show: false },
+    grid: { left: 60, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } }, axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 }, splitLine: { show: false } },
+    yAxis: {
+      scale: true,
+      axisLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.1)' } },
+      axisLabel: { color: 'rgba(255, 255, 255, 0.5)', fontSize: 10 },
+      splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)' } },
+    },
+    series: [
+      { name: '当前回测', type: 'line', data: currentData, smooth: true, lineStyle: { width: 2, color: '#2962FF' }, itemStyle: { color: '#2962FF' } },
+      { name: '对照回测', type: 'line', data: compareData, smooth: true, lineStyle: { width: 1.6, color: 'rgba(255, 255, 255, 0.5)' }, itemStyle: { color: 'rgba(255, 255, 255, 0.5)' } },
+    ],
+  }
+
+  compareChartInstance.value.setOption(option)
 }
 
 onMounted(() => {
@@ -1396,16 +1926,22 @@ onMounted(() => {
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
   recentBacktests.value = JSON.parse(window.localStorage.getItem(RECENT_BACKTESTS_KEY) || '[]')
   hydrateFromQuery()
-  void loadStrategyTemplates()
-  void loadSavedStrategies()
-  void loadBacktestHistory()
-  if (currentBacktestId.value) {
-    void loadBacktestResult(currentBacktestId.value)
-  }
+  void (async () => {
+    await loadStrategyTemplates()
+    await loadSavedStrategies()
+    await loadBacktestHistory()
+    if (currentBacktestId.value) {
+      await loadBacktestResult(currentBacktestId.value)
+    }
+    if (selectedCompareBacktestId.value) {
+      await loadCompareBacktestResult(selectedCompareBacktestId.value)
+    }
+  })()
 })
 
 onBeforeUnmount(() => {
   equityChartInstance.value?.dispose()
+  compareChartInstance.value?.dispose()
 })
 </script>
 
@@ -1795,6 +2331,64 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.55);
 }
 
+.strategy-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+
+  &--warning {
+    color: #f6c177;
+  }
+
+  &--info {
+    color: #8fb8ff;
+  }
+}
+
+.bridge-context {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(41, 98, 255, 0.08);
+  border: 1px solid rgba(41, 98, 255, 0.22);
+}
+
+.bridge-context__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.66);
+
+  strong {
+    color: rgba(255, 255, 255, 0.9);
+  }
+}
+
+.bridge-context__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bridge-context__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+
+  span {
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  strong {
+    color: rgba(255, 255, 255, 0.88);
+    word-break: break-word;
+  }
+}
+
 .results-panel {
   flex: 1;
   min-width: 0;
@@ -2020,6 +2614,8 @@ onBeforeUnmount(() => {
 }
 
 .charts-row {
+  display: grid;
+  gap: 16px;
   margin-bottom: 24px;
 }
 

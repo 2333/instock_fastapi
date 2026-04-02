@@ -2,10 +2,18 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas.market_schema import MarketTaskHealthResponse
+from app.schemas.market_schema import MarketSummaryResponse, MarketTaskHealthResponse
 from app.services.market_data_service import MarketDataService
 
 router = APIRouter()
+
+
+@router.get("/market/summary", response_model=MarketSummaryResponse)
+async def get_market_summary(
+    db: AsyncSession = Depends(get_db),
+) -> MarketSummaryResponse:
+    service = MarketDataService(db)
+    return await service.get_summary()
 
 
 @router.get("/market/fund-flow")

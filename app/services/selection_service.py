@@ -1,6 +1,6 @@
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.providers.market_data_provider import MarketDataProvider
@@ -88,14 +88,12 @@ class SelectionService:
                 "operators": ["="],
                 "description": "是否要求 MACD 死叉/柱状图为负",
             },
-            # Patterns (coming soon)
             {
                 "key": "pattern",
                 "label": "形态筛选",
                 "value_type": "enum",
                 "operators": ["="],
-                "description": "形态类型（即将推出）",
-                "coming_soon": True,
+                "description": "形态类型（如 HAMMER、HEAD_SHOULDERS、INVERSE_HEAD_SHOULDERS）",
             },
         ]
         return payload
@@ -174,6 +172,141 @@ class SelectionService:
             },
         ]
 
+    @staticmethod
+    def _normalize_pattern_filters(conditions: dict[str, Any]) -> list[str]:
+        raw_pattern = conditions.get("pattern")
+        if raw_pattern is None:
+            return []
+        if isinstance(raw_pattern, (list, tuple, set)):
+            values = [str(item).strip() for item in raw_pattern]
+        else:
+            values = [part.strip() for part in str(raw_pattern).split(",")]
+        return [value for value in values if value]
+
+    @staticmethod
+    def _normalize_saved_condition_params(params: Any) -> dict[str, Any]:
+        if not isinstance(params, dict):
+            return {}
+        nested_filters = params.get("filters")
+        if isinstance(nested_filters, dict):
+            params = nested_filters
+        return {key: value for key, value in params.items() if value is not None}
+
+    @staticmethod
+    def _normalize_indicator_key(name: Any) -> str:
+        return "".join(char for char in str(name or "").lower() if char.isalnum())
+
+    @staticmethod
+    def _coerce_indicator_scalar(value: Any) -> float | None:
+        if value is None:
+            return None
+        if hasattr(value, "iloc"):
+            if len(value) == 0:  # type: ignore[arg-type]
+                return None
+            value = value.iloc[-1]
+        elif isinstance(value, (list, tuple)):
+            if not value:
+                return None
+            value = value[-1]
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _normalize_provider_indicator_payload(self, raw: Any) -> dict[str, float | None]:
+        indicator_map: dict[str, float | None] = {}
+
+        if raw is None:
+            return indicator_map
+
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                normalized_key = self._normalize_indicator_key(key)
+                indicator_map[normalized_key] = self._coerce_indicator_scalar(value)
+            return indicator_map
+
+        if hasattr(raw, "empty"):
+            if raw.empty:
+                return indicator_map
+            row = raw.iloc[-1].to_dict()
+            for key, value in row.items():
+                normalized_key = self._normalize_indicator_key(key)
+                indicator_map[normalized_key] = self._coerce_indicator_scalar(value)
+        return indicator_map
+
+    async def _load_provider_indicator_rows(
+        self,
+        codes: list[str],
+        target_date,
+    ) -> list[dict[str, Any]]:
+        if not self.provider or not codes:
+            return []
+
+        indicator_rows: list[dict[str, Any]] = []
+        requested_indicators = ["RSI14", "RSI", "MACD", "MACD_SIGNAL"]
+
+        for code in codes:
+            raw_payload = await self.provider.get_technicals(
+                code=code,
+                indicators=requested_indicators,
+                start_date=target_date,
+                end_date=target_date,
+            )
+            indicator_map = self._normalize_provider_indicator_payload(raw_payload)
+            if not indicator_map:
+                continue
+            indicator_rows.append(
+                {
+                    "code": code,
+                    "rsi": indicator_map.get("rsi14", indicator_map.get("rsi")),
+                    "macd": indicator_map.get("macd"),
+                    "macd_signal": indicator_map.get("macdsignal"),
+                }
+            )
+
+        return indicator_rows
+
+    async def _load_pattern_hits(
+        self, trade_date: str, ts_codes: list[str], pattern_names: list[str] | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not self.db or not ts_codes:
+            return {}
+
+        params: dict[str, Any] = {"trade_date": trade_date}
+        ts_placeholders: list[str] = []
+        for index, ts_code in enumerate(ts_codes):
+            key = f"ts_code_{index}"
+            ts_placeholders.append(f":{key}")
+            params[key] = ts_code
+
+        pattern_clause = ""
+        if pattern_names:
+            pattern_placeholders: list[str] = []
+            for index, pattern_name in enumerate(pattern_names):
+                key = f"pattern_name_{index}"
+                pattern_placeholders.append(f":{key}")
+                params[key] = pattern_name
+            pattern_clause = f" AND pattern_name IN ({', '.join(pattern_placeholders)})"
+
+        query = text(
+            f"""
+            SELECT ts_code, pattern_name, pattern_type, confidence
+            FROM patterns
+            WHERE trade_date = :trade_date
+              AND ts_code IN ({', '.join(ts_placeholders)})
+              {pattern_clause}
+            ORDER BY confidence DESC NULLS LAST, pattern_name ASC
+            """
+        )
+        result = await self.db.execute(query, params)
+        pattern_hits: dict[str, list[dict[str, Any]]] = {}
+        for row in result.mappings().all():
+            ts_code = str(row.get("ts_code") or "")
+            if not ts_code:
+                continue
+            pattern_hits.setdefault(ts_code, []).append(dict(row))
+        return pattern_hits
+
     async def _resolve_trade_date(self, date: str | None) -> str | None:
         if not self.db:
             return None
@@ -227,13 +360,19 @@ class SelectionService:
             "description": description or f"{label} {operator} {condition}",
         }
 
-    def _build_reason(self, conditions: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    def _build_reason(
+        self,
+        conditions: dict[str, Any],
+        row: dict[str, Any],
+        pattern_hits: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         pct = float(row["pct_chg"] or 0)
         amount = float(row["amount"] or 0)
         close = float(row["close"] or 0)
         market_value = "sh" if str(row["ts_code"]).endswith(".SH") else "sz"
         evidence: list[dict[str, Any]] = []
         summary_parts: list[str] = []
+        selected_patterns = self._normalize_pattern_filters(conditions)
 
         # Basic price and change conditions
         if conditions.get("priceMin") is not None:
@@ -307,11 +446,33 @@ class SelectionService:
                     "condition": str(conditions["market"]),
                     "matched": market_value == str(conditions["market"]),
                     "condition_id": "market",
-                    "condition_id": "market",
                     "condition_name": "市场范围",
                     "description": f"股票属于 {conditions['market']} 市场",
                 }
             )
+
+        if pattern_hits:
+            matched_names = [
+                str(hit.get("pattern_name") or "").strip()
+                for hit in pattern_hits
+                if hit.get("pattern_name")
+            ]
+            matched_names = [name for name in matched_names if name]
+            if matched_names:
+                summary_parts.append(f"Pattern = {', '.join(matched_names[:3])}")
+                evidence.append(
+                    {
+                        "key": "pattern",
+                        "label": "Pattern",
+                        "value": ", ".join(matched_names[:3]),
+                        "operator": "=",
+                        "condition": ", ".join(selected_patterns[:3]) if selected_patterns else ", ".join(matched_names[:3]),
+                        "matched": True,
+                        "condition_id": "pattern",
+                        "condition_name": "形态筛选",
+                        "description": f"命中形态 {', '.join(matched_names[:3])}",
+                    }
+                )
 
         # RSI conditions
         rsi_value = row.get("rsi")
@@ -422,6 +583,11 @@ class SelectionService:
     async def run_selection(
         self, conditions: dict[str, Any], date: str | None, limit: int = 300
     ) -> list[dict]:
+        pattern_names = self._normalize_pattern_filters(conditions)
+
+        if pattern_names:
+            return await self._run_selection_with_sql(conditions, date, limit)
+
         # If provider is available, delegate to provider-based implementation
         if self.provider:
             try:
@@ -455,6 +621,7 @@ class SelectionService:
         rsi_max = conditions.get("rsiMax")
         macd_bullish = conditions.get("macdBullish")
         macd_bearish = conditions.get("macdBearish")
+        pattern_names = self._normalize_pattern_filters(conditions)
 
         where_sql = [
             "s.list_status = 'L'",
@@ -479,6 +646,23 @@ class SelectionService:
             where_sql.append("s.symbol LIKE '6%'")
         elif market == "sz":
             where_sql.append("(s.symbol LIKE '0%' OR s.symbol LIKE '3%')")
+        if pattern_names:
+            pattern_placeholders: list[str] = []
+            for index, pattern_name in enumerate(pattern_names):
+                key = f"pattern_name_{index}"
+                pattern_placeholders.append(f":{key}")
+                params[key] = pattern_name
+            where_sql.append(
+                f"""
+                EXISTS (
+                    SELECT 1
+                    FROM patterns p
+                    WHERE p.ts_code = s.ts_code
+                      AND p.trade_date = :trade_date
+                      AND p.pattern_name IN ({', '.join(pattern_placeholders)})
+                )
+                """
+            )
 
         # Build base query with optional indicator joins
         select_fields = """
@@ -506,7 +690,7 @@ class SelectionService:
         if rsi_min is not None or rsi_max is not None or macd_bullish or macd_bearish:
             # Add indicator joins using conditional aggregation or subqueries
             select_fields += """,
-            COALESCE(MAX(CASE WHEN i.indicator_name = 'RSI' THEN i.indicator_value END), 0) AS rsi,
+            COALESCE(MAX(CASE WHEN i.indicator_name IN ('RSI', 'RSI14') THEN i.indicator_value END), 0) AS rsi,
             COALESCE(MAX(CASE WHEN i.indicator_name = 'MACD' THEN i.indicator_value END), 0) AS macd,
             COALESCE(MAX(CASE WHEN i.indicator_name = 'MACD_SIGNAL' THEN i.indicator_value END), 0) AS macd_signal
             """
@@ -564,6 +748,14 @@ class SelectionService:
         # Limit after filtering
         rows = filtered_rows[:limit]
 
+        pattern_hits_map: dict[str, list[dict[str, Any]]] = {}
+        if pattern_names and rows:
+            ts_codes = [str(row["ts_code"]) for row in rows if row.get("ts_code")]
+            pattern_hits_map = await self._load_pattern_hits(trade_date, ts_codes, pattern_names)
+            rows = [row for row in rows if pattern_hits_map.get(str(row["ts_code"]))]
+            if not rows:
+                return []
+
         results: list[dict] = []
         for row in rows:
             pct = float(row["pct_chg"] or 0)
@@ -574,7 +766,7 @@ class SelectionService:
                 signal = "buy"
             elif pct <= -2:
                 signal = "sell"
-            reason = self._build_reason(conditions, dict(row))
+            reason = self._build_reason(conditions, dict(row), pattern_hits_map.get(str(row["ts_code"])))
             results.append(
                 {
                     "ts_code": row["ts_code"],
@@ -593,6 +785,74 @@ class SelectionService:
                 }
             )
         return results
+
+    async def get_today_summary(
+        self, user_id: int, date: str | None = None, limit: int = 5
+    ) -> dict[str, Any]:
+        if not self.db:
+            return {
+                "trade_date": None,
+                "total_conditions": 0,
+                "active_conditions": 0,
+                "total_hits": 0,
+                "items": [],
+            }
+
+        trade_date = await self._resolve_trade_date(date)
+        if not trade_date:
+            return {
+                "trade_date": None,
+                "total_conditions": 0,
+                "active_conditions": 0,
+                "total_hits": 0,
+                "items": [],
+            }
+
+        from app.models.stock_model import SelectionCondition
+
+        stmt = select(SelectionCondition).where(SelectionCondition.user_id == user_id).order_by(
+            SelectionCondition.id.asc()
+        )
+        result = await self.db.execute(stmt)
+        all_conditions = result.scalars().all()
+        conditions = [condition for condition in all_conditions if condition.is_active]
+
+        items: list[dict[str, Any]] = []
+        total_hits = 0
+
+        for condition in conditions:
+            filters = self._normalize_saved_condition_params(condition.params)
+            hits = await self._run_selection_with_sql(filters, trade_date, limit=1000)
+            total_hits += len(hits)
+            items.append(
+                {
+                    "condition_id": condition.id,
+                    "name": condition.name,
+                    "category": condition.category,
+                    "description": condition.description,
+                    "pattern": filters.get("pattern"),
+                    "hit_count": len(hits),
+                    "top_hits": [
+                        {
+                            "code": hit["code"],
+                            "stock_name": hit.get("stock_name"),
+                            "trade_date": hit.get("trade_date"),
+                            "score": float(hit.get("score") or 0),
+                            "signal": hit.get("signal", "hold"),
+                            "reason_summary": hit.get("reason_summary"),
+                        }
+                        for hit in hits[:limit]
+                    ],
+                }
+            )
+
+        return {
+            "trade_date": trade_date,
+            "total_conditions": len(all_conditions),
+            "active_conditions": len(conditions),
+            "total_hits": total_hits,
+            "items": items,
+        }
 
     async def get_history(self, date: str | None, limit: int) -> list[dict]:
         if not self.db:
@@ -716,8 +976,8 @@ class SelectionService:
             return []
 
         import logging
-        import pandas as pd
         from datetime import date as date_cls
+        import pandas as pd
 
         logger = logging.getLogger(__name__)
 
@@ -784,41 +1044,37 @@ class SelectionService:
 
         # Get technical indicators for filtered stocks
         try:
-            final_codes = filtered["code"].unique().tolist()
-            technicals_df = await self.provider.get_technicals(
-                code=None,
-                indicators=["rsi", "macd", "macd_signal"],
-                start_date=target_date,
-                end_date=target_date,
+            final_codes = filtered["code"].dropna().astype(str).unique().tolist()
+            indicator_rows = await self._load_provider_indicator_rows(final_codes, target_date)
+            if not indicator_rows:
+                raise RuntimeError("provider technical indicators unavailable")
+
+            technicals_df = pd.DataFrame(indicator_rows)
+            merged = filtered.merge(
+                technicals_df[["code", "rsi", "macd", "macd_signal"]],
+                on="code",
+                how="left",
             )
-            if not technicals_df.empty:
-                # Merge and filter by indicators
-                merged = filtered.merge(
-                    technicals_df[["code", "rsi", "macd", "macd_signal"]],
-                    on="code",
-                    how="left",
-                )
-                if rsi_min is not None:
-                    merged = merged[(merged["rsi"].notna()) & (merged["rsi"] >= rsi_min)]
-                if rsi_max is not None:
-                    merged = merged[(merged["rsi"].notna()) & (merged["rsi"] <= rsi_max)]
-                if macd_bullish:
-                    merged = merged[
-                        (merged["macd"].notna())
-                        & (merged["macd_signal"].notna())
-                        & (merged["macd"] > merged["macd_signal"])
-                    ]
-                if macd_bearish:
-                    merged = merged[
-                        (merged["macd"].notna())
-                        & (merged["macd_signal"].notna())
-                        & (merged["macd"] < merged["macd_signal"])
-                    ]
-                return self._format_provider_results(merged, conditions, target_date, limit)
+            if rsi_min is not None:
+                merged = merged[(merged["rsi"].notna()) & (merged["rsi"] >= rsi_min)]
+            if rsi_max is not None:
+                merged = merged[(merged["rsi"].notna()) & (merged["rsi"] <= rsi_max)]
+            if macd_bullish:
+                merged = merged[
+                    (merged["macd"].notna())
+                    & (merged["macd_signal"].notna())
+                    & (merged["macd"] > merged["macd_signal"])
+                ]
+            if macd_bearish:
+                merged = merged[
+                    (merged["macd"].notna())
+                    & (merged["macd_signal"].notna())
+                    & (merged["macd"] < merged["macd_signal"])
+                ]
+            return self._format_provider_results(merged, conditions, target_date, limit)
         except Exception as exc:
             logger.warning("Indicator fetch via provider failed: %s", exc)
-
-        return self._format_provider_results(filtered, conditions, target_date, limit)
+            raise
 
     def _format_provider_results(
         self, df, conditions: dict[str, Any], trade_date, limit: int

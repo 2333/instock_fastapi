@@ -11,6 +11,7 @@ from app.schemas.selection_schema import (
     ScreeningMetadataResponse,
     ScreeningQuery,
     ScreeningRequest,
+    ScreeningTodaySummaryResponse,
     ScreeningRunData,
     ScreeningRunResponse,
     SelectionConditionCreate,
@@ -199,6 +200,18 @@ async def get_screening_history(
     return ScreeningHistoryResponse(
         data=ScreeningHistoryData(trade_date=date, limit=limit, items=items, total=len(items))
     )
+
+
+@router.get("/selection/today-summary", response_model=ScreeningTodaySummaryResponse)
+async def get_today_summary(
+    date: str | None = None,
+    limit: int = Query(5, ge=1, le=20),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningTodaySummaryResponse:
+    service = SelectionService(db)
+    summary = await service.get_today_summary(current_user.id, date=date, limit=limit)
+    return ScreeningTodaySummaryResponse(data=summary)
 
 
 @router.post("/screening/compare", response_model=ScreeningComparisonResponse)
