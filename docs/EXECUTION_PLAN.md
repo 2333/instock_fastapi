@@ -1,6 +1,6 @@
 # InStock 执行计划（Execution Plan）
 
-> 版本：v2.0 | 更新日期：2026-04-01
+> 版本：v2.0 | 更新日期：2026-04-02
 > 基于 PRD v2.0 / ROADMAP v2.0 + 代码实际进度重写
 > v1.0 归档：[EXECUTION_PLAN_v1_archive.md](./EXECUTION_PLAN_v1_archive.md)
 
@@ -141,6 +141,9 @@
 - **当前缺口**：
   - [ ] 缺少前端工作台级联调 / E2E 验收入口；当前验证主要停留在 API 和静态代码接线层
   - [ ] `web/package.json` 当前仅提供 `dev / build / typecheck / lint / preview`，未发现 Playwright / Cypress / Vitest 等前端联调测试资产
+- **当前判断**：
+  - [x] 本地手工联调路径具备基础前提：后端 `.env` 已提供本地数据库/API 运行配置，前端无额外 `.env` 依赖
+  - [ ] 因此 Dashboard 收尾更适合优先走“手工联调记录”而不是先补测试框架
 - **验收**：打开首页能看到 4 张卡片，每张卡片数据来自真实 API，点击可跳转到对应功能页
 
 #### P0b-02：筛选条件保存/加载 [x]
@@ -198,17 +201,34 @@
 > 用户把筛选方法转成参数化策略，跑历史回测，看到收益曲线、最大回撤、胜率、基准对比，并能对比不同参数版本的结果。
 
 ### 现状评估
-后端策略模板和回测引擎骨架已完成（`strategy_service.py` + `backtest_service.py`），前端回测页已有 68KB 的综合 UI。核心差距在于：回测报告的结构化程度、策略-筛选条件的打通、基准对比的完整性。
+后端策略模板和回测报告结构已成型，前端回测页的 URL 化、结果对比和历史回放也已接通。`Strategy.params` 的 canonical envelope 已统一完成，Phase 1 当前的主风险已转向“筛选策略进入回测的最终用户路径”和“回测结果结构化展示是否足够完整、可信、易解释”。
 
 ### 任务清单
 
-#### P1-01：筛选条件 → 策略模板打通 [ ]
-- **文件**：`app/services/strategy_service.py`, `app/services/selection_service.py`
+#### P1-00：统一 Strategy.params 契约 [x]
+- **文件**：`app/services/strategy_service.py`, `app/api/routers/strategy_router.py`, `app/schemas/strategy_schema.py`, `web/src/views/Backtest.vue`, `web/src/views/Selection.vue`
+- **背景**：当前 `Strategy.params` 同时存在两种形态
+  - 筛选桥接：`selection_filters / selection_scope / entry_rules / exit_rules`
+  - 回测保存：`strategy_type / stock_code / period / initial_capital / ... / strategy_params`
+- **已完成**：
+  - [x] 定义唯一 canonical envelope，统一 `source / template_name / selection_filters / selection_scope / entry_rules / exit_rules / backtest_config / strategy_params`
+  - [x] `/strategies/my` 与 `/strategies/my/from-selection` 写入同一结构
+  - [x] Backtest 页可继续兼容旧数据，后端写入已统一
+  - [x] 移除标准化输出与前端保存里的 legacy 顶层扁平镜像字段，仅保留 `backtest_config` 作为回测配置承载
+  - [x] 补测试覆盖：selection payload、manual backtest payload、旧 payload 兼容读取
+- **验收**：同一套 `Strategy.params` 既能表达筛选桥接策略，也能表达回测保存策略，前后端不再靠分叉字段名硬兼容
+
+#### P1-01：筛选条件 → 策略模板打通 [-]
+- **文件**：`app/services/strategy_service.py`, `app/api/routers/strategy_router.py`, `web/src/views/Selection.vue`
+- **现状**：筛选页已支持一键“保存为策略”，后端已提供 `selection_bridge` 模板与 `/strategies/my/from-selection`
+- **已完成**：
+  - [x] 用户在筛选页可一键"将当前条件保存为策略"
+  - [x] 策略模板可直接暴露筛选条件 schema 元信息
+  - [x] 入场条件 = 筛选条件、出场条件 = 可配置 的桥接结构已落地
 - **待做**：
-  - [ ] 用户在筛选页可一键"将当前条件保存为策略"
-  - [ ] 策略模板可直接消费筛选条件 schema
-  - [ ] 在策略模板中增加买卖规则配置（入场条件 = 筛选条件，出场条件 = 可配置）
-- **验收**：在筛选页保存一组条件 → 在策略页看到对应策略 → 可直接发起回测
+  - [ ] 在策略页提供更明确的 selection-derived strategy 展示与编辑入口
+  - [ ] 打通“从已保存筛选策略直接发起回测”的最终用户路径
+- **验收**：在筛选页保存一组条件 → 在策略/回测体系内看到对应策略 → 后续可平滑进入回测
 
 #### P1-02：回测报告结构化 [-]
 - **文件**：`app/services/backtest_service.py`, `app/schemas/`
@@ -225,11 +245,14 @@
 
 #### P1-03：策略参数对比 [-]
 - **文件**：`web/src/views/Backtest.vue`
-- **现状**：前端已有回测 UI，需确认对比功能完整度
+- **现状**：结果对比表、核心指标 delta、收益曲线叠加图、对照基线选择器都已接通；URL 状态刷新恢复也已落地
+- **已完成**：
+  - [x] 同一策略不同参数版本的回测结果并排对比
+  - [x] 核心指标对比表：收益率、回撤、胜率、夏普比率
+  - [x] 收益曲线叠加图
 - **待做**：
-  - [ ] 同一策略不同参数版本的回测结果并排对比
-  - [ ] 核心指标对比表：收益率、回撤、胜率、夏普比率
-  - [ ] 收益曲线叠加图
+  - [ ] 统一“对比对象”的参数来源契约，避免历史快照和已保存策略双轨并存
+  - [ ] 补更完整的参数 diff 展示，而不是仅展示当前模板前几个参数
 - **验收**：用户跑两次不同参数的回测 → 在对比页看到差异
 
 #### P1-04：回测任务异步化 [ ]
@@ -240,12 +263,15 @@
   - [ ] 回测任务状态持久化（pending → running → completed / failed）
 - **验收**：发起跨 1 年回测 → 前端显示进度 → 完成后自动刷新结果
 
-#### P1-05：策略保存与 URL 化 [ ]
+#### P1-05：策略保存与 URL 化 [-]
 - **文件**：`app/api/routers/strategy_router.py`
-- **现状**：策略 CRUD 已有
+- **现状**：Backtest 页已支持 `stock / period / strategy / saved / bt / cbt` 与关键参数 URL 化，刷新可恢复；浏览器 query 变更也已开始回流到页面状态
+- **已完成**：
+  - [x] 策略 + 参数 + 回测结果可通过 URL 复现
+  - [x] 前端 URL 即状态（刷新不丢失上下文）
 - **待做**：
-  - [ ] 策略 + 参数 + 回测结果可通过 URL 复现
-  - [ ] 前端 URL 即状态（刷新不丢失上下文）
+  - [ ] 把 URL 化能力和统一 `Strategy.params` 契约对齐
+  - [ ] 补前端联调 / E2E 资产，验证分享链接在真实交互下稳定
 - **验收**：复制回测结果页 URL → 新标签页打开 → 完整复现
 
 ---
