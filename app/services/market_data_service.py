@@ -7,6 +7,15 @@ class MarketDataService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _to_float(value) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     async def _resolve_trade_date(
         self, target_date: str | None, table_name: str = "daily_bars"
     ) -> str | None:
@@ -228,3 +237,275 @@ class MarketDataService:
             "alerts": alerts,
             "alert_count": alert_count,
         }
+
+    async def get_summary(self) -> dict:
+        """返回首页市场温度计所需的聚合摘要。"""
+        trade_date = await self._resolve_trade_date(None, "daily_bars")
+        if not trade_date:
+            return {
+                "trade_date": None,
+                "total_count": 0,
+                "up_count": 0,
+                "down_count": 0,
+                "flat_count": 0,
+                "limit_up_count": 0,
+                "limit_down_count": 0,
+                "sentiment_summary": "当前没有可用的盘后行情数据。",
+                "indices": [],
+            }
+
+        query = text("""
+            SELECT
+                s.symbol,
+                s.name,
+                s.market,
+                s.exchange,
+                s.is_etf,
+                db.close,
+                db.pct_chg,
+                db.trade_date
+            FROM daily_bars db
+            INNER JOIN stocks s ON s.ts_code = db.ts_code
+            WHERE db.trade_date = :trade_date
+              AND COALESCE(s.list_status, 'L') = 'L'
+              AND COALESCE(s.is_etf, false) = false
+            ORDER BY s.symbol ASC
+        """)
+        result = await self.db.execute(query, {"trade_date": trade_date})
+        rows = [dict(row._mapping) for row in result.fetchall()]
+
+        if not rows:
+            return {
+                "trade_date": trade_date,
+                "total_count": 0,
+                "up_count": 0,
+                "down_count": 0,
+                "flat_count": 0,
+                "limit_up_count": 0,
+                "limit_down_count": 0,
+                "sentiment_summary": "当前交易日没有可用于首页聚合的股票行情。",
+                "indices": self._build_index_placeholders(trade_date, "暂无可用成分数据"),
+            }
+
+        up_count = 0
+        down_count = 0
+        flat_count = 0
+        limit_up_count = 0
+        limit_down_count = 0
+        total_change = 0.0
+        total_change_weight = 0
+        index_buckets: dict[str, list[dict]] = {
+            "sh_index": [],
+            "sz_index": [],
+            "chinext_index": [],
+        }
+
+        for row in rows:
+            pct_chg = self._to_float(row.get("pct_chg"))
+            if pct_chg is None:
+                continue
+
+            total_change += pct_chg
+            total_change_weight += 1
+
+            if abs(pct_chg) < 0.005:
+                flat_count += 1
+            elif pct_chg > 0:
+                up_count += 1
+            else:
+                down_count += 1
+
+            threshold = self._limit_threshold(row)
+            if pct_chg >= threshold:
+                limit_up_count += 1
+            elif pct_chg <= -threshold:
+                limit_down_count += 1
+
+            bucket = self._market_bucket(row)
+            if bucket in index_buckets:
+                index_buckets[bucket].append(row)
+
+        indices = [
+            self._build_index_summary(
+                code="sh_index",
+                name="上证综指代理",
+                rows=index_buckets["sh_index"],
+                trade_date=trade_date,
+                note="基于上海市场股票日涨跌幅的代理摘要",
+            ),
+            self._build_index_summary(
+                code="sz_index",
+                name="深成综指代理",
+                rows=index_buckets["sz_index"],
+                trade_date=trade_date,
+                note="基于深圳市场股票日涨跌幅的代理摘要",
+            ),
+            self._build_index_summary(
+                code="chinext_index",
+                name="创业板代理",
+                rows=index_buckets["chinext_index"],
+                trade_date=trade_date,
+                note="基于创业板股票日涨跌幅的代理摘要",
+            ),
+        ]
+
+        avg_change = total_change / total_change_weight if total_change_weight else 0.0
+        sentiment_summary = self._build_sentiment_summary(
+            trade_date=trade_date,
+            total_count=total_change_weight,
+            up_count=up_count,
+            down_count=down_count,
+            flat_count=flat_count,
+            limit_up_count=limit_up_count,
+            limit_down_count=limit_down_count,
+            avg_change=avg_change,
+            indices=indices,
+        )
+
+        return {
+            "trade_date": trade_date,
+            "total_count": total_change_weight,
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "limit_up_count": limit_up_count,
+            "limit_down_count": limit_down_count,
+            "sentiment_summary": sentiment_summary,
+            "indices": indices,
+        }
+
+    @staticmethod
+    def _market_bucket(row: dict) -> str | None:
+        symbol = str(row.get("symbol") or "")
+        market = str(row.get("market") or "")
+        exchange = str(row.get("exchange") or "")
+
+        if symbol.startswith("3") or market == "创业板":
+            return "chinext_index"
+        if symbol.startswith("688") or market == "科创板":
+            return "sh_index"
+        if symbol.startswith("0") or symbol.startswith("2") or exchange.upper() in {"SZSE", "SZ"}:
+            return "sz_index"
+        if symbol.startswith("6") or exchange.upper() in {"SSE", "SH"}:
+            return "sh_index"
+        return None
+
+    @staticmethod
+    def _limit_threshold(row: dict) -> float:
+        symbol = str(row.get("symbol") or "")
+        market = str(row.get("market") or "")
+        if symbol.startswith("3") or symbol.startswith("688") or market in {"创业板", "科创板"}:
+            return 19.5
+        return 9.5
+
+    def _build_index_placeholders(self, trade_date: str | None, note: str) -> list[dict]:
+        return [
+            {
+                "code": "sh_index",
+                "name": "上证综指代理",
+                "trade_date": trade_date,
+                "current": None,
+                "change": None,
+                "change_rate": None,
+                "constituent_count": 0,
+                "source": "fallback",
+                "note": note,
+            },
+            {
+                "code": "sz_index",
+                "name": "深成综指代理",
+                "trade_date": trade_date,
+                "current": None,
+                "change": None,
+                "change_rate": None,
+                "constituent_count": 0,
+                "source": "fallback",
+                "note": note,
+            },
+            {
+                "code": "chinext_index",
+                "name": "创业板代理",
+                "trade_date": trade_date,
+                "current": None,
+                "change": None,
+                "change_rate": None,
+                "constituent_count": 0,
+                "source": "fallback",
+                "note": note,
+            },
+        ]
+
+    def _build_index_summary(
+        self,
+        *,
+        code: str,
+        name: str,
+        rows: list[dict],
+        trade_date: str | None,
+        note: str | None = None,
+    ) -> dict:
+        if not rows:
+            return {
+                "code": code,
+                "name": name,
+                "trade_date": trade_date,
+                "current": None,
+                "change": None,
+                "change_rate": None,
+                "constituent_count": 0,
+                "source": "fallback",
+                "note": note or "暂无可用成分数据",
+            }
+
+        change_rates = [self._to_float(row.get("pct_chg")) for row in rows]
+        change_rates = [value for value in change_rates if value is not None]
+        avg_change_rate = sum(change_rates) / len(change_rates) if change_rates else None
+
+        return {
+            "code": code,
+            "name": name,
+            "trade_date": trade_date,
+            "current": None,
+            "change": None,
+            "change_rate": round(avg_change_rate, 4) if avg_change_rate is not None else None,
+            "constituent_count": len(rows),
+            "source": "proxy",
+            "note": note,
+        }
+
+    def _build_sentiment_summary(
+        self,
+        *,
+        trade_date: str,
+        total_count: int,
+        up_count: int,
+        down_count: int,
+        flat_count: int,
+        limit_up_count: int,
+        limit_down_count: int,
+        avg_change: float,
+        indices: list[dict],
+    ) -> str:
+        if total_count <= 0:
+            return "当前没有可用的盘后行情数据。"
+
+        up_ratio = up_count / total_count if total_count else 0
+        down_ratio = down_count / total_count if total_count else 0
+        bullish_indices = sum(1 for item in indices if (item.get("change_rate") or 0) > 0)
+        bearish_indices = sum(1 for item in indices if (item.get("change_rate") or 0) < 0)
+
+        if up_ratio >= 0.6 and limit_up_count >= limit_down_count and avg_change > 0:
+            mood = "市场偏强，涨多跌少，情绪积极。"
+        elif down_ratio >= 0.6 and limit_down_count >= limit_up_count and avg_change < 0:
+            mood = "市场偏弱，跌多涨少，情绪偏谨慎。"
+        elif bullish_indices > bearish_indices:
+            mood = "主要指数多数收涨，整体情绪略偏多。"
+        elif bearish_indices > bullish_indices:
+            mood = "主要指数多数收跌，整体情绪略偏空。"
+        else:
+            mood = "市场分歧较大，整体情绪中性。"
+
+        return (
+            f"{trade_date} 收盘：上涨 {up_count} 只、下跌 {down_count} 只、平盘 {flat_count} 只，"
+            f"涨停 {limit_up_count} 只、跌停 {limit_down_count} 只。{mood}"
+        )

@@ -29,6 +29,30 @@ async def test_run_backtest_returns_missing_required_params_error():
 
 
 @pytest.mark.asyncio
+async def test_run_backtest_rejects_unsupported_strategy():
+    db = Mock()
+    service = BacktestService(db=db)
+
+    result = await service.run_backtest(
+        {
+            "stock_code": "000001",
+            "start_date": "20240102",
+            "end_date": "20240103",
+            "strategy": "selection_bridge",
+        },
+        user_id=7,
+    )
+
+    assert result == {
+        "backtest_id": None,
+        "status": "failed",
+        "error": "unsupported_strategy",
+        "strategy": "selection_bridge",
+    }
+    db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_run_backtest_includes_strategy_params_in_result_meta():
     db = Mock()
     db.execute = AsyncMock(

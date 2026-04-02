@@ -571,5 +571,69 @@ async def test_strategy_create_persists_params_payload(client, current_user_over
     assert response.status_code == 200
     saved_strategy = fake_db.add.call_args.args[0]
     assert saved_strategy.name == "ma_crossover-600519"
-    assert saved_strategy.params["strategy_type"] == "ma_crossover"
+    assert saved_strategy.params["source"] == "backtest"
+    assert saved_strategy.params["template_name"] == "ma_crossover"
+    assert saved_strategy.params["backtest_config"]["strategy_type"] == "ma_crossover"
+    assert saved_strategy.params["backtest_config"]["stock_code"] == "600519"
+    assert saved_strategy.params["entry_rules"]["mode"] == "template_signal"
+    assert saved_strategy.params["exit_rules"]["mode"] == "fixed_risk"
+    assert saved_strategy.params["exit_rules"]["stop_loss_pct"] is None
     assert saved_strategy.params["strategy_params"]["fast_ma"] == 5
+    assert "strategy_type" not in saved_strategy.params
+
+
+@pytest.mark.asyncio
+async def test_strategy_update_normalizes_flat_backtest_payload(client, current_user_override):
+    existing_strategy = SimpleNamespace(
+        id=9,
+        user_id=1,
+        name="ma_crossover-600519",
+        description="old",
+        params={"source": "manual"},
+        is_active=True,
+    )
+
+    async def refresh_strategy(obj):
+        return obj
+
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: existing_strategy),
+                SimpleNamespace(scalar_one_or_none=lambda: existing_strategy),
+            ]
+        ),
+        delete=Mock(),
+        commit=AsyncMock(),
+        refresh=AsyncMock(side_effect=refresh_strategy),
+    )
+
+    async def override_router_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = override_router_db
+
+    try:
+        response = await client.put(
+            "/api/v1/strategies/my/9",
+            json={
+                "params": {
+                    "strategy_type": "rsi_oversold",
+                    "stock_code": "000001",
+                    "period": "1y",
+                    "initial_capital": 200000,
+                    "strategy_params": {"rsi_period": 14, "oversold_level": 30},
+                },
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert existing_strategy.params["source"] == "backtest"
+    assert existing_strategy.params["template_name"] == "rsi_oversold"
+    assert existing_strategy.params["backtest_config"]["strategy_type"] == "rsi_oversold"
+    assert existing_strategy.params["backtest_config"]["stock_code"] == "000001"
+    assert existing_strategy.params["entry_rules"]["mode"] == "template_signal"
+    assert existing_strategy.params["exit_rules"]["mode"] == "fixed_risk"
+    assert existing_strategy.params["strategy_params"]["rsi_period"] == 14

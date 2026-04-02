@@ -30,7 +30,9 @@ class SelectionFilters(BaseModel):
     macd_bullish: bool | None = Field(None, alias="macdBullish")
     macd_bearish: bool | None = Field(None, alias="macdBearish")
     # Pattern filters (future)
-    pattern: str | None = Field(None, description="Pattern name to filter by")
+    pattern: str | None = Field(
+        None, description="Pattern name to filter by (for example HAMMER or HEAD_SHOULDERS)"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -315,4 +317,47 @@ class ScreeningComparisonResponse(BaseModel):
     code: str = "SUCCESS"
     message: str = "OK"
     data: list[ScreeningComparisonItem] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ScreeningTodayHitItem(BaseModel):
+    """One hit item in today's saved-condition summary."""
+
+    code: str
+    stock_name: str | None = None
+    trade_date: str | None = None
+    score: float
+    signal: str
+    reason_summary: str | None = None
+
+
+class ScreeningTodayConditionItem(BaseModel):
+    """One saved condition in the today-summary payload."""
+
+    condition_id: int
+    name: str
+    category: str
+    description: str | None = None
+    pattern: str | None = None
+    hit_count: int = 0
+    top_hits: list[ScreeningTodayHitItem] = Field(default_factory=list)
+
+
+class ScreeningTodaySummaryData(BaseModel):
+    """Structured payload for today's saved-condition summary."""
+
+    trade_date: str | None = None
+    total_conditions: int = 0
+    active_conditions: int = 0
+    total_hits: int = 0
+    items: list[ScreeningTodayConditionItem] = Field(default_factory=list)
+
+
+class ScreeningTodaySummaryResponse(BaseModel):
+    """Canonical response for GET /selection/today-summary."""
+
+    success: bool = True
+    code: str = "SUCCESS"
+    message: str = "OK"
+    data: ScreeningTodaySummaryData
     timestamp: datetime = Field(default_factory=datetime.utcnow)

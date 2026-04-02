@@ -2,10 +2,10 @@
   <div class="dashboard-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">Phase 0 工作台</p>
-        <h1>重新进入扫描与验证</h1>
+        <p class="eyebrow">Phase 0b 工作台</p>
+        <h1>四个入口，把扫描、关注、验证收回来</h1>
         <p class="subtitle">
-          首页只保留四个真实入口，帮助你从最近一次扫描、关注和验证继续往下走。
+          首页只保留真实入口：市场温度计、我的关注、今日扫描发现、策略信号与回测更新。
         </p>
       </div>
       <div class="header-actions">
@@ -13,123 +13,87 @@
           <span class="sync-label">最近刷新</span>
           <strong>{{ lastSyncedLabel }}</strong>
         </div>
-        <button class="refresh-btn" @click="refreshWorkbench" :disabled="loading">
+        <button class="refresh-btn" :disabled="loading" @click="refreshWorkbench">
           {{ loading ? '刷新中...' : '刷新工作台' }}
         </button>
       </div>
     </header>
 
     <div v-if="loadWarnings.length" class="warning-banner">
-      <strong>部分卡片未完成加载</strong>
+      <strong>部分数据暂不可用</strong>
       <span>{{ loadWarnings.join(' / ') }}</span>
     </div>
 
-    <section class="health-strip">
-      <div class="card-header health-strip__header">
-        <div>
-          <span class="card-kicker">数据任务健康</span>
-          <h2>关键更新状态</h2>
-        </div>
-        <span :class="healthToneClass">{{ healthToneLabel }}</span>
-      </div>
-
-      <div class="metric-strip metric-strip--compact metric-strip--health">
-        <div class="metric-block">
-          <span class="metric-value">{{ staleDatasetCount }}</span>
-          <span class="metric-label">滞后数据集</span>
-        </div>
-        <div class="metric-block">
-          <span class="metric-value" :class="{ 'metric-value--negative': activeAlertCount > 0 }">
-            {{ activeAlertCount }}
-          </span>
-          <span class="metric-label">活动告警</span>
-        </div>
-        <div class="metric-block">
-          <span class="metric-value metric-value--small">{{ baselineTradeDateLabel }}</span>
-          <span class="metric-label">基准交易日</span>
-        </div>
-        <div class="metric-block">
-          <span class="metric-value metric-value--small">{{ topAlertDatasetLabel }}</span>
-          <span class="metric-label">最高优先提示</span>
-        </div>
-      </div>
-
-      <p class="card-description health-strip__description">
-        <template v-if="topAlertSummary">
-          {{ topAlertSummary }}
-        </template>
-        <template v-else-if="staleDatasetNames.length">
-          当前滞后数据集：{{ staleDatasetNames.join(' / ') }}。
-        </template>
-        <template v-else>
-          关键市场数据已对齐到基准交易日，首页暂未发现需要优先处理的更新异常。
-        </template>
-      </p>
-
-      <div v-if="staleDatasetNames.length || alertBadgeLabels.length" class="health-strip__tags">
-        <span v-for="label in staleDatasetNames" :key="`stale-${label}`" class="health-tag health-tag--stale">
-          滞后：{{ label }}
-        </span>
-        <span v-for="label in alertBadgeLabels" :key="`alert-${label}`" class="health-tag health-tag--alert">
-          告警：{{ label }}
-        </span>
-      </div>
-    </section>
-
     <div class="card-grid">
-      <section class="workbench-card">
+      <section class="workbench-card workbench-card--market">
         <div class="card-header">
           <div>
-            <span class="card-kicker">扫描温度</span>
-            <h2>今日形态摘要</h2>
+            <span class="card-kicker">市场温度计</span>
+            <h2>盘后市场概览</h2>
           </div>
-          <router-link to="/patterns" class="card-link">进入形态识别</router-link>
+          <router-link to="/stocks" class="card-link">查看股票列表</router-link>
         </div>
 
-        <div class="metric-strip">
+        <div class="metric-strip metric-strip--market">
           <div class="metric-block">
-            <span class="metric-value">{{ patternSummary.total }}</span>
-            <span class="metric-label">命中总数</span>
+            <span class="metric-value metric-value--positive">{{ formatCount(marketSummary.advancers) }}</span>
+            <span class="metric-label">上涨家数</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value metric-value--positive">{{ patternSummary.bullish }}</span>
-            <span class="metric-label">看涨</span>
+            <span class="metric-value metric-value--negative">{{ formatCount(marketSummary.decliners) }}</span>
+            <span class="metric-label">下跌家数</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value">{{ patternSummary.neutral }}</span>
-            <span class="metric-label">中性</span>
+            <span class="metric-value">{{ formatCount(marketSummary.unchanged) }}</span>
+            <span class="metric-label">平盘家数</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value metric-value--negative">{{ patternSummary.bearish }}</span>
-            <span class="metric-label">看跌</span>
+            <span class="metric-value metric-value--positive">{{ formatCount(marketSummary.limitUp) }}</span>
+            <span class="metric-label">涨停</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--negative">{{ formatCount(marketSummary.limitDown) }}</span>
+            <span class="metric-label">跌停</span>
           </div>
         </div>
 
-        <p class="card-description">
-          <template v-if="patternSummary.tradeDate">
-            最近评估交易日 {{ formatDisplayDate(patternSummary.tradeDate) }}，优先从置信度更高的形态回到个股详情。
-          </template>
-          <template v-else>
-            当前没有可展示的形态结果，进入形态识别页可重新扫描。
-          </template>
-        </p>
+        <div class="mood-panel">
+          <div class="mood-panel__header">
+            <span class="card-kicker">情绪摘要</span>
+            <span :class="toneBadgeClass(marketSummary.moodTone)">{{ marketSummary.moodLabel }}</span>
+          </div>
+          <p class="card-description">
+            <template v-if="marketSummary.headline">
+              {{ marketSummary.headline }}
+            </template>
+            <template v-else-if="marketSummary.tradeDate">
+              已完成 {{ formatDisplayDate(marketSummary.tradeDate) }} 的市场聚合，等待后端补充情绪摘要。
+            </template>
+            <template v-else>
+              市场温度计暂未返回数据，刷新后会自动回落为空状态。
+            </template>
+          </p>
+        </div>
 
-        <div v-if="topPatterns.length" class="list-stack">
-          <router-link
-            v-for="pattern in topPatterns"
-            :key="`${pattern.code}-${pattern.patternName}-${pattern.tradeDate}`"
-            :to="buildStockLink(pattern.code, pattern.tradeDate)"
-            class="list-row"
+        <div v-if="marketSummary.majorIndices.length" class="list-stack">
+          <div
+            v-for="indexItem in marketSummary.majorIndices"
+            :key="indexItem.code"
+            class="list-row list-row--static"
           >
             <div>
-              <strong>{{ pattern.code }}</strong>
-              <span>{{ pattern.name }}</span>
+              <strong>{{ indexItem.name }}</strong>
+              <span>{{ indexItem.code }}</span>
             </div>
             <div class="row-meta">
-              <span :class="signalBadgeClass(pattern.signal)">{{ signalLabel(pattern.signal) }}</span>
-              <span>{{ pattern.confidence.toFixed(0) }}%</span>
+              <span :class="trendBadgeClass(indexItem.changeRate)">
+                {{ formatSignedPercent(indexItem.changeRate) }}
+              </span>
+              <span class="row-note">
+                {{ indexItem.current !== null ? formatCount(indexItem.current) : formatIndexMeta(indexItem) }}
+              </span>
             </div>
-          </router-link>
+          </div>
         </div>
       </section>
 
@@ -137,7 +101,7 @@
         <div class="card-header">
           <div>
             <span class="card-kicker">我的关注</span>
-            <h2>关注列表回看</h2>
+            <h2>关注列表联动</h2>
           </div>
           <router-link to="/attention" class="card-link">管理关注</router-link>
         </div>
@@ -145,36 +109,46 @@
         <div class="metric-strip metric-strip--compact">
           <div class="metric-block">
             <span class="metric-value">{{ attentionItems.length }}</span>
-            <span class="metric-label">已关注股票</span>
+            <span class="metric-label">关注股票</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value">{{ latestAttentionDateLabel }}</span>
+            <span class="metric-value">{{ triggeredAttentionCount }}</span>
+            <span class="metric-label">今日命中</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--small">{{ attentionLatestDateLabel }}</span>
             <span class="metric-label">最近加入</span>
           </div>
         </div>
 
         <p class="card-description">
-          <template v-if="attentionItems.length">
-            从关注列表直接回到个股详情，继续核对走势与筛选证据。
+          <template v-if="triggeredAttentionCount > 0">
+            今日扫描结果已和关注列表联动，命中的个股会直接标记出来，方便继续核对验证。
+          </template>
+          <template v-else-if="attentionItems.length > 0">
+            关注列表已加载，但当前暂无命中提示。后端补上今日扫描概要后，这里会自动点亮。
           </template>
           <template v-else>
-            暂无关注股票，可在详情页或关注页补充观察名单。
+            还没有关注股票，可以从个股详情或关注页补充观察名单。
           </template>
         </p>
 
-        <div v-if="topAttentionItems.length" class="list-stack">
+        <div v-if="attentionItems.length" class="list-stack">
           <router-link
-            v-for="stock in topAttentionItems"
-            :key="stock.code"
-            :to="buildStockLink(stock.code)"
+            v-for="item in topAttentionItems"
+            :key="item.code"
+            :to="buildStockLink(item.code, todaySummary.tradeDate)"
             class="list-row"
           >
             <div>
-              <strong>{{ stock.code }}</strong>
-              <span>{{ stock.name }}</span>
+              <strong>{{ item.code }}</strong>
+              <span>{{ item.name }}</span>
             </div>
             <div class="row-meta">
-              <span>{{ formatDisplayDate(stock.createdAt) }}</span>
+              <span v-if="isAttentionTriggered(item.code)" class="signal-badge signal-badge--bullish">
+                今日命中
+              </span>
+              <span>{{ formatDisplayDate(item.createdAt) }}</span>
             </div>
           </router-link>
         </div>
@@ -183,45 +157,53 @@
       <section class="workbench-card">
         <div class="card-header">
           <div>
-            <span class="card-kicker">最新筛选</span>
-            <h2>最近一次筛选结果</h2>
+            <span class="card-kicker">今日扫描发现</span>
+            <h2>已保存条件的命中概要</h2>
           </div>
-          <router-link to="/selection" class="card-link">继续筛选</router-link>
+          <router-link to="/selection" class="card-link">进入筛选页</router-link>
         </div>
 
         <div class="metric-strip metric-strip--compact">
           <div class="metric-block">
-            <span class="metric-value">{{ latestScreeningCount }}</span>
-            <span class="metric-label">最新命中</span>
+            <span class="metric-value">{{ formatCount(todaySummary.savedConditionCount) }}</span>
+            <span class="metric-label">已保存条件</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value">{{ latestScreeningDateLabel }}</span>
+            <span class="metric-value">{{ formatCount(todaySummary.totalHits) }}</span>
+            <span class="metric-label">今日命中</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--small">{{ todaySummaryDateLabel }}</span>
             <span class="metric-label">筛选交易日</span>
           </div>
         </div>
 
         <p class="card-description">
-          <template v-if="latestScreeningCount > 0">
-            保留最近交易日的筛选命中，便于直接重回结果页或逐只进入验证详情。
+          <template v-if="todaySummary.note">
+            {{ todaySummary.note }}
+          </template>
+          <template v-else-if="todaySummary.items.length > 0">
+            今天命中的条件已经按保存列表聚合，点开筛选页可以继续回看命中股票和证据。
           </template>
           <template v-else>
-            还没有筛选历史，进入股票精选页可发起新的规范筛选。
+            还没有可展示的今日扫描概要，等待后端把今日摘要接口接上后会自动显示。
           </template>
         </p>
 
-        <div v-if="latestScreeningItems.length" class="list-stack">
+        <div v-if="todaySummary.items.length" class="list-stack">
           <router-link
-            v-for="item in latestScreeningItems"
-            :key="`${item.code}-${item.tradeDate}`"
-            :to="buildStockLink(item.code, item.tradeDate)"
+            v-for="item in topTodayConditions"
+            :key="item.id"
+            to="/selection"
             class="list-row"
           >
             <div>
-              <strong>{{ item.code }}</strong>
-              <span>{{ item.name }}</span>
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.category || '保存条件' }}</span>
             </div>
             <div class="row-meta">
-              <span>{{ item.score.toFixed(1) }} 分</span>
+              <span class="row-note">{{ item.hitCount }} 只</span>
+              <span>{{ item.topCodes.length ? item.topCodes.slice(0, 2).join(' / ') : '暂无代码' }}</span>
             </div>
           </router-link>
         </div>
@@ -230,75 +212,55 @@
       <section class="workbench-card">
         <div class="card-header">
           <div>
-            <span class="card-kicker">最近验证</span>
-            <h2>历史验证入口</h2>
+            <span class="card-kicker">策略信号 / 回测更新</span>
+            <h2>最近回测与策略记录</h2>
           </div>
-          <router-link to="/selection" class="card-link">查看历史</router-link>
+          <router-link to="/backtest" class="card-link">查看回测页</router-link>
         </div>
 
         <div class="metric-strip metric-strip--compact">
           <div class="metric-block">
-            <span class="metric-value">{{ latestValidationCount }}</span>
-            <span class="metric-label">历史记录</span>
+            <span class="metric-value">{{ backtestSummary.totalReturnLabel }}</span>
+            <span class="metric-label">最新收益</span>
           </div>
           <div class="metric-block">
-            <span class="metric-value">{{ latestValidationDateLabel }}</span>
-            <span class="metric-label">最近日期</span>
+            <span class="metric-value">{{ backtestSummary.drawdownLabel }}</span>
+            <span class="metric-label">最大回撤</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ backtestSummary.winRateLabel }}</span>
+            <span class="metric-label">胜率</span>
           </div>
         </div>
 
         <p class="card-description">
-          <template v-if="latestValidationCount > 0">
-            从历史筛选记录回到个股详情，继续核查价格、指标和形态是否支持当时结论。
+          <template v-if="latestBacktest">
+            最新回测来自 {{ latestBacktest.strategyLabel }}，覆盖 {{ latestBacktest.rangeLabel }}。
+          </template>
+          <template v-else-if="backtestItems.length > 0">
+            已加载回测历史，但暂未解析出最新摘要。
           </template>
           <template v-else>
-            暂无历史验证记录，当前首页不会伪造策略或回测摘要。
+            暂无回测记录，进入回测页后可直接发起新的策略验证。
           </template>
         </p>
 
-        <div v-if="latestValidationItems.length" class="list-stack">
+        <div v-if="backtestItems.length" class="list-stack">
           <router-link
-            v-for="item in latestValidationItems"
-            :key="item.selectionId"
-            :to="buildStockLink(item.code, item.tradeDate)"
+            v-for="item in topBacktestItems"
+            :key="item.id"
+            :to="buildBacktestLink(item)"
             class="list-row"
           >
             <div>
-              <strong>{{ item.code }}</strong>
-              <span>{{ item.name }}</span>
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.strategyLabel }}</span>
             </div>
             <div class="row-meta">
-              <span>{{ item.score.toFixed(1) }} 分</span>
-            </div>
-          </router-link>
-        </div>
-      </section>
-
-      <section class="workbench-card">
-        <div class="card-header">
-          <div>
-            <span class="card-kicker">最近查看</span>
-            <h2>最近浏览的股票</h2>
-          </div>
-        </div>
-
-        <div v-if="recentViewedStocks.length === 0" class="empty-hint">
-          暂无最近查看的股票记录
-        </div>
-
-        <div v-else class="list-stack">
-          <router-link
-            v-for="item in recentViewedStocks"
-            :key="item.code"
-            :to="`/stock/${item.code}`"
-            class="list-row"
-          >
-            <div>
-              <strong>{{ item.code }}</strong>
-              <span>{{ item.name }}</span>
-            </div>
-            <div class="row-meta">
-              <span>{{ formatCompactDateRelative(item.viewedAt) }}</span>
+              <span :class="trendBadgeClass(item.totalReturn)">
+                {{ formatSignedPercent(item.totalReturn) }}
+              </span>
+              <span>{{ formatDisplayDate(item.createdAt) }}</span>
             </div>
           </router-link>
         </div>
@@ -309,47 +271,73 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { attentionApi, marketApi, patternApi, selectionApi } from '@/api'
+import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
 
 interface AttentionEntry {
   code: string
   name: string
+  group: string
+  notes: string
   createdAt: string
 }
 
-interface ScreeningEntry {
-  selectionId: string
+interface MarketIndexEntry {
   code: string
   name: string
-  tradeDate: string
-  score: number
-}
-
-interface PatternEntry {
-  code: string
-  name: string
-  tradeDate: string
-  confidence: number
-  signal: string
-  patternName: string
-}
-
-interface MarketTaskDatasetStatus {
-  dataset: string
-  latestTradeDate: string
-  baselineTradeDate: string
-  current: boolean
-}
-
-interface MarketTaskHealthAlert {
-  taskName: string
-  entityType: string
-  entityKey: string
-  tradeDate: string
-  status: string
+  current: number | null
+  changeRate: number | null
+  constituentCount: number | null
   source: string
+}
+
+interface MarketSummaryState {
+  tradeDate: string
+  advancers: number | null
+  decliners: number | null
+  unchanged: number | null
+  limitUp: number | null
+  limitDown: number | null
+  headline: string
+  moodLabel: string
+  moodTone: 'bullish' | 'neutral' | 'bearish'
+  majorIndices: MarketIndexEntry[]
+}
+
+interface TodayConditionEntry {
+  id: string
+  name: string
+  category: string
+  hitCount: number
+  tradeDate: string
+  summary: string
+  topCodes: string[]
+}
+
+interface TodaySummaryState {
+  tradeDate: string
+  totalHits: number | null
+  savedConditionCount: number | null
   note: string
-  updatedAt: string
+  items: TodayConditionEntry[]
+  triggeredCodes: string[]
+}
+
+interface BacktestEntry {
+  id: string
+  name: string
+  strategy: string
+  strategyLabel: string
+  code: string
+  stockName: string
+  createdAt: string
+  startDate: string
+  endDate: string
+  rangeLabel: string
+  totalReturn: number
+  annualReturn: number
+  maxDrawdown: number
+  winRate: number
+  totalTrades: number
 }
 
 const loading = ref(false)
@@ -357,407 +345,432 @@ const lastSyncedAt = ref('')
 const loadWarnings = ref<string[]>([])
 
 const attentionItems = ref<AttentionEntry[]>([])
-const screeningItems = ref<ScreeningEntry[]>([])
-const validationItems = ref<ScreeningEntry[]>([])
-const patternItems = ref<PatternEntry[]>([])
-const taskDatasets = ref<MarketTaskDatasetStatus[]>([])
-const taskAlerts = ref<MarketTaskHealthAlert[]>([])
-const taskHealthBaselineTradeDate = ref('')
-const taskAlertCount = ref(0)
-const recentViewedStocks = ref<Array<{ code: string; name: string; viewedAt: string }>>([])
+const marketSummary = ref<MarketSummaryState>({
+  tradeDate: '',
+  advancers: null,
+  decliners: null,
+  unchanged: null,
+  limitUp: null,
+  limitDown: null,
+  headline: '',
+  moodLabel: '待更新',
+  moodTone: 'neutral',
+  majorIndices: [],
+})
+const todaySummary = ref<TodaySummaryState>({
+  tradeDate: '',
+  totalHits: null,
+  savedConditionCount: null,
+  note: '',
+  items: [],
+  triggeredCodes: [],
+})
+const backtestItems = ref<BacktestEntry[]>([])
 
-const normalizeList = <T>(response: unknown, fallback: T[] = []): T[] => {
-  if (Array.isArray(response)) return response as T[]
-  if (response && typeof response === 'object') {
-    const payload = (response as { data?: unknown }).data
-    if (Array.isArray(payload)) return payload as T[]
+const unwrapPayload = (value: unknown) => {
+  if (value && typeof value === 'object' && 'data' in value) {
+    return (value as { data?: unknown }).data ?? value
   }
-  return fallback
+  return value
 }
 
-const normalizeScreeningHistory = (response: unknown) => {
-  if (response && typeof response === 'object') {
-    const payload = (response as { data?: { items?: unknown[] } }).data
-    if (payload && Array.isArray(payload.items)) {
-      return payload.items
+const asObject = (value: unknown): Record<string, any> => {
+  const payload = unwrapPayload(value)
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, any>
+  }
+  return {}
+}
+
+const asArray = (value: unknown): any[] => {
+  const payload = unwrapPayload(value)
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === 'object') {
+    const candidates = ['items', 'list', 'results', 'data']
+    for (const key of candidates) {
+      const candidate = (payload as Record<string, unknown>)[key]
+      if (Array.isArray(candidate)) return candidate
     }
   }
   return []
 }
 
-const coerceNumber = (value: unknown) => {
+const toNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : 0
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const toNullableNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const toString = (value: unknown, fallback = '') => {
+  if (value === null || value === undefined) return fallback
+  return String(value)
+}
+
+const formatDisplayDate = (value?: string | null) => {
+  if (!value) return '--'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+const formatCount = (value: number | null | undefined) => {
+  if (value === null || value === undefined) return '--'
+  return new Intl.NumberFormat('zh-CN').format(value)
+}
+
+const formatPercent = (value: unknown, digits = 1) => {
+  const numeric = toNumber(value, Number.NaN)
+  if (Number.isNaN(numeric)) return '--'
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}%`
+}
+
+const formatSignedPercent = (value: unknown, digits = 1) => {
+  const numeric = toNumber(value, Number.NaN)
+  if (Number.isNaN(numeric)) return '--'
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}%`
+}
+
+const toneBadgeClass = (tone: 'bullish' | 'neutral' | 'bearish') => {
+  if (tone === 'bullish') return 'signal-badge signal-badge--bullish'
+  if (tone === 'bearish') return 'signal-badge signal-badge--bearish'
+  return 'signal-badge signal-badge--neutral'
+}
+
+const trendBadgeClass = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return 'signal-badge signal-badge--neutral'
+  const numeric = toNumber(value, 0)
+  if (numeric > 0) return 'signal-badge signal-badge--bullish'
+  if (numeric < 0) return 'signal-badge signal-badge--bearish'
+  return 'signal-badge signal-badge--neutral'
+}
+
+const formatIndexMeta = (item: MarketIndexEntry) => {
+  if (item.constituentCount !== null) {
+    return `成分 ${formatCount(item.constituentCount)}`
+  }
+  if (item.source === 'proxy') return '代理口径'
+  if (item.source === 'fallback') return '待补数'
+  return '--'
 }
 
 const normalizeAttentionEntry = (item: any): AttentionEntry => ({
-  code: String(item?.code || item?.symbol || item?.ts_code?.split('.')?.[0] || ''),
-  name: String(item?.stock_name || item?.name || item?.code || '--'),
-  createdAt: String(item?.created_at || ''),
+  code: toString(item?.code || item?.symbol || item?.ts_code?.split?.('.')?.[0] || ''),
+  name: toString(item?.stock_name || item?.name || item?.code || '--'),
+  group: toString(item?.group || 'watch'),
+  notes: toString(item?.notes || ''),
+  createdAt: toString(item?.created_at || item?.createdAt || ''),
 })
 
-const normalizeScreeningEntry = (item: any): ScreeningEntry => ({
-  selectionId: String(item?.selection_id || `${item?.code || ''}-${item?.trade_date || item?.date || ''}`),
-  code: String(item?.code || item?.ts_code?.split('.')?.[0] || ''),
-  name: String(item?.stock_name || item?.name || item?.code || '--'),
-  tradeDate: String(item?.trade_date || item?.date || ''),
-  score: coerceNumber(item?.score),
-})
+const normalizeMarketSummary = (response: unknown): MarketSummaryState => {
+  const payload = asObject(response)
+  const counts = payload.counts && typeof payload.counts === 'object' ? payload.counts : payload
+  const indicesSource = asArray(payload.indices || payload.major_indices || payload.majorIndices || payload.indexes)
 
-const normalizePatternEntry = (item: any): PatternEntry => ({
-  code: String(item?.code || item?.symbol || item?.ts_code?.split('.')?.[0] || ''),
-  name: String(item?.stock_name || item?.name || item?.code || '--'),
-  tradeDate: String(item?.trade_date || item?.date || ''),
-  confidence: coerceNumber(item?.confidence),
-  signal: String(item?.pattern_type || item?.signal || 'neutral'),
-  patternName: String(item?.pattern_name || item?.type || ''),
-})
+  const tradeDate = toString(
+    payload.trade_date || payload.tradeDate || payload.date || counts.trade_date || counts.date || '',
+  )
+  const advancers = toNullableNumber(
+    payload.advancers ?? counts.advancers ?? payload.up_count ?? counts.up_count ?? payload.rise_count ?? counts.rise_count,
+  )
+  const decliners = toNullableNumber(
+    payload.decliners ?? counts.decliners ?? payload.down_count ?? counts.down_count ?? payload.fall_count ?? counts.fall_count,
+  )
+  const unchanged = toNullableNumber(
+    payload.unchanged ?? counts.unchanged ?? payload.flat_count ?? counts.flat_count ?? payload.neutral_count ?? counts.neutral_count,
+  )
+  const limitUp = toNullableNumber(
+    payload.limit_up ?? counts.limit_up ?? payload.limitUp ?? counts.limitUp ?? payload.limit_up_count ?? counts.limit_up_count,
+  )
+  const limitDown = toNullableNumber(
+    payload.limit_down ?? counts.limit_down ?? payload.limitDown ?? counts.limitDown ?? payload.limit_down_count ?? counts.limit_down_count,
+  )
 
-const normalizeTaskDatasetStatus = (item: any): MarketTaskDatasetStatus => ({
-  dataset: String(item?.dataset || '--'),
-  latestTradeDate: String(item?.latest_trade_date || ''),
-  baselineTradeDate: String(item?.baseline_trade_date || ''),
-  current: Boolean(item?.current),
-})
+  const majorIndices = indicesSource.slice(0, 5).map((item: any) => ({
+    code: toString(item?.code || item?.symbol || item?.index_code || item?.ts_code || ''),
+    name: toString(item?.name || item?.index_name || item?.label || '指数'),
+    current: toNullableNumber(item?.current ?? item?.close ?? item?.value ?? item?.last),
+    changeRate: toNullableNumber(item?.change_rate ?? item?.pct_chg ?? item?.rate ?? item?.changeRate),
+    constituentCount: toNullableNumber(item?.constituent_count ?? item?.constituentCount ?? item?.sample_size),
+    source: toString(item?.source || 'unknown'),
+  }))
 
-const normalizeTaskAlert = (item: any): MarketTaskHealthAlert => ({
-  taskName: String(item?.task_name || '--'),
-  entityType: String(item?.entity_type || ''),
-  entityKey: String(item?.entity_key || ''),
-  tradeDate: String(item?.trade_date || ''),
-  status: String(item?.status || ''),
-  source: String(item?.source || ''),
-  note: String(item?.note || ''),
-  updatedAt: String(item?.updated_at || ''),
-})
+  const headline = toString(
+    payload.headline ||
+      payload.summary ||
+      payload.mood_summary ||
+      payload.sentiment_summary ||
+      payload.description ||
+      '',
+  )
 
-const signalKey = (signal: string) => {
-  const normalized = signal.toLowerCase()
-  if (normalized.includes('bull') || normalized.includes('买') || normalized.includes('多')) return 'bullish'
-  if (normalized.includes('bear') || normalized.includes('卖') || normalized.includes('空')) return 'bearish'
-  return 'neutral'
-}
+  const sentiment = toString(payload.mood || payload.tone || '').toLowerCase()
+  const advancerValue = advancers ?? 0
+  const declinerValue = decliners ?? 0
+  const moodTone: 'bullish' | 'neutral' | 'bearish' =
+    sentiment.includes('bull') || sentiment.includes('强') || sentiment.includes('热')
+      ? 'bullish'
+      : sentiment.includes('bear') || sentiment.includes('弱') || sentiment.includes('冷')
+        ? 'bearish'
+        : advancerValue > declinerValue
+          ? 'bullish'
+          : declinerValue > advancerValue
+            ? 'bearish'
+            : 'neutral'
 
-const groupByLatestDate = (items: ScreeningEntry[]) => {
-  const latestDate = items.reduce((latest, item) => {
-    return item.tradeDate > latest ? item.tradeDate : latest
-  }, '')
+  const moodLabel = toString(payload.mood_label || payload.moodLabel || payload.sentiment_label || '').trim() || (() => {
+    if (moodTone === 'bullish') return '偏强'
+    if (moodTone === 'bearish') return '偏弱'
+    return '中性'
+  })()
+
   return {
-    latestDate,
-    items: items.filter((item) => item.tradeDate === latestDate),
+    tradeDate,
+    advancers,
+    decliners,
+    unchanged,
+    limitUp,
+    limitDown,
+    headline,
+    moodLabel,
+    moodTone,
+    majorIndices,
   }
 }
 
-const patternSummary = computed(() => {
-  const summary = {
-    total: patternItems.value.length,
-    bullish: 0,
-    neutral: 0,
-    bearish: 0,
-    tradeDate: '',
+const normalizeTodaySummary = (response: unknown): TodaySummaryState => {
+  const payload = asObject(response)
+  const rawItems = asArray(
+    payload.items ||
+      payload.conditions ||
+      payload.saved_conditions ||
+      payload.condition_hits ||
+      payload.results ||
+      payload.data,
+  )
+
+  const items = rawItems.map((item: any, index) => {
+    const topCodes = [
+      ...asArray(item?.top_codes || item?.codes || item?.matched_codes || item?.top_matches || item?.hits),
+      ...asArray(item?.stocks),
+    ]
+      .map((code) => toString(code?.code || code?.symbol || code?.ts_code?.split?.('.')?.[0] || code))
+      .filter(Boolean)
+
+    return {
+      id: toString(item?.id || item?.condition_id || item?.name || `condition-${index}`),
+      name: toString(item?.name || item?.condition_name || item?.label || '未命名条件'),
+      category: toString(item?.category || item?.group || item?.type || ''),
+      hitCount: toNumber(item?.hit_count ?? item?.total ?? item?.count ?? item?.matches ?? topCodes.length),
+      tradeDate: toString(item?.trade_date || payload.trade_date || payload.date || ''),
+      summary: toString(item?.summary || item?.reason_summary || item?.note || ''),
+      topCodes,
+    } as TodayConditionEntry
+  })
+
+  const triggeredCodes = new Set<string>()
+  const topLevelCodeSources = [
+    payload.triggered_codes,
+    payload.matched_codes,
+    payload.matched_codes_today,
+    payload.watchlist_hits,
+    payload.codes,
+    payload.symbols,
+  ]
+  for (const source of topLevelCodeSources) {
+    for (const code of asArray(source)) {
+      const normalized = toString(code?.code || code?.symbol || code?.ts_code?.split?.('.')?.[0] || code)
+      if (normalized) triggeredCodes.add(normalized)
+    }
+  }
+  for (const item of items) {
+    for (const code of item.topCodes) triggeredCodes.add(code)
   }
 
-  for (const item of patternItems.value) {
-    summary.tradeDate = item.tradeDate > summary.tradeDate ? item.tradeDate : summary.tradeDate
-    const key = signalKey(item.signal)
-    if (key === 'bullish') summary.bullish += 1
-    if (key === 'bearish') summary.bearish += 1
-    if (key === 'neutral') summary.neutral += 1
+  const hasMeaningfulPayload = Object.keys(payload).length > 0 || rawItems.length > 0
+  const totalHits =
+    toNullableNumber(
+      payload.total ?? payload.total_hits ?? payload.hit_count ?? payload.matches ?? payload.hits,
+    ) ?? (hasMeaningfulPayload ? items.reduce((sum, item) => sum + item.hitCount, 0) : null)
+  const savedConditionCount =
+    toNullableNumber(
+      payload.saved_condition_count ?? payload.condition_count ?? payload.conditions_count ?? payload.total_conditions,
+    ) ?? (hasMeaningfulPayload ? items.length : null)
+  const note = toString(payload.note || payload.summary || payload.message || '')
+  const tradeDate = toString(payload.trade_date || payload.tradeDate || payload.date || items[0]?.tradeDate || '')
+
+  return {
+    tradeDate,
+    totalHits,
+    savedConditionCount,
+    note,
+    items,
+    triggeredCodes: Array.from(triggeredCodes),
   }
+}
 
-  return summary
-})
+const normalizeBacktestEntry = (item: any): BacktestEntry => {
+  const strategy = toString(item?.strategy || item?.meta?.strategy || item?.name || 'backtest')
+  const startDate = toString(item?.start_date || item?.startDate || '')
+  const endDate = toString(item?.end_date || item?.endDate || '')
 
-const topPatterns = computed(() => {
-  return [...patternItems.value]
-    .sort((a, b) => b.confidence - a.confidence || b.tradeDate.localeCompare(a.tradeDate))
-    .slice(0, 3)
-})
-
-const topAttentionItems = computed(() => attentionItems.value.slice(0, 3))
-
-const latestScreeningGroup = computed(() => groupByLatestDate(screeningItems.value))
-const latestValidationGroup = computed(() => groupByLatestDate(validationItems.value))
-
-const latestScreeningItems = computed(() => {
-  return [...latestScreeningGroup.value.items]
-    .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
-    .slice(0, 3)
-})
-
-const latestValidationItems = computed(() => {
-  return [...latestValidationGroup.value.items]
-    .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
-    .slice(0, 3)
-})
-
-const latestScreeningCount = computed(() => latestScreeningGroup.value.items.length)
-const latestValidationCount = computed(() => latestValidationGroup.value.items.length)
-const staleDatasets = computed(() => taskDatasets.value.filter((item) => !item.current))
-const staleDatasetCount = computed(() => staleDatasets.value.length)
-const activeAlertCount = computed(() => {
-  return taskAlertCount.value > 0 ? taskAlertCount.value : taskAlerts.value.length
-})
-const baselineTradeDateLabel = computed(() => {
-  return taskHealthBaselineTradeDate.value ? formatDisplayDate(taskHealthBaselineTradeDate.value) : '--'
-})
-const staleDatasetNames = computed(() => {
-  return staleDatasets.value
-    .slice(0, 3)
-    .map((item) => humanizeDatasetName(item.dataset))
-})
-const alertBadgeLabels = computed(() => {
-  return taskAlerts.value
-    .slice(0, 2)
-    .map((item) => `${humanizeTaskName(item.taskName)} / ${humanizeTaskEntity(item.entityType, item.entityKey)}`)
-})
-const topAlert = computed(() => taskAlerts.value[0] || null)
-const topAlertDatasetLabel = computed(() => {
-  if (topAlert.value) return `${humanizeTaskName(topAlert.value.taskName)} / ${humanizeTaskEntity(topAlert.value.entityType, topAlert.value.entityKey)}`
-  if (staleDatasets.value[0]) return humanizeDatasetName(staleDatasets.value[0].dataset)
-  return '已对齐'
-})
-const healthToneLabel = computed(() => {
-  if (activeAlertCount.value > 0) return '需处理'
-  if (staleDatasetCount.value > 0) return '有滞后'
-  return '正常'
-})
-const healthToneClass = computed(() => {
-  if (activeAlertCount.value > 0) return 'signal-badge signal-badge--bearish'
-  if (staleDatasetCount.value > 0) return 'signal-badge signal-badge--neutral'
-  return 'signal-badge signal-badge--bullish'
-})
-const topAlertSummary = computed(() => {
-  if (!topAlert.value) return ''
-
-  const parts = [humanizeTaskName(topAlert.value.taskName), humanizeTaskEntity(topAlert.value.entityType, topAlert.value.entityKey)]
-  if (topAlert.value.tradeDate) {
-    parts.push(`交易日 ${formatDisplayDate(topAlert.value.tradeDate)}`)
+  return {
+    id: toString(item?.id || item?.backtest_id || `${strategy}-${startDate}-${endDate}`),
+    name: toString(item?.name || item?.title || strategy),
+    strategy,
+    strategyLabel: toString(item?.strategy_label || item?.strategyLabel || strategy),
+    code: toString(item?.code || item?.stock_code || item?.symbol || ''),
+    stockName: toString(item?.stock_name || item?.stockName || ''),
+    createdAt: toString(item?.created_at || item?.createdAt || ''),
+    startDate,
+    endDate,
+    rangeLabel: startDate && endDate ? `${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : '未提供区间',
+    totalReturn: toNumber(item?.total_return ?? item?.summary?.total_return ?? 0),
+    annualReturn: toNumber(item?.annual_return ?? item?.summary?.annual_return ?? 0),
+    maxDrawdown: toNumber(item?.max_drawdown ?? item?.summary?.max_drawdown ?? 0),
+    winRate: toNumber(item?.win_rate ?? item?.summary?.win_rate ?? 0),
+    totalTrades: toNumber(item?.total_trades ?? item?.summary?.total_trades ?? 0),
   }
-  if (topAlert.value.source) {
-    parts.push(`来源 ${humanizeTaskSource(topAlert.value.source)}`)
-  }
-  if (topAlert.value.note) {
-    parts.push(topAlert.value.note)
-  } else {
-    parts.push(`状态 ${humanizeTaskStatus(topAlert.value.status)}`)
-  }
-  return parts.join('，')
-})
+}
 
-const lastSyncedLabel = computed(() => {
-  return lastSyncedAt.value ? formatDisplayDate(lastSyncedAt.value, true) : '--'
-})
-
-const latestScreeningDateLabel = computed(() => {
-  return latestScreeningGroup.value.latestDate
-    ? formatDisplayDate(latestScreeningGroup.value.latestDate)
-    : '--'
-})
-
-const latestValidationDateLabel = computed(() => {
-  return latestValidationGroup.value.latestDate
-    ? formatDisplayDate(latestValidationGroup.value.latestDate)
-    : '--'
-})
-
-const latestAttentionDateLabel = computed(() => {
+const attentionLatestDateLabel = computed(() => {
   const latest = attentionItems.value[0]?.createdAt
   return latest ? formatDisplayDate(latest) : '--'
 })
 
-const humanizeDatasetName = (value: string) => {
-  const labels: Record<string, string> = {
-    daily_bars: '日线行情',
-    fund_flows: '资金流向',
-    stock_tops: '龙虎榜',
-    stock_top: '龙虎榜',
-    stock_block_trades: '大宗交易',
-    block_trades: '大宗交易',
-    north_bound_funds: '北向资金',
-    north_bound: '北向资金',
+const triggeredAttentionCount = computed(() => {
+  if (!attentionItems.value.length) return 0
+  return attentionItems.value.filter((item) => isAttentionTriggered(item.code)).length
+})
+
+const topAttentionItems = computed(() => attentionItems.value.slice(0, 4))
+
+const topTodayConditions = computed(() =>
+  [...todaySummary.value.items]
+    .sort((a, b) => b.hitCount - a.hitCount || a.name.localeCompare(b.name))
+    .slice(0, 4),
+)
+
+const todaySummaryDateLabel = computed(() => formatDisplayDate(todaySummary.value.tradeDate))
+
+const latestBacktest = computed(() => backtestItems.value[0] || null)
+
+const topBacktestItems = computed(() => backtestItems.value.slice(0, 3))
+
+const backtestSummary = computed(() => {
+  const latest = latestBacktest.value
+  return {
+    totalReturnLabel: latest ? formatSignedPercent(latest.totalReturn) : '--',
+    drawdownLabel: latest ? formatSignedPercent(latest.maxDrawdown) : '--',
+    winRateLabel: latest ? formatPercent(latest.winRate) : '--',
   }
-  return labels[value] || value.replace(/_/g, ' ')
-}
+})
 
-const humanizeTaskName = (value: string) => {
-  const labels: Record<string, string> = {
-    fetch_daily_data: '日线数据抓取',
-    fetch_fund_flow: '资金流抓取',
-    fetch_market_reference: '市场参考抓取',
-    fetch_block_trades: '大宗交易抓取',
-    fetch_north_bound: '北向资金抓取',
-  }
-  return labels[value] || value.replace(/^fetch_/, '').replace(/_/g, ' ')
-}
-
-const humanizeTaskEntity = (entityType: string, entityKey: string) => {
-  const entityLabels: Record<string, string> = {
-    stock_list: entityKey === 'ETF' ? 'ETF 列表' : 'A 股列表',
-    stock_fund_flow: '个股资金流',
-    sector_fund_flow: entityKey === 'industry' ? '行业资金流' : '板块资金流',
-    stock_top: '龙虎榜',
-    block_trade: '大宗交易',
-  }
-  return entityLabels[entityType] || entityKey || entityType || '--'
-}
-
-const humanizeTaskStatus = (value: string) => {
-  const labels: Record<string, string> = {
-    done: '完成',
-    nodata: '无数据',
-    needs_fallback: '需要降级/补救',
-    failed: '失败',
-  }
-  return labels[value] || value || '--'
-}
-
-const humanizeTaskSource = (value: string) => {
-  const labels: Record<string, string> = {
-    tushare: 'Tushare',
-    baostock: 'BaoStock',
-    eastmoney: '东方财富',
-    mixed: '混合来源',
-  }
-  return labels[value] || value || '--'
-}
-
-const formatDisplayDate = (value: string, withTime = false) => {
-  if (!value) return '--'
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value
-  }
-
-  if (/^\d{8}$/.test(value)) {
-    return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
-  }
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-
-  const options: Intl.DateTimeFormatOptions = withTime
-    ? {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      }
-    : {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      }
-  return new Intl.DateTimeFormat('zh-CN', options).format(date)
-}
+const lastSyncedLabel = computed(() => {
+  if (!lastSyncedAt.value) return '--'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(lastSyncedAt.value))
+})
 
 const buildStockLink = (code: string, screeningDate?: string) => ({
   path: `/stock/${code}`,
   query: screeningDate ? { screening_date: screeningDate } : undefined,
 })
 
-const formatCompactDateRelative = (isoString: string) => {
-  const date = new Date(isoString)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
+const buildBacktestLink = (item: BacktestEntry) => ({
+  path: '/backtest',
+  query: item.id ? { backtest_id: item.id } : undefined,
+})
 
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  if (diffHours < 24) return `${diffHours}小时前`
-  if (diffDays < 7) return `${diffDays}天前`
-  return formatDisplayDate(isoString)
+const isAttentionTriggered = (code: string) => {
+  return todaySummary.value.triggeredCodes.includes(code)
 }
 
-const signalLabel = (signal: string) => {
-  const key = signalKey(signal)
-  if (key === 'bullish') return '看涨'
-  if (key === 'bearish') return '看跌'
-  return '中性'
-}
-
-const signalBadgeClass = (signal: string) => `signal-badge signal-badge--${signalKey(signal)}`
-
-const refreshWorkbench = async () => {
+function refreshWorkbench() {
   loading.value = true
   loadWarnings.value = []
 
-  const results = await Promise.allSettled([
+  return Promise.allSettled([
+    marketApi.getSummary(),
     attentionApi.getList(),
-    selectionApi.getScreeningHistory({ limit: 60 }),
-    selectionApi.getHistory({ limit: 60 }),
-    patternApi.getTodayPatterns({ limit: 120, min_confidence: 60 }),
-    marketApi.getTaskHealth(5),
+    selectionApi.getTodaySummary({ limit: 12 }),
+    backtestApi.getBacktestHistory(5),
   ])
+    .then(([marketResult, attentionResult, todayResult, backtestResult]) => {
+      if (marketResult.status === 'fulfilled') {
+        marketSummary.value = normalizeMarketSummary(marketResult.value)
+      } else {
+        marketSummary.value = {
+          tradeDate: '',
+          advancers: null,
+          decliners: null,
+          unchanged: null,
+          limitUp: null,
+          limitDown: null,
+          headline: '',
+          moodLabel: '待更新',
+          moodTone: 'neutral',
+          majorIndices: [],
+        }
+        loadWarnings.value.push('市场温度计')
+      }
 
-  const [attentionResult, screeningResult, validationResult, patternResult, taskHealthResult] = results
+      if (attentionResult.status === 'fulfilled') {
+        attentionItems.value = asArray(attentionResult.value)
+          .map(normalizeAttentionEntry)
+          .filter((item: AttentionEntry) => Boolean(item.code))
+      } else {
+        attentionItems.value = []
+        loadWarnings.value.push('我的关注')
+      }
 
-  if (attentionResult.status === 'fulfilled') {
-    attentionItems.value = normalizeList(attentionResult.value).map(normalizeAttentionEntry)
-  } else {
-    attentionItems.value = []
-    loadWarnings.value.push('关注列表')
-    console.error('Failed to fetch attention list:', attentionResult.reason)
-  }
+      if (todayResult.status === 'fulfilled') {
+        todaySummary.value = normalizeTodaySummary(todayResult.value)
+      } else {
+        todaySummary.value = {
+          tradeDate: '',
+          totalHits: null,
+          savedConditionCount: null,
+          note: '',
+          items: [],
+          triggeredCodes: [],
+        }
+        loadWarnings.value.push('今日扫描发现')
+      }
 
-  if (screeningResult.status === 'fulfilled') {
-    screeningItems.value = normalizeScreeningHistory(screeningResult.value).map(normalizeScreeningEntry)
-  } else {
-    screeningItems.value = []
-    loadWarnings.value.push('最近筛选')
-    console.error('Failed to fetch screening history:', screeningResult.reason)
-  }
+      if (backtestResult.status === 'fulfilled') {
+        backtestItems.value = asArray(backtestResult.value)
+          .map(normalizeBacktestEntry)
+          .sort((a: BacktestEntry, b: BacktestEntry) => b.createdAt.localeCompare(a.createdAt))
+      } else {
+        backtestItems.value = []
+        loadWarnings.value.push('策略信号 / 回测更新')
+      }
 
-  if (validationResult.status === 'fulfilled') {
-    validationItems.value = normalizeList(validationResult.value).map(normalizeScreeningEntry)
-  } else {
-    validationItems.value = []
-    loadWarnings.value.push('历史验证')
-    console.error('Failed to fetch selection history:', validationResult.reason)
-  }
-
-  if (patternResult.status === 'fulfilled') {
-    patternItems.value = normalizeList(patternResult.value).map(normalizePatternEntry)
-  } else {
-    patternItems.value = []
-    loadWarnings.value.push('形态摘要')
-    console.error('Failed to fetch pattern summary:', patternResult.reason)
-  }
-
-  if (taskHealthResult.status === 'fulfilled') {
-    taskHealthBaselineTradeDate.value = String(taskHealthResult.value?.baseline_trade_date || '')
-    taskAlertCount.value = coerceNumber(taskHealthResult.value?.alert_count)
-    taskDatasets.value = normalizeList(taskHealthResult.value?.datasets).map(normalizeTaskDatasetStatus)
-    taskAlerts.value = normalizeList(taskHealthResult.value?.alerts).map(normalizeTaskAlert)
-  } else {
-    taskHealthBaselineTradeDate.value = ''
-    taskAlertCount.value = 0
-    taskDatasets.value = []
-    taskAlerts.value = []
-    loadWarnings.value.push('任务健康')
-    console.error('Failed to fetch task health summary:', taskHealthResult.reason)
-  }
-
-  lastSyncedAt.value = new Date().toISOString()
-  loading.value = false
-}
-
-const loadRecentViewed = () => {
-  try {
-    const stored = localStorage.getItem('recently_viewed_stocks')
-    if (stored) {
-      recentViewedStocks.value = JSON.parse(stored).slice(0, 5)
-    }
-  } catch (e) {
-    recentViewedStocks.value = []
-  }
+      lastSyncedAt.value = new Date().toISOString()
+    })
+    .finally(() => {
+      loading.value = false
+    })
 }
 
 onMounted(() => {
-  loadRecentViewed()
   refreshWorkbench()
 })
 </script>
@@ -765,6 +778,22 @@ onMounted(() => {
 <style scoped lang="scss">
 .dashboard-page {
   padding: 24px;
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -18px -18px auto;
+    height: 300px;
+    z-index: -1;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(88, 121, 255, 0.22), transparent 34%),
+      radial-gradient(circle at 80% 0%, rgba(47, 207, 133, 0.12), transparent 28%),
+      linear-gradient(180deg, rgba(18, 24, 38, 0.94), rgba(13, 18, 29, 0.66));
+    filter: blur(8px);
+    pointer-events: none;
+  }
 }
 
 .page-header {
@@ -867,55 +896,6 @@ onMounted(() => {
   gap: 18px;
 }
 
-.health-strip {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  margin-bottom: 18px;
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 18px;
-  background:
-    linear-gradient(180deg, rgba(18, 24, 38, 0.98), rgba(13, 18, 29, 0.98)),
-    rgba(16, 19, 28, 0.92);
-  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.18);
-}
-
-.health-strip__header {
-  align-items: center;
-}
-
-.health-strip__description {
-  min-height: 0;
-}
-
-.health-strip__tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.health-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.health-tag--stale {
-  background: rgba(255, 184, 77, 0.12);
-}
-
-.health-tag--alert {
-  background: rgba(255, 123, 123, 0.14);
-}
-
-.metric-strip--health {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 .workbench-card {
   display: flex;
   flex-direction: column;
@@ -962,12 +942,15 @@ onMounted(() => {
 
 .metric-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
+.metric-strip--market {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric-strip--compact {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-block {
@@ -1000,6 +983,22 @@ onMounted(() => {
 .metric-label {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.5);
+}
+
+.mood-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mood-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .card-description {
@@ -1045,11 +1044,24 @@ onMounted(() => {
   }
 }
 
+.list-row--static {
+  cursor: default;
+
+  &:hover {
+    transform: none;
+  }
+}
+
 .row-meta {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.row-note {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
 }
 
 .signal-badge {
@@ -1102,9 +1114,8 @@ onMounted(() => {
     align-items: stretch;
   }
 
-  .metric-strip,
-  .metric-strip--compact,
-  .metric-strip--health {
+  .metric-strip--market,
+  .metric-strip--compact {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

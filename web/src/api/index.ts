@@ -169,6 +169,9 @@ export const strategyApi = {
   createMyStrategy: (payload: { name: string; description?: string; params?: Record<string, unknown>; is_active?: boolean }) =>
     api.post('/strategies/my', payload) as Promise<any>,
 
+  createMyStrategyFromSelection: (payload: { name: string; description?: string; params?: Record<string, unknown>; is_active?: boolean }) =>
+    api.post('/strategies/my/from-selection', payload) as Promise<any>,
+
   runStrategy: (strategy: string, date?: string) =>
     api.post('/strategies/run', { strategy, date }) as Promise<any>,
 
@@ -214,6 +217,9 @@ export const selectionApi = {
 
   getScreeningMetadata: () => api.get('/screening/metadata') as Promise<any>,
 
+  getTodaySummary: (params?: { date?: string; limit?: number }) =>
+    api.get('/selection/today-summary', { params }) as Promise<any>,
+
   runScreening: (payload: { filters?: Record<string, unknown>; scope?: Record<string, unknown> }) =>
     api.post('/screening/run', payload) as Promise<any>,
 
@@ -236,6 +242,9 @@ export const fundFlowApi = {
 }
 
 export const marketApi = {
+  getSummary: (params?: { date?: string }) =>
+    api.get('/market/summary', { params }) as Promise<any>,
+
   getFundFlowRank: (date?: string, limit?: number) =>
     api.get('/market/fund-flow', { params: { date, limit } }) as Promise<any>,
 

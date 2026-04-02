@@ -99,6 +99,7 @@
 | 2026-04-02 05:58 CST | quick suite（screening baseline + task health + selection market services） | 通过（13/13） | 首次组合回归完成，三块非功能验收基座的首条正式记录已闭环 |
 | 2026-04-02 06:30 CST | quick suite（screening baseline + task health + selection market services） | 通过（13/13） | 第二次组合回归完成，连续性记录开始形成 |
 | 2026-04-02 07:02 CST | quick suite（screening baseline + task health + selection market services） | 通过（13/13） | 第三次组合回归完成，连续性记录进一步增强 |
+| 2026-04-03 05:25 CST | quick suite（screening baseline + task health + selection market services） + 数据抓取 + Dashboard 端点验证 | 通过（13/13 + 数据就绪） | Dev 环境全链路验证完成，市场概览返回 5485 只股票真实数据，数据抓取任务成功执行 |
 
 > 2026-04-02 heartbeat 备注：仓库内暂未发现现成的性能 / 压测 / 稳定性专项脚本或验收说明；当前“待验证”不是单纯还没执行，而是**验证资产本身尚未建立**。
 >
@@ -132,8 +133,8 @@
   - [x] `GET /api/v1/market/summary` — 返回涨跌家数、涨停跌停、主要指数等聚合数据
   - [x] `GET /api/v1/selection/today-summary` — 返回已保存条件的今日命中概要
 - **待做**：
-  - [ ] 实际联调确认 4 张卡片在真实登录态/真实数据下展示稳定
-  - [ ] 校正 Dashboard 文案与 PRD 验收描述，避免计划文档继续落后于代码
+  - [x] 实际联调确认 4 张卡片在真实登录态/真实数据下展示稳定（2026-04-03 Dev 环境验证通过）
+  - [x] 校正 Dashboard 文案与 PRD 验收描述，避免计划文档继续落后于代码
 - **已验证**：
   - [x] `tests/test_market_summary.py` 已覆盖 `GET /api/v1/market/summary`
   - [x] `tests/test_selection_today_summary.py` 已覆盖 `GET /api/v1/selection/today-summary`
@@ -223,16 +224,15 @@
   - [x] 补测试覆盖：selection payload、manual backtest payload、旧 payload 兼容读取
 - **验收**：同一套 `Strategy.params` 既能表达筛选桥接策略，也能表达回测保存策略，前后端不再靠分叉字段名硬兼容
 
-#### P1-01：筛选条件 → 策略模板打通 [-]
-- **文件**：`app/services/strategy_service.py`, `app/api/routers/strategy_router.py`, `web/src/views/Selection.vue`
-- **现状**：筛选页已支持一键“保存为策略”，后端已提供 `selection_bridge` 模板与 `/strategies/my/from-selection`
+#### P1-01：筛选条件 → 策略模板打通 [x]
+- **文件**：`app/services/strategy_service.py`, `app/api/routers/strategy_router.py`, `web/src/views/Selection.vue`, `web/src/views/Backtest.vue`
+- **现状**：筛选页已支持一键“保存为策略 / 保存并去回测”，后端已提供 `selection_bridge` 模板与 `/strategies/my/from-selection`，Backtest 页已可承接 selection-derived strategy 的桥接上下文
 - **已完成**：
   - [x] 用户在筛选页可一键"将当前条件保存为策略"
   - [x] 策略模板可直接暴露筛选条件 schema 元信息
   - [x] 入场条件 = 筛选条件、出场条件 = 可配置 的桥接结构已落地
-- **待做**：
-  - [ ] 在策略页提供更明确的 selection-derived strategy 展示与编辑入口
-  - [ ] 打通“从已保存筛选策略直接发起回测”的最终用户路径
+  - [x] Selection 页已支持“保存并去回测”，可携带当前 Top1 命中股票进入 Backtest
+  - [x] Backtest 页已可识别并导入 selection-derived strategy 的桥接上下文，并在同页继续补股票/模板后运行
 - **验收**：在筛选页保存一组条件 → 在策略/回测体系内看到对应策略 → 后续可平滑进入回测
 
 #### P1-02：回测报告结构化 [-]
@@ -278,6 +278,86 @@
   - [ ] 把 URL 化能力和统一 `Strategy.params` 契约对齐
   - [ ] 补前端联调 / E2E 资产，验证分享链接在真实交互下稳定
 - **验收**：复制回测结果页 URL → 新标签页打开 → 完整复现
+
+---
+
+## Phase 1.5：数据层改造
+
+> 决策日期：2026-04-02
+> 完整技术方案：[DATA_LAYER_REPORT.md](./DATA_LAYER_REPORT.md)
+
+### 前置条件
+- **Phase 0b DoD 已通过**（首页联调、非功能性验证、形态筛选）
+- **Phase 1 核心项已完成**（P1-02 回测基准、P1-03 参数对比、P1-04 异步回测）
+- 当前"扫描 → 筛选 → 验证"主线稳定运行
+
+### 为什么不能提前
+
+| 风险 | 说明 |
+|------|------|
+| `fund_flows` → `moneyflow` 表替换 | Dashboard Card 1 依赖资金流数据，改表会直接打断 Phase 0b 联调验收 |
+| `stock_tops` → `top_list` 替换 | `market_data_service.get_lhb()` 需重写，影响 Dashboard |
+| `fetch_daily_task` 重构 | 日线获取是全系统基础，改动后"连续10个交易日稳定"的验证窗口被重置 |
+| Alembic 引入 | 需与现有 `init_db()` auto-create 逻辑对接，时机不对会打断开发节奏 |
+
+### 目标
+统一数据源管理、补全数据维度、建立数据质量体系，为 Phase 2 体验打磨和未来功能扩展（基本面筛选、筹码分析、技术因子对比）提供数据基础。
+
+### 改造范围概要
+
+**改造现有表：**
+- `stocks` 补全字段：fullname, cnspell, is_hs, act_name, asset_type 等（对齐 `stock_basic` 全字段）
+- `fund_flows` → `moneyflow`：大单/中单/小单/超大单买卖明细替代现有汇总值
+- `stock_tops` → `top_list`：对齐 Tushare `top_list` 全字段
+- `daily_bars` 统一走 `pro_bar` 通用行情接口，支持 asset=E/I/FT/O/FD
+
+**新增 6 张表：**
+
+| 表名 | Tushare 接口 | 用途 |
+|------|-------------|------|
+| `daily_basic` | `daily_basic` | 每日指标：换手率、PE/PB/PS、总市值、流通市值 |
+| `stock_st` | `stock_st` | ST 股票列表快照 |
+| `broker_forecast` | `report_rc` | 券商盈利预测 |
+| `chip_performance` | `cyq_perf` | 每日筹码成本与胜率 |
+| `chip_distribution` | `cyq_chips` | 每日筹码分布 |
+| `technical_factors` | `stk_factor_pro` | 210+ 技术面因子 |
+
+### 执行工作流（4 条并行线）
+
+```
+WS-0 基础设施 (2d)  ──→  WS-1 核心改造 (3d)  ──→  WS-4 服务接入 (3d)
+                    ──→  WS-2 新接口接入 (4d) ──→
+                    ──→  WS-3 质量保障 (2d)   ──→
+```
+
+- **WS-0**：Alembic 迁移框架 + 通用行情抽象 (`pro_bar`) + 数据质量框架 + 积分检测
+- **WS-1**：stocks 补全 + moneyflow 替换 + top_list 替换 + pro_bar 统一行情 + 指数入库
+- **WS-2**：6 个新接口各自独立（**最高并行度，6 任务全并行**）
+- **WS-3**：完整性检查 + 范围校验 + 跨源一致性 + 告警 + 回填工具
+- **WS-4**：Repository + API 端点 + 筛选条件集成 (PE/PB/换手率/市值) + ST 过滤 + 筹码可视化
+
+详细任务分解和字段定义见 [DATA_LAYER_REPORT.md](./DATA_LAYER_REPORT.md)。
+
+### 验收标准
+- [ ] 10 个 Tushare 接口已对接并可自动调度
+- [ ] 每个新表有 Model + Migration + Fetch Task + Unit Test
+- [ ] stocks 表包含 `stock_basic` 全字段
+- [ ] moneyflow 表包含大单/中单/小单/超大单买卖明细
+- [ ] 通用行情接口支持 asset=E/I 获取
+- [ ] 数据质量检查覆盖：完整性 + 范围 + 跨源一致性
+- [ ] 历史数据回填工具可按日期范围运行
+- [ ] 新数据通过 API 端点可访问
+- [ ] 筛选引擎支持 PE/PB/换手率/市值等基本面条件
+- [ ] ST 股票可在筛选中被过滤
+
+### 可提前做的零风险准备（与 Phase 0b/1 并行）
+
+以下任务不触碰现有表结构和获取逻辑，可安全并行：
+
+- [ ] **积分检测脚本** `scripts/check_tushare_points.py` — 确认当前可用接口范围
+- [ ] **新表 Model 定义** — 只写 Python class，不执行 create table
+- [ ] **Tushare Provider 新方法骨架** — `fetch_daily_basic()`, `fetch_moneyflow()` 等，不接入调度
+- [ ] **数据质量框架骨架** `core/quality/validator.py` — 纯新增文件
 
 ---
 
@@ -329,10 +409,11 @@
 |------|------|
 | Parquet 每日导出 | 等 Phase 1 回测有性能瓶颈时再做 |
 | DuckDB 迁移 | 同上 |
-| AI 助手 | Phase 0-1 稳定运行后再接入 |
+| AI 助手 | Phase 1.5 数据层稳定后再接入 |
 | 低代码策略编排器 | Phase 2+ |
 | 移动端适配 | Phase 2+ |
 | 多市场扩张 | 不在当前规划 |
+| 期货/期权数据接入 | Phase 1.5 先覆盖 E(股票)+I(指数)，FT/O 留到有明确需求时 |
 
 ---
 
@@ -357,10 +438,17 @@
    - 建议固定 quick suite：`pytest tests/test_screening_baseline.py tests/test_api.py::TestMarketTaskHealthAPI tests/test_selection_market_services.py -q`，覆盖三块非功能验收基座的快速回归
 3. `P0b-06` 形态筛选条件集成 — Phase 0b 剩余明确功能项
 
+**可安全并行（Phase 1.5 零风险准备）：**
+- 积分检测脚本、新表 Model 定义、Tushare Provider 新方法骨架、数据质量框架骨架
+- 这些不触碰现有表结构和获取逻辑，详见 Phase 1.5 章节
+
 **然后进入 Phase 1：**
-4. `P1-01` 筛选条件 → 策略打通 — Phase 1 的起手式
-5. `P1-02` 回测报告完善
-6. `P1-03` 策略对比
+4. `P1-02` 回测报告完善 — 真实指数基准
+5. `P1-03` 策略对比 — 参数来源契约统一
+6. `P1-04` 异步回测 — 长跨度回测后台化
+
+**Phase 1 DoD 通过后进入 Phase 1.5：**
+7. 数据层改造 — 统一行情、补全字段、新接口接入、质量体系（详见 Phase 1.5 章节）
 
 ---
 

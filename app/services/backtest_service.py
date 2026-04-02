@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.stock_model import BacktestResult
 
 
+SUPPORTED_BACKTEST_STRATEGIES = {"buy_hold", "ma_crossover", "rsi_oversold"}
+
+
 class BacktestService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -28,6 +31,13 @@ class BacktestService:
                 "status": "failed",
                 "error": "missing_required_params",
                 "debug_user_id": user_id,
+            }
+        if strategy_name not in SUPPORTED_BACKTEST_STRATEGIES:
+            return {
+                "backtest_id": None,
+                "status": "failed",
+                "error": "unsupported_strategy",
+                "strategy": strategy_name,
             }
 
         stock_sql = text("""
@@ -94,8 +104,12 @@ class BacktestService:
         elif strategy_name == "rsi_oversold":
             signals = self._rsi_oversold_signals(bars, strategy_params)
         else:
-            # 未知策略回退到买入持有
-            signals = self._buy_hold_signals(bars)
+            return {
+                "backtest_id": None,
+                "status": "failed",
+                "error": "unsupported_strategy",
+                "strategy": strategy_name,
+            }
 
         # 执行回测模拟
         equity_curve, trades = self._simulate_backtest(bars, signals, initial_capital)
@@ -145,10 +159,12 @@ class BacktestService:
         avg_loss = -total_loss / losing_trades if losing_trades else 0.0
         win_rate = (winning_trades / total_trades * 100) if total_trades else 0.0
 
-        result = {
-            "backtest_id": f"bt_{stock_row['symbol']}_{start_date}_{end_date}",
-            "status": "completed",
-            "summary": {
+        report = self._build_report(
+            stock_row=stock_row,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            summary={
                 "initial_capital": round(initial_capital, 2),
                 "final_capital": round(final_capital, 2),
                 "total_return": round(total_return * 100, 4),
@@ -162,6 +178,17 @@ class BacktestService:
                 "avg_win": round(avg_win, 2),
                 "avg_loss": round(avg_loss, 2),
             },
+            equity_curve=equity_curve,
+            trades=trades,
+            strategy_name=strategy_name,
+            strategy_params=strategy_params,
+        )
+
+        result = {
+            "backtest_id": f"bt_{stock_row['symbol']}_{start_date}_{end_date}",
+            "status": "completed",
+            "summary": report["performance"],
+            "report": report,
             "equity_curve": equity_curve,
             "trades": trades,
             "meta": {
@@ -191,6 +218,7 @@ class BacktestService:
                         "equity_curve": equity_curve,
                         "trades": trades,
                         "summary": result["summary"],
+                        "report": report,
                         "meta": result["meta"],
                     },
                 )
@@ -236,6 +264,9 @@ class BacktestService:
             payload = row.get("result_data") or {}
             summary = payload.get("summary") or {}
             meta = payload.get("meta") or {}
+            report = payload.get("report")
+            benchmark = report.get("benchmark") if report else {}
+            risk = report.get("risk") if report else {}
             items.append(
                 {
                     "id": str(row.get("id")),
@@ -270,6 +301,15 @@ class BacktestService:
                     if row.get("total_trades") is not None
                     else summary.get("total_trades"),
                     "created_at": row.get("created_at"),
+                    **(
+                        {
+                            "benchmark_name": (benchmark or {}).get("name"),
+                            "risk_level": (risk or {}).get("risk_level"),
+                            "report": report,
+                        }
+                        if report
+                        else {}
+                    ),
                 }
             )
         return items
@@ -291,7 +331,22 @@ class BacktestService:
             )
             row = result.fetchone()
             if row:
-                return {"backtest_id": str(row[0]), "status": "completed", "data": row._mapping}
+                row_data = dict(row._mapping)
+                payload = row_data.get("result_data") or {}
+                report = payload.get("report") or self._build_report_from_row(row_data, payload)
+                summary = payload.get("summary") or report.get("performance") or {}
+                row_data["result_data"] = {
+                    **payload,
+                    "report": report,
+                }
+                return {
+                    "backtest_id": str(row[0]),
+                    "id": str(row[0]),
+                    "status": "completed",
+                    "summary": summary,
+                    "report": report,
+                    "data": row_data,
+                }
         return {"backtest_id": backtest_id, "status": "not_found"}
 
     # 策略信号生成方法
@@ -473,3 +528,200 @@ class BacktestService:
                     point["benchmark"] = initial_capital
 
         return equity_curve, trades
+
+    def _build_report(
+        self,
+        *,
+        stock_row: dict[str, Any],
+        start_date: str,
+        end_date: str,
+        initial_capital: float,
+        summary: dict[str, Any],
+        equity_curve: list[dict[str, Any]],
+        trades: list[dict[str, Any]],
+        strategy_name: str,
+        strategy_params: dict[str, Any],
+    ) -> dict[str, Any]:
+        benchmark = self._build_benchmark_summary(
+            stock_row=stock_row,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            equity_curve=equity_curve,
+        )
+        risk = self._build_risk_summary(
+            summary=summary,
+            equity_curve=equity_curve,
+            trades=trades,
+        )
+        return {
+            "performance": summary,
+            "benchmark": benchmark,
+            "risk": risk,
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "meta": {
+                "code": stock_row["symbol"],
+                "name": stock_row["name"],
+                "strategy": strategy_name,
+                "strategy_params": strategy_params,
+                "start_date": start_date,
+                "end_date": end_date,
+                "report_version": 1,
+            },
+        }
+
+    def _build_benchmark_summary(
+        self,
+        *,
+        stock_row: dict[str, Any],
+        start_date: str,
+        end_date: str,
+        initial_capital: float,
+        equity_curve: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        benchmark_series: list[dict[str, Any]] = []
+        benchmark_final_value = initial_capital
+        if equity_curve:
+            benchmark_final_value = float(equity_curve[-1].get("benchmark") or initial_capital)
+            for point in equity_curve:
+                benchmark_value = float(point.get("benchmark") or initial_capital)
+                benchmark_series.append(
+                    {
+                        "date": point["date"],
+                        "value": round(benchmark_value, 2),
+                        "return_pct": round(
+                            ((benchmark_value - initial_capital) / initial_capital * 100)
+                            if initial_capital
+                            else 0.0,
+                            4,
+                        ),
+                    }
+                )
+
+        benchmark_total_return = (
+            ((benchmark_final_value - initial_capital) / initial_capital * 100)
+            if initial_capital
+            else 0.0
+        )
+        strategy_final_value = float(equity_curve[-1]["equity"]) if equity_curve else initial_capital
+        strategy_total_return = (
+            ((strategy_final_value - initial_capital) / initial_capital * 100)
+            if initial_capital
+            else 0.0
+        )
+        return {
+            "name": "同标的买入持有",
+            "code": stock_row.get("symbol"),
+            "source": "proxy",
+            "description": "当仓库没有真实指数数据时，使用同标的买入持有作为可解释基准。",
+            "initial_value": round(initial_capital, 2),
+            "final_value": round(benchmark_final_value, 2),
+            "total_return": round(benchmark_total_return, 4),
+            "excess_return": round(strategy_total_return - benchmark_total_return, 4),
+            "series": benchmark_series,
+            "period": {
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        }
+
+    def _build_risk_summary(
+        self,
+        *,
+        summary: dict[str, Any],
+        equity_curve: list[dict[str, Any]],
+        trades: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        last_equity = None
+        max_loss_streak = 0
+        current_loss_streak = 0
+        max_single_day_loss = 0.0
+
+        for point in equity_curve:
+            equity = float(point["equity"])
+            if last_equity is not None and last_equity > 0:
+                change = (equity - last_equity) / last_equity
+                if change < 0:
+                    current_loss_streak += 1
+                    max_loss_streak = max(max_loss_streak, current_loss_streak)
+                    max_single_day_loss = min(max_single_day_loss, change)
+                else:
+                    current_loss_streak = 0
+            last_equity = equity
+
+        winning_trades = sum(1 for t in trades if t["type"] == "SELL" and t["profit"] > 0)
+        losing_trades = sum(1 for t in trades if t["type"] == "SELL" and t["profit"] < 0)
+        breakeven_trades = sum(1 for t in trades if t["type"] == "SELL" and t["profit"] == 0)
+        closed_trades = winning_trades + losing_trades + breakeven_trades
+        win_rate = float(summary.get("win_rate") or 0.0)
+        profit_factor = float(summary.get("profit_factor") or 0.0)
+        max_drawdown = float(summary.get("max_drawdown") or 0.0)
+
+        risk_notes: list[str] = []
+        abs_drawdown = abs(max_drawdown)
+        if abs_drawdown >= 20:
+            risk_notes.append("最大回撤超过 20%")
+        if max_loss_streak >= 5:
+            risk_notes.append(f"最长连续亏损 {max_loss_streak} 天")
+        if profit_factor < 1 and losing_trades > 0:
+            risk_notes.append("盈亏比小于 1")
+        if win_rate < 40 and closed_trades > 0:
+            risk_notes.append("胜率低于 40%")
+        if not risk_notes:
+            risk_notes.append("整体风险可控")
+
+        if abs_drawdown >= 20 or max_loss_streak >= 8:
+            risk_level = "high"
+        elif abs_drawdown >= 10 or max_loss_streak >= 4 or (profit_factor < 1 and losing_trades > 0):
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        return {
+            "max_drawdown": max_drawdown,
+            "max_consecutive_loss_days": max_loss_streak,
+            "max_single_day_loss": round(max_single_day_loss * 100, 4),
+            "closed_trades": closed_trades,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "breakeven_trades": breakeven_trades,
+            "win_rate": round(win_rate, 4),
+            "profit_factor": round(profit_factor, 4),
+            "risk_level": risk_level,
+            "risk_notes": risk_notes,
+        }
+
+    def _build_report_from_row(
+        self,
+        row_data: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary = payload.get("summary") or {}
+        equity_curve = payload.get("equity_curve") or []
+        trades = payload.get("trades") or []
+        meta = payload.get("meta") or {}
+        return {
+            "performance": summary,
+            "benchmark": payload.get("benchmark")
+            or {
+                "name": "同标的买入持有",
+                "code": meta.get("code") or row_data.get("name"),
+                "source": "proxy",
+                "description": "历史记录未保存结构化基准时，退回到结果中的回测数据。",
+                "initial_value": float(row_data.get("initial_capital") or summary.get("initial_capital") or 0.0),
+                "final_value": float(row_data.get("final_capital") or summary.get("final_capital") or 0.0),
+                "total_return": float(summary.get("total_return") or 0.0),
+                "excess_return": 0.0,
+                "series": [],
+                "period": {
+                    "start_date": row_data.get("start_date"),
+                    "end_date": row_data.get("end_date"),
+                },
+            },
+            "risk": payload.get("risk")
+            or self._build_risk_summary(summary=summary, equity_curve=equity_curve, trades=trades),
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "meta": meta,
+        }
