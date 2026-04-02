@@ -389,6 +389,8 @@
               <select v-model="selectedCompareBacktestId" class="select-full compare-target-row__select">
                 <option v-for="item in compareTargetOptions" :key="item.id" :value="item.id">
                   #{{ item.id }} / {{ item.code || item.name }}
+                  <span v-if="item.__source === 'snapshot'" class="badge badge--info" style="margin-left: 4px;">快照</span>
+                  <span v-else class="badge badge--secondary" style="margin-left: 4px;">历史</span>
                 </option>
               </select>
             </div>
@@ -399,9 +401,12 @@
                 <strong>{{ config.stockCode || '--' }} / {{ config.strategyType || '--' }}</strong>
               </div>
               <div>
-                <span class="compare-target-meta__label">对照历史</span>
+                <span class="compare-target-meta__label">对照对象</span>
                 <strong>#{{ compareTargetHistoryItem.id }} / {{ compareTargetHistoryItem.code || compareTargetHistoryItem.name || '--' }}</strong>
-                <small>{{ compareTargetHistoryItem.strategy || '--' }} · {{ formatDateTime(compareTargetHistoryItem.createdAt) }}</small>
+                <small>{{ compareTargetHistoryItem.strategy || '--' }} · {{ formatDateTime(compareTargetHistoryItem.createdAt) }}
+                  <span v-if="selectedCompareSource === 'snapshot'" class="badge badge--info">分享快照</span>
+                  <span v-else class="badge badge--secondary">历史回测</span>
+                </small>
               </div>
             </div>
 
@@ -1015,23 +1020,25 @@ const filteredBacktestHistory = computed(() => {
 })
 
 const compareTargetHistoryItem = computed(() => {
-  if (selectedCompareBacktestId.value) {
-    return (
-      backtestHistory.value.find((item) => item.id === selectedCompareBacktestId.value) ||
-      (compareBacktestSnapshot.value?.history?.id === selectedCompareBacktestId.value ? compareBacktestSnapshot.value.history : null) ||
-      null
-    )
-  }
-  return compareBacktestSnapshot.value?.history || backtestHistory.value.find((item) => item.id !== currentBacktestId.value) || null
+  const selectedId = selectedCompareBacktestId.value
+  if (!selectedId) return compareBacktestSnapshot.value?.history || null
+  return compareTargetOptions.value.find((item) => item.id === selectedId) || null
 })
 
 const compareTargetOptions = computed(() => {
-  const options = backtestHistory.value.filter((item) => item.id !== currentBacktestId.value)
+  const options = backtestHistory.value
+    .filter((item) => item.id !== currentBacktestId.value)
+    .map((item) => ({ ...item, __source: 'history' }))
   const snapshotHistory = compareBacktestSnapshot.value?.history
   if (snapshotHistory && !options.some((item) => item.id === snapshotHistory.id)) {
-    options.unshift(snapshotHistory)
+    options.unshift({ ...snapshotHistory, __source: 'snapshot' })
   }
   return options
+})
+
+const selectedCompareSource = computed(() => {
+  const item = compareTargetHistoryItem.value
+  return (item as any)?.__source || 'history'
 })
 
 const formatDelta = (value: number | null | undefined, suffix = '') => {
