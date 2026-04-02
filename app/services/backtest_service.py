@@ -1,6 +1,7 @@
+from datetime import datetime
 from decimal import Decimal
 from math import sqrt
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -724,4 +725,218 @@ class BacktestService:
             "equity_curve": equity_curve,
             "trades": trades,
             "meta": meta,
+        }
+
+
+    async def run_backtest_async(
+        self,
+        params: dict[str, Any],
+        user_id: int,
+        progress_callback: Callable[[int], Any] | None = None,
+    ) -> dict[str, Any]:
+        """异步执行回测并报告进度（供后台任务使用）"""
+        def report(progress: int) -> None:
+            if progress_callback:
+                try:
+                    progress_callback(progress)
+                except Exception:
+                    pass
+
+        # 进度点：5% 参数验证
+        report(5)
+
+        code = str(params.get("stock_code") or params.get("code") or "").strip()
+        start_date = str(params.get("start_date") or "").strip()
+        end_date = str(params.get("end_date") or "").strip()
+        initial_capital = float(params.get("initial_capital") or 100000)
+        strategy_name = str(params.get("strategy") or "buy_hold")
+        strategy_params = params.get("strategy_params") or {}
+
+        if not code or not start_date or not end_date:
+            return {
+                "backtest_id": None,
+                "status": "failed",
+                "error": "missing_required_params",
+                "debug_user_id": user_id,
+            }
+        if strategy_name not in SUPPORTED_BACKTEST_STRATEGIES:
+            return {
+                "backtest_id": None,
+                "status": "failed",
+                "error": "unsupported_strategy",
+                "strategy": strategy_name,
+            }
+
+        # 10% 股票查询
+        stock_sql = text("""
+            SELECT ts_code, symbol, name
+            FROM stocks
+            WHERE symbol = :code OR ts_code = :code
+            LIMIT 1
+            """)
+        stock_row = (await self.db.execute(stock_sql, {"code": code})).mappings().first()
+        if not stock_row:
+            return {"backtest_id": None, "status": "failed", "error": "stock_not_found"}
+        report(10)
+
+        # 20% 日线加载
+        bars_sql = text("""
+            SELECT trade_date, open, high, low, close, vol
+            FROM daily_bars
+            WHERE ts_code = :ts_code
+            AND trade_date BETWEEN :start_date AND :end_date
+            ORDER BY trade_date ASC
+            """)
+        bars = (
+            (
+                await self.db.execute(
+                    bars_sql,
+                    {
+                        "ts_code": stock_row["ts_code"],
+                        "start_date": start_date,
+                        "end_date": end_date,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+        report(20)
+
+        if len(bars) < 2:
+            return {
+                "backtest_id": None,
+                "status": "completed",
+                "summary": {
+                    "initial_capital": initial_capital,
+                    "final_capital": initial_capital,
+                    "total_return": 0.0,
+                    "annual_return": 0.0,
+                    "max_drawdown": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "win_rate": 0.0,
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "profit_factor": 0.0,
+                    "avg_win": 0.0,
+                    "avg_loss": 0.0,
+                },
+                "equity_curve": [],
+                "trades": [],
+                "note": "not_enough_bars",
+            }
+
+        # 40% 信号生成
+        if strategy_name == "buy_hold":
+            signals = self._buy_hold_signals(bars)
+        elif strategy_name == "ma_crossover":
+            signals = self._ma_crossover_signals(bars, strategy_params)
+        elif strategy_name == "rsi_oversold":
+            signals = self._rsi_oversold_signals(bars, strategy_params)
+        else:
+            return {
+                "backtest_id": None,
+                "status": "failed",
+                "error": "unsupported_strategy",
+                "strategy": strategy_name,
+            }
+        report(40)
+
+        # 70% 回测模拟
+        equity_curve, trades = self._simulate_backtest(bars, signals, initial_capital)
+        report(70)
+
+        # 90% 指标计算 & 保存
+        final_capital = equity_curve[-1]["equity"] if equity_curve else initial_capital
+        total_return = ((final_capital - initial_capital) / initial_capital) if initial_capital else 0.0
+        years = max(len(bars) / 252.0, 1 / 252.0)
+        annual_return = ((1 + total_return) ** (1 / years) - 1) if years else 0.0
+
+        peak = initial_capital
+        max_dd = 0.0
+        for point in equity_curve:
+            equity = point["equity"]
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak if peak else 0.0
+            if dd > max_dd:
+                max_dd = dd
+
+        excess_returns = []
+        winning_trades = 0
+        profit_sum = 0.0
+        loss_sum = 0.0
+        for t in trades:
+            ret = t["return_pct"]
+            excess_returns.append(ret)
+            if ret > 0:
+                winning_trades += 1
+                profit_sum += ret
+            else:
+                loss_sum += abs(ret)
+        total_trades = len(trades)
+        win_rate = (winning_trades / total_trades) if total_trades else 0.0
+        avg_win = (profit_sum / winning_trades) if winning_trades else 0.0
+        avg_loss = (loss_sum / (total_trades - winning_trades)) if total_trades > winning_trades else 0.0
+        profit_factor = (profit_sum / loss_sum) if loss_sum else float("inf")
+        sharpe = self._calculate_sharpe(excess_returns)
+
+        summary = {
+            "initial_capital": round(initial_capital, 2),
+            "final_capital": round(final_capital, 2),
+            "total_return": round(total_return * 100, 4),
+            "annual_return": round(annual_return * 100, 4),
+            "max_drawdown": round(max_dd * 100, 4),
+            "sharpe_ratio": round(sharpe, 4),
+            "win_rate": round(win_rate * 100, 4),
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "profit_factor": round(profit_factor, 4),
+            "avg_win": round(avg_win, 4),
+            "avg_loss": round(avg_loss, 4),
+        }
+
+        backtest_id = f"bt_{int(datetime.utcnow().timestamp())}"
+        result = BacktestResult(
+            user_id=user_id,
+            name=params.get("name") or f"回测 {backtest_id}",
+            strategy_id=None,
+            start_date=start_date,
+            end_date=end_date,
+            initial_capital=initial_capital,
+            final_capital=final_capital,
+            total_return=total_return * 100,
+            annual_return=annual_return * 100,
+            max_drawdown=max_dd * 100,
+            sharpe_ratio=sharpe,
+            win_rate=win_rate * 100,
+            total_trades=total_trades,
+            result_data={
+                "summary": summary,
+                "equity_curve": equity_curve,
+                "trades": trades,
+                "benchmark": self._build_benchmark_summary(
+                    stock_row=stock_row,
+                    start_date=start_date,
+                    end_date=end_date,
+                    initial_capital=initial_capital,
+                    equity_curve=equity_curve,
+                ),
+                "risk": self._build_risk_summary(summary=summary, equity_curve=equity_curve, trades=trades),
+            },
+        )
+        self.db.add(result)
+        await self.db.commit()
+        await self.db.refresh(result)
+
+        report(100)
+
+        return {
+            "backtest_id": backtest_id,
+            "status": "completed",
+            "summary": summary,
+            "equity_curve": equity_curve,
+            "trades": trades,
+            "benchmark": result.result_data["benchmark"],
+            "risk": result.result_data["risk"],
         }
