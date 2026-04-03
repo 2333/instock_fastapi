@@ -13,6 +13,7 @@ from app.models.stock_model import (
     Strategy,
     StrategyResult,
 )
+from app.models.strategy_social_models import StrategyComment, StrategyFavorite, StrategyRating
 from app.models.user_event_model import UserEvent
 
 __all__ = [
@@ -29,6 +30,9 @@ __all__ = [
     "SelectionResult",
     "Stock",
     "Strategy",
+    "StrategyComment",
+    "StrategyFavorite",
+    "StrategyRating",
     "StrategyResult",
     "UserEvent",
 ]
