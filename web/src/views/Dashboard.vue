@@ -30,6 +30,7 @@
           <div>
             <span class="card-kicker">市场温度计</span>
             <h2>盘后市场概览</h2>
+            <span v-if="marketSummary.tradeDate" class="card-date">数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}</span>
           </div>
           <router-link to="/stocks" class="card-link">查看股票列表</router-link>
         </div>
@@ -159,6 +160,7 @@
           <div>
             <span class="card-kicker">今日扫描发现</span>
             <h2>已保存条件的命中概要</h2>
+            <span v-if="todaySummary.tradeDate" class="card-date">数据日期：{{ formatTradeDate(todaySummary.tradeDate) }}</span>
           </div>
           <router-link to="/selection" class="card-link">进入筛选页</router-link>
         </div>
@@ -214,6 +216,7 @@
           <div>
             <span class="card-kicker">策略信号 / 回测更新</span>
             <h2>最近回测与策略记录</h2>
+            <span v-if="latestBacktest?.createdAt" class="card-date">最近回测：{{ formatDate(latestBacktest.createdAt) }}</span>
           </div>
           <router-link to="/backtest" class="card-link">查看回测页</router-link>
         </div>
@@ -422,6 +425,25 @@ const formatDisplayDate = (value?: string | null) => {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+  }).format(date)
+}
+
+const formatTradeDate = (value?: string | null) => {
+  if (!value) return '--'
+  if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}/${value.slice(4, 6)}/${value.slice(6, 8)}`
+  return value
+}
+
+const formatDate = (value?: string | null) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date)
 }
 
@@ -928,6 +950,13 @@ onMounted(() => {
   font-size: 12px;
   color: rgba(139, 168, 255, 0.88);
   letter-spacing: 0.04em;
+}
+
+.card-date {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
 }
 
 .card-link {
