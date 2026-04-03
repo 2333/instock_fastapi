@@ -1,4 +1,5 @@
-from typing import Any
+from typing import Any, Optional
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +9,22 @@ from app.schemas.selection_schema import ScreeningScope, SelectionFilters
 class StrategyResponse(BaseModel):
     name: str
     display_name: str
-    description: str | None = None
+    description: Optional[str] = None
+    # 社交字段
+    is_public: bool = False
+    is_official: bool = False
+    rating: float = 0.0
+    rating_count: int = 0
+    favorite_count: int = 0
+    comment_count: int = 0
+    backtest_count: int = 0
+    view_count: int = 0
+    tags: list[str] = Field(default_factory=list)
+    risk_level: Optional[str] = None
+    suitable_market: Optional[str] = None
+    # 用户状态（登录后返回）
+    user_rating: Optional[int] = None
+    user_favorited: bool = False
 
 
 class StrategyTemplateParamOption(BaseModel):

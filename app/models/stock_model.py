@@ -210,10 +210,22 @@ class Strategy(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # 社交字段
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否公开到社区")
+    is_official: Mapped[bool] = mapped_column(Boolean, default=False, comment="官方认证策略")
+    rating: Mapped[float] = mapped_column(Numeric(3, 2), default=0.0, comment="平均评分 0-5")
+    rating_count: Mapped[int] = mapped_column(Integer, default=0, comment="评分人数")
+    favorite_count: Mapped[int] = mapped_column(Integer, default=0, comment="收藏数")
+    comment_count: Mapped[int] = mapped_column(Integer, default=0, comment="评论数")
+    backtest_count: Mapped[int] = mapped_column(Integer, default=0, comment="被回测次数")
+    view_count: Mapped[int] = mapped_column(Integer, default=0, comment="查看次数")
+    tags: Mapped[list[str]] = mapped_column(JSONB, default=list, comment="质量标签")
+    risk_level: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="风险等级 low/medium/high")
+    suitable_market: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="适用市场 bull/bear/sideway")
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class StrategyResult(Base):

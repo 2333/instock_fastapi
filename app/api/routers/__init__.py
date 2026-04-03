@@ -14,6 +14,7 @@ from app.api.routers import (
     selection_router,
     stock_router,
     strategy_router,
+    strategy_social_router,
 )
 
 router = APIRouter()
@@ -31,5 +32,6 @@ router.include_router(auth_router.router, prefix="/api/v1")
 router.include_router(market_router.router, prefix="/api/v1")
 router.include_router(events_router.router, prefix="/api/v1")
 router.include_router(alert_router.router, prefix="/api/v1")
+router.include_router(strategy_social_router.router, prefix="/api/v1")
 
 __all__ = ["router"]
