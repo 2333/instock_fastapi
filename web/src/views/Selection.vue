@@ -174,10 +174,27 @@
           <div class="criteria-group">
             <label>RSI 范围</label>
             <div class="range-inputs">
-              <input type="number" v-model.number="criteria.rsiMin" placeholder="最小" min="0" max="100" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.rsiMin"
+                placeholder="最小"
+                min="0"
+                max="100"
+                class="input-small"
+                :class="{ invalid: rsiMinInvalid, valid: rsiMinValid }"
+              >
               <span>-</span>
-              <input type="number" v-model.number="criteria.rsiMax" placeholder="最大" min="0" max="100" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.rsiMax"
+                placeholder="最大"
+                min="0"
+                max="100"
+                class="input-small"
+                :class="{ invalid: rsiMaxInvalid, valid: rsiMaxValid }"
+              >
             </div>
+            <div v-if="rsiRangeError" class="criteria-hint error">{{ rsiRangeError }}</div>
             <p class="field-hint">RSI 相对强弱指标，通常 0-100，超卖区域低于 30</p>
           </div>
 
@@ -1022,6 +1039,20 @@ const changeRangeError = computed(() => {
   if (changeMaxInvalid.value) return '最大涨跌幅需在 -100% ~ +100% 范围内'
   if (criteria.changeMin != null && criteria.changeMax != null && criteria.changeMin > criteria.changeMax) {
     return '最小涨跌幅不能大于最大涨跌幅'
+  }
+  return ''
+})
+
+// RSI 验证
+const rsiMinValid = computed(() => criteria.rsiMin === null || criteria.rsiMin === undefined || (criteria.rsiMin >= 0 && criteria.rsiMin <= 100))
+const rsiMaxValid = computed(() => criteria.rsiMax === null || criteria.rsiMax === undefined || (criteria.rsiMax >= 0 && criteria.rsiMax <= 100))
+const rsiMinInvalid = computed(() => !rsiMinValid.value && criteria.rsiMin !== null && criteria.rsiMin !== undefined)
+const rsiMaxInvalid = computed(() => !rsiMaxValid.value && criteria.rsiMax !== null && criteria.rsiMax !== undefined)
+const rsiRangeError = computed(() => {
+  if (rsiMinInvalid.value) return '最小 RSI 需在 0-100 范围内'
+  if (rsiMaxInvalid.value) return '最大 RSI 需在 0-100 范围内'
+  if (criteria.rsiMin != null && criteria.rsiMax != null && criteria.rsiMin > criteria.rsiMax) {
+    return '最小 RSI 不能大于最大 RSI'
   }
   return ''
 })
