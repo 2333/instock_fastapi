@@ -12,6 +12,7 @@ from app.models.stock_model import (
     Strategy,
     StrategyResult,
 )
+from app.models.user_event_model import UserEvent
 
 __all__ = [
     "Attention",
@@ -26,4 +27,5 @@ __all__ = [
     "Stock",
     "Strategy",
     "StrategyResult",
+    "UserEvent",
 ]
