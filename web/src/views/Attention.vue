@@ -44,6 +44,9 @@
             <span class="group-badge" :class="stock.group">{{ groupLabel(stock.group) }}</span>
           </div>
           <div class="card-actions">
+            <button class="btn-icon" @click.stop="openAlertConfig(stock)" title="设置预警">
+              🔔
+            </button>
             <button class="btn-icon" @click.stop="toggleEdit(stock)" title="编辑">
               ✏️
             </button>
@@ -110,6 +113,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAnalytics } from '@/composables/useAnalytics'
+import { alertApi } from '@/api'
 import { attentionApi } from '@/api'
 
 const { pageView, attentionAction } = useAnalytics()
@@ -152,6 +156,42 @@ const groupLabel = (group: string) => {
     'long-term': '长期关注',
   }
   return labels[group] || group
+}
+
+// 预警快速设置
+const alertModal = ref<{ show: boolean; stock: AttentionItem | null }>({ show: false, stock: null })
+const alertForm = ref({
+  name: '',
+  code: '',
+  condition: { type: 'price', operator: 'gt', value: 0 },
+  notify_channels: ['in_app'] as string[],
+})
+
+function openAlertConfig(stock: AttentionItem) {
+  alertModal.value = { show: true, stock }
+  alertForm.value = {
+    name: `${stock.stock_name || stock.code} 价格预警`,
+    code: stock.code,
+    condition: { type: 'price', operator: 'gt', value: 0 },
+    notify_channels: ['in_app'],
+  }
+}
+
+function closeAlertModal() {
+  alertModal.value = { show: false, stock: null }
+}
+
+// @ts-ignore: used in template
+const saveQuickAlert = async () => {
+  if (!alertModal.value.stock) return
+  try {
+    await alertApi.create(alertForm.value)
+    closeAlertModal()
+    alert('预警创建成功')
+  } catch (e) {
+    console.error('Failed to create alert:', e)
+    alert('创建失败')
+  }
 }
 
 const hasAlerts = (stock: AttentionItem) => {
@@ -561,4 +601,120 @@ onMounted(() => {
     font-size: 12px;
   }
 }
+
+/* 快速预警模态框 */
+.alert-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.alert-modal {
+  background: var(--color-bg-primary);
+  border-radius: 8px;
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+}
+
+.alert-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+
+  h3 {
+    margin: 0;
+    font-size: 16px;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+  }
+}
+
+.alert-modal-body {
+  .form-group {
+    margin-bottom: 12px;
+
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid var(--color-border);
+      border-radius: 4px;
+      font-size: 13px;
+    }
+  }
+}
+
+.alert-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
 </style>
+
+<!-- 快速预警模态框 -->
+<div v-if="alertModal.show" class="alert-modal-overlay" @click.self="closeAlertModal">
+  <div class="alert-modal">
+    <div class="alert-modal-header">
+      <h3>快速设置预警</h3>
+      <button class="close-btn" @click="closeAlertModal">×</button>
+    </div>
+    <div class="alert-modal-body">
+      <div class="form-group">
+        <label>预警名称</label>
+        <input v-model="alertForm.name" type="text" />
+      </div>
+      <div class="form-group">
+        <label>股票代码</label>
+        <input v-model="alertForm.code" type="text" disabled />
+      </div>
+      <div class="form-group">
+        <label>条件类型</label>
+        <select v-model="alertForm.condition.type">
+          <option value="price">价格</option>
+          <option value="rsi">RSI</option>
+          <option value="change">涨跌幅</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>比较符</label>
+        <select v-model="alertForm.condition.operator">
+          <option value="gt">大于 (>)</option>
+          <option value="gte">大于等于 (≥)</option>
+          <option value="lt">小于 (<)</option>
+          <option value="lte">小于等于 (≤)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>阈值</label>
+        <input v-model.number="alertForm.condition.value" type="number" step="0.01" />
+      </div>
+    </div>
+    <div class="alert-modal-footer">
+      <button class="btn btn-secondary" @click="closeAlertModal">取消</button>
+      <button class="btn btn-primary" @click="saveQuickAlert" :disabled="!alertForm.name || !alertForm.condition.value">
+        创建
+      </button>
+    </div>
+  </div>
+</div>

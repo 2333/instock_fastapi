@@ -64,6 +64,12 @@ const routes = [
     meta: { title: '我的关注' }
   },
   {
+    path: '/alerts',
+    name: 'Alerts',
+    component: () => import('@/views/Alerts.vue'),
+    meta: { title: '预警管理' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),

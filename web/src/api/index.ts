@@ -273,4 +273,15 @@ export const attentionApi = {
   remove: (code: string) => api.delete(`/attention/${code}`) as Promise<any>,
 }
 
+export const alertApi = {
+  list: () => api.get('/alerts/conditions') as Promise<any>,
+  create: (data: any) => api.post('/alerts/conditions', data) as Promise<any>,
+  get: (id: number) => api.get(`/alerts/conditions/${id}`) as Promise<any>,
+  update: (id: number, data: any) => api.put(`/alerts/conditions/${id}`, data) as Promise<any>,
+  remove: (id: number) => api.delete(`/alerts/conditions/${id}`) as Promise<any>,
+  listNotifications: (limit?: number) => api.get('/alerts/notifications', { params: { limit } }) as Promise<any>,
+  markRead: (notifId: number) => api.patch(`/alerts/notifications/${notifId}/read`) as Promise<any>,
+  getUnreadCount: () => api.get('/alerts/unread-count') as Promise<any>,
+}
+
 export default api

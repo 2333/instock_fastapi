@@ -132,6 +132,8 @@
         </button>
       </div>
 
+      <NotificationBell />
+
       <div class="user-menu">
         <template v-if="currentUser">
           <button class="user-btn" @click="toggleUserMenu">
@@ -170,6 +172,7 @@ import { useRouter } from "vue-router";
 import { useLocale } from "@/composables/useLocale";
 import { authApi } from "@/api";
 import { useUserPreferences } from "@/composables/useUserPreferences";
+import NotificationBell from "@/components/NotificationBell.vue";
 
 const router = useRouter();
 const emit = defineEmits<{
