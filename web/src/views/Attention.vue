@@ -109,7 +109,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { attentionApi } from '@/api'
+
+const { pageView, attentionAction } = useAnalytics()
 
 interface AttentionItem {
   id: number
@@ -179,11 +182,13 @@ const fetchAttention = async () => {
 
 const addStock = async () => {
   if (!searchQuery.value) return
+  const code = searchQuery.value
 
   try {
-    await attentionApi.add(searchQuery.value, 'watch')
+    await attentionApi.add(code, 'watch')
     searchQuery.value = ''
     await fetchAttention()
+    attentionAction('add', code, 'attention_page')
   } catch (e) {
     console.error('Failed to add attention:', e)
   }
@@ -196,6 +201,7 @@ const removeStock = async (id: number) => {
     if (stock) {
       await attentionApi.remove(stock.code)
       await fetchAttention()
+      attentionAction('remove', stock.code, 'attention_page')
     }
   } catch (e) {
     console.error('Failed to remove attention:', e)
@@ -244,6 +250,7 @@ const saveEdit = async (id: number) => {
 }
 
 onMounted(() => {
+  pageView('/attention')
   fetchAttention()
 })
 </script>

@@ -577,6 +577,7 @@ import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { backtestApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
@@ -712,6 +713,8 @@ const config = reactive({
   strategyType: 'ma_crossover',
 })
 const strategyParams = reactive<Record<string, string | number>>({})
+
+const { pageView, backtestRun } = useAnalytics()
 
 const selectedStrategyTemplate = computed(() =>
   strategyTemplates.value.find((template) => template.name === config.strategyType) || null
@@ -1727,6 +1730,16 @@ const runBacktest = async () => {
       initial_capital: config.initialCapital,
       stock_code: config.stockCode,
     } as any)
+
+    backtestRun({
+      strategy: config.strategyType,
+      params: { ...strategyParams },
+      stock_code: config.stockCode,
+      start_date: range.start,
+      end_date: range.end,
+      initial_capital: config.initialCapital,
+    }, false)
+
     if (result?.status !== 'completed') {
       const message = result?.error === 'unsupported_strategy'
         ? '当前模板尚未接入回测引擎，请切换到可运行模板后重试'
@@ -1929,6 +1942,7 @@ const initCompareEquityChart = async () => {
 }
 
 onMounted(() => {
+  pageView('/backtest')
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
   recentBacktests.value = JSON.parse(window.localStorage.getItem(RECENT_BACKTESTS_KEY) || '[]')

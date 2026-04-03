@@ -297,6 +297,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { attentionApi, patternApi, stockApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
 import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
@@ -684,6 +685,15 @@ const analyzePatterns = () => {
 }
 
 const openPatternDetail = (pattern: PatternDetail) => {
+  // 追踪形态查看事件
+  const { patternView } = useAnalytics()
+  patternView(
+    pattern.pattern_name,
+    pattern.confidence,
+    pattern.trade_date,
+    pattern.pattern_key
+  )
+
   selectedPattern.value = pattern
   showPatternDetail.value = true
 }
@@ -722,6 +732,8 @@ watch(
 )
 
 onMounted(() => {
+  const { pageView } = useAnalytics()
+  pageView(`/stock/${code.value}`)
   fetchStockDetail(currentAdjust.value, true)
 })
 </script>
