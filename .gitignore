@@ -48,6 +48,7 @@ config/proxy.txt
 *.db
 *.sqlite
 *.sqlite3
+backups/
 
 # Docker
 .docker/

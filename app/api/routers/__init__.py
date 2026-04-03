@@ -11,6 +11,7 @@ from app.api.routers import (
     indicator_router,
     market_router,
     pattern_router,
+    report_router,
     selection_router,
     stock_router,
     strategy_router,
@@ -35,5 +36,6 @@ router.include_router(events_router.router, prefix="/api/v1")
 router.include_router(alert_router.router, prefix="/api/v1")
 router.include_router(strategy_social_router.router, prefix="/api/v1")
 router.include_router(optimization_router.router, prefix="/api/v1")
+router.include_router(report_router.router, prefix="/api/v1")
 
 __all__ = ["router"]

@@ -1,5 +1,6 @@
 from app.models.alert_models import AlertCondition, Notification
 from app.models.optimization_models import ParameterOptimizationJob, ParameterOptimizationTrial
+from app.models.report_models import ReportPreference, UserReport
 from app.models.stock_model import (
     Attention,
     BacktestResult,
@@ -29,6 +30,7 @@ __all__ = [
     "ParameterOptimizationJob",
     "ParameterOptimizationTrial",
     "Pattern",
+    "ReportPreference",
     "SelectionCondition",
     "SelectionResult",
     "Stock",
@@ -38,4 +40,5 @@ __all__ = [
     "StrategyRating",
     "StrategyResult",
     "UserEvent",
+    "UserReport",
 ]
