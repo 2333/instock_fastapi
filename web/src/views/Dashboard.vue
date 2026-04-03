@@ -105,7 +105,10 @@
             <h2>关注列表联动</h2>
             <span class="card-date">最后刷新：{{ lastSyncedLabel }}</span>
           </div>
-          <router-link to="/attention" class="card-link">管理关注</router-link>
+          <div class="card-meta">
+            <span :class="['freshness-dot', freshnessClass]" title="数据新鲜度"></span>
+            <router-link to="/attention" class="card-link">管理关注</router-link>
+          </div>
         </div>
 
         <div class="metric-strip metric-strip--compact">
@@ -711,6 +714,15 @@ const lastSyncedLabel = computed(() => {
   }).format(new Date(lastSyncedAt.value))
 })
 
+const freshnessClass = computed(() => {
+  if (!lastSyncedAt.value) return 'stale'
+  const elapsedMs = Date.now() - new Date(lastSyncedAt.value).getTime()
+  const elapsedMin = elapsedMs / 60000
+  if (elapsedMin < 1) return 'fresh'    // < 1 分钟
+  if (elapsedMin < 5) return 'recent'   // < 5 分钟
+  return 'stale'
+})
+
 const buildStockLink = (code: string, screeningDate?: string) => ({
   path: `/stock/${code}`,
   query: screeningDate ? { screening_date: screeningDate } : undefined,
@@ -945,6 +957,24 @@ onMounted(() => {
     font-weight: 600;
     color: rgba(255, 255, 255, 0.92);
   }
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.freshness-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+
+  &.fresh { background: #00C853; box-shadow: 0 0 6px rgba(0, 200, 83, 0.6); }
+  &.recent { background: #FFB74D; box-shadow: 0 0 6px rgba(255, 183, 77, 0.5); }
+  &.stale { background: rgba(255, 255, 255, 0.3); }
 }
 
 .card-kicker {
