@@ -112,6 +112,14 @@
           <div class="card-meta">
             <span :class="['freshness-dot', freshnessClass]" title="数据新鲜度"></span>
             <router-link to="/attention" class="card-link">管理关注</router-link>
+            <button
+              v-if="attentionItems.length > 0"
+              class="card-action-btn"
+              @click="addAllToScreening"
+              title="将所有关注股票加入今日扫描"
+            >
+              全部扫描
+            </button>
           </div>
         </div>
 
@@ -285,7 +293,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
+
+const router = useRouter()
 
 interface AttentionEntry {
   code: string
@@ -812,6 +823,15 @@ function refreshWorkbench() {
     })
 }
 
+const addAllToScreening = () => {
+  const codes = attentionItems.value.map((item: any) => item.code).filter(Boolean)
+  if (!codes.length) return
+  router.push({
+    path: '/selection',
+    query: { watchlist: codes.join(',') },
+  })
+}
+
 onMounted(() => {
   refreshWorkbench()
 })
@@ -1007,6 +1027,27 @@ onMounted(() => {
 .data-source {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.25);
+}
+
+.card-action-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(41, 98, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(41, 98, 255, 0.1);
+  color: #9ab7ff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: rgba(41, 98, 255, 0.2);
+    border-color: rgba(41, 98, 255, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .card-link {
