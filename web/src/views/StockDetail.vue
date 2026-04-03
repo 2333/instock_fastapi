@@ -227,7 +227,7 @@
                 @mouseleave="activePatternKey = ''"
                 @focus="activePatternKey = pattern.pattern_key"
                 @blur="activePatternKey = ''"
-                @click="activePatternKey = pattern.pattern_key"
+                @click="openPatternDetail(pattern)"
               >
                 <div class="pattern-info">
                   <span class="pattern-name">{{ getPatternLabel(pattern.pattern_name) }}</span>
@@ -247,6 +247,45 @@
           </div>
         </aside>
       </div>
+
+      <!-- Pattern Detail Modal -->
+      <div v-if="showPatternDetail && selectedPattern" class="pattern-modal-overlay" @click.self="closePatternDetail">
+        <div class="pattern-modal">
+          <div class="pattern-modal-header">
+            <h3>{{ getPatternLabel(selectedPattern.pattern_name) }}</h3>
+            <button class="modal-close-btn" @click="closePatternDetail">×</button>
+          </div>
+          <div class="pattern-modal-body">
+            <div class="pattern-detail-row">
+              <span class="label">信号方向</span>
+              <span class="value" :class="getSignalClass(selectedPattern.pattern_type)">
+                {{ getSignalText(selectedPattern.pattern_type) }}
+              </span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">发生日期</span>
+              <span class="value">{{ formatDisplayDate(selectedPattern.trade_date) }}</span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">置信度</span>
+              <span class="value">{{ selectedPattern.confidence }}%</span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">形态代码</span>
+              <span class="value">{{ selectedPattern.pattern_key }}</span>
+            </div>
+            <p class="pattern-description">
+              该形态出现在 {{ formatDisplayDate(selectedPattern.trade_date) }}，置信度 {{ selectedPattern.confidence }}%。
+              可在 K 线图中查看具体位置与形态结构。
+            </p>
+          </div>
+          <div class="pattern-modal-footer">
+            <button class="btn btn-secondary" @click="closePatternDetail">关闭</button>
+            <button class="btn btn-primary" @click="analyzePatterns">查看所有形态</button>
+          </div>
+        </div>
+      </div>
+
     </template>
 
     <div v-else class="error-state">
@@ -319,6 +358,8 @@ const inWatchlist = ref(false)
 const activeChartMode = ref<'native' | 'tradingview'>('native')
 const showPatternMarks = ref(true)
 const activePatternKey = ref('')
+const selectedPattern = ref<PatternDetail | null>(null)
+const showPatternDetail = ref(false)
 const focusRangeRequestId = ref(0)
 
 const stockInfo = ref<any>(null)
@@ -640,6 +681,16 @@ const analyzePatterns = () => {
     path: '/patterns',
     query: { code: code.value },
   })
+}
+
+const openPatternDetail = (pattern: PatternDetail) => {
+  selectedPattern.value = pattern
+  showPatternDetail.value = true
+}
+
+const closePatternDetail = () => {
+  showPatternDetail.value = false
+  selectedPattern.value = null
 }
 
 const goBacktest = () => {
@@ -1332,6 +1383,106 @@ onMounted(() => {
     .price-change {
       font-size: 12px;
     }
+  }
+}
+
+/* Pattern Detail Modal */
+.pattern-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pattern-modal {
+  background: linear-gradient(180deg, rgba(30, 34, 45, 0.98), rgba(20, 22, 28, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+
+  &-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .modal-close-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: rgba(255, 255, 255, 0.9);
+      }
+    }
+  }
+
+  &-body {
+    padding: 20px;
+
+    .pattern-detail-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+
+      .label {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .value {
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+
+        &.bullish { color: #00C853; }
+        &.bearish { color: #ff5252; }
+        &.neutral { color: rgba(255, 255, 255, 0.6); }
+      }
+    }
+
+    .pattern-description {
+      margin: 16px 0 0;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 13px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.6);
+    }
+  }
+
+  &-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
   }
 }
 </style>
