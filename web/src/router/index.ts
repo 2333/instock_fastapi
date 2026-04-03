@@ -70,6 +70,12 @@ const routes = [
     meta: { title: '预警管理' }
   },
   {
+    path: '/strategies',
+    name: 'StrategyMarket',
+    component: () => import('@/views/StrategyMarket.vue'),
+    meta: { title: '策略市场' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),

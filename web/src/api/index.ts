@@ -284,4 +284,33 @@ export const alertApi = {
   getUnreadCount: () => api.get('/alerts/unread-count') as Promise<any>,
 }
 
+export const strategySocialApi = {
+  listPublic: (params?: {
+    strategy_type?: string
+    risk_level?: string
+    sort_by?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/strategies/public', { params }) as Promise<any>,
+
+  getDetails: (strategyId: number) => api.get(`/strategies/${strategyId}/details`) as Promise<any>,
+
+  rate: (strategyId: number, rating: number, comment?: string) =>
+    api.post(`/strategies/${strategyId}/rate`, { rating, comment }) as Promise<any>,
+
+  getMyRatings: (limit?: number) => api.get('/strategies/my-ratings', { params: { limit } }) as Promise<any>,
+
+  toggleFavorite: (strategyId: number) => api.post(`/strategies/${strategyId}/favorite`) as Promise<any>,
+
+  getMyFavorites: (limit?: number) => api.get('/strategies/my-favorites', { params: { limit } }) as Promise<any>,
+
+  getComments: (strategyId: number, limit?: number, offset?: number) =>
+    api.get(`/strategies/${strategyId}/comments`, { params: { limit, offset } }) as Promise<any>,
+
+  addComment: (strategyId: number, content: string, parentId?: number) =>
+    api.post(`/strategies/${strategyId}/comments`, { content, parent_id: parentId }) as Promise<any>,
+
+  deleteComment: (commentId: number) => api.delete(`/strategies/comments/${commentId}`) as Promise<any>,
+}
+
 export default api
