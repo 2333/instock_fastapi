@@ -82,6 +82,24 @@ const routes = [
     meta: { title: '参数优化' }
   },
   {
+    path: '/reports',
+    name: 'Reports',
+    component: () => import('@/views/Reports.vue'),
+    meta: { title: '数据洞察报告' }
+  },
+  {
+    path: '/reports/:id',
+    name: 'ReportDetail',
+    component: () => import('@/views/ReportDetail.vue'),
+    meta: { title: '报告详情' }
+  },
+  {
+    path: '/report-preferences',
+    name: 'ReportPreferences',
+    component: () => import('@/views/ReportPreferences.vue'),
+    meta: { title: '报告偏好设置' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),
