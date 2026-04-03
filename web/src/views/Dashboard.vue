@@ -294,9 +294,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
 
 const router = useRouter()
+const { pageView } = useAnalytics()
 
 interface AttentionEntry {
   code: string
@@ -833,6 +835,7 @@ const addAllToScreening = () => {
 }
 
 onMounted(() => {
+  pageView('/dashboard')
   refreshWorkbench()
 })
 </script>
