@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class AlertConditionBase(BaseModel):
@@ -33,8 +33,7 @@ class AlertConditionResponse(AlertConditionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlertConditionSimple(BaseModel):
@@ -47,5 +46,4 @@ class AlertConditionSimple(BaseModel):
     last_triggered_at: Optional[datetime] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
