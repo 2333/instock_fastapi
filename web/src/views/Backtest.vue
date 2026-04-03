@@ -287,8 +287,26 @@
 
         <div class="config-section">
           <h4>入场策略</h4>
-          <div class="config-item">
-            <label>策略类型</label>
+
+          <!-- 策略来源标签页 -->
+          <div class="strategy-tabs">
+            <button
+              class="tab-btn"
+              :class="{ active: strategySourceTab === 'my' }"
+              @click="strategySourceTab = 'my'"
+            >
+              我的模板
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: strategySourceTab === 'public' }"
+              @click="strategySourceTab = 'public'"
+            >
+              公共策略库
+            </button>
+          </div>
+
+          <div v-if="strategySourceTab === 'my'" class="strategy-select">
             <select v-model="config.strategyType" class="select-full">
               <option
                 v-for="template in strategyTemplates"
@@ -299,6 +317,22 @@
               </option>
             </select>
           </div>
+
+          <div v-else class="public-strategies">
+            <div v-if="loadingPublicStrategies" class="loading-state">加载中...</div>
+            <div v-else-if="publicStrategies.length === 0" class="empty-state">暂无公共策略</div>
+            <div v-else class="public-strategies-grid">
+              <StrategyCard
+                v-for="strategy in publicStrategies"
+                :key="strategy.id"
+                :strategy="strategy"
+                @favorite-toggle="onPublicFavoriteToggle"
+                @rate="onPublicRate"
+                @close="openStrategyDetails = null"
+              />
+            </div>
+          </div>
+
           <p v-if="selectedStrategyTemplate?.description" class="strategy-description">
             {{ selectedStrategyTemplate.description }}
           </p>
@@ -578,8 +612,9 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useAnalytics } from '@/composables/useAnalytics'
-import { backtestApi, strategyApi } from '@/api'
+import { backtestApi, strategyApi, strategySocialApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
+import StrategyCard from '@/components/StrategyCard.vue'
 
 echarts.use([
   LineChart,
@@ -712,6 +747,15 @@ const config = reactive({
   slippage: 0.1,
   strategyType: 'ma_crossover',
 })
+
+// 策略来源标签页：my（我的模板） / public（公共策略库）
+const strategySourceTab = ref<'my' | 'public'>('my')
+
+// 公共策略数据
+const publicStrategies = ref<any[]>([])
+const loadingPublicStrategies = ref(false)
+const openStrategyDetails = ref<number | null>(null)  // 当前打开的 StrategyDetailModal 策略ID
+
 const strategyParams = reactive<Record<string, string | number>>({})
 
 const { pageView, backtestRun } = useAnalytics()
@@ -1597,6 +1641,52 @@ const loadStrategyTemplates = async () => {
   }
 }
 
+const loadPublicStrategies = async () => {
+  loadingPublicStrategies.value = true
+  try {
+    const res = await strategySocialApi.listPublic({
+      sort_by: 'backtest_count',
+      limit: 20,
+    })
+    publicStrategies.value = (res.data?.items || []).map((s: any) => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      rating: s.rating || 0,
+      rating_count: s.rating_count || 0,
+      favorite_count: s.favorite_count || 0,
+      comment_count: s.comment_count || 0,
+      backtest_count: s.backtest_count || 0,
+      is_public: s.is_public,
+      is_official: s.is_official,
+      tags: s.tags,
+      risk_level: s.risk_level,
+      suitable_market: s.suitable_market,
+    }))
+  } catch (error) {
+    console.error('Failed to load public strategies:', error)
+  } finally {
+    loadingPublicStrategies.value = false
+  }
+}
+
+function onPublicFavoriteToggle(strategyId: number, favorited: boolean) {
+  // 更新本地公共策略状态
+  const strategy = publicStrategies.value.find(s => s.id === strategyId)
+  if (strategy) {
+    strategy.favorite_count += favorited ? 1 : -1
+  }
+}
+
+function onPublicRate(strategyId: number, rating: number) {
+  // 更新本地评分
+  const strategy = publicStrategies.value.find(s => s.id === strategyId)
+  if (strategy) {
+    // 重新计算平均分（简化：直接替换）
+    strategy.rating = rating
+  }
+}
+
 const saveStrategy = async () => {
   if (!selectedStrategyTemplate.value) return
 
@@ -1951,6 +2041,7 @@ onMounted(() => {
     await loadStrategyTemplates()
     await loadSavedStrategies()
     await loadBacktestHistory()
+    await loadPublicStrategies()  // 加载公共策略
     if (currentBacktestId.value) {
       await loadBacktestResult(currentBacktestId.value)
     }
@@ -2763,6 +2854,53 @@ onBeforeUnmount(() => {
 @media (max-width: 1400px) {
   .metrics-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+// 策略标签页
+.strategy-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+
+  .tab-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--color-text);
+    transition: all 0.2s;
+
+    &:hover {
+      border-color: var(--color-primary);
+    }
+
+    &.active {
+      background: var(--color-primary);
+      color: white;
+      border-color: var(--color-primary);
+    }
+  }
+}
+
+// 公共策略网格
+.public-strategies {
+  .public-strategies-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .loading-state,
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-secondary);
+    border-radius: 8px;
   }
 }
 </style>
