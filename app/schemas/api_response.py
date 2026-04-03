@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class APIResponse(BaseModel):
@@ -11,8 +11,7 @@ class APIResponse(BaseModel):
     data: Any | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
 
 
 class PaginatedData(BaseModel):

@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class StrategyRatingBase(BaseModel):
@@ -21,8 +21,7 @@ class StrategyRatingResponse(StrategyRatingBase):
     user_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StrategyFavoriteResponse(BaseModel):
@@ -32,8 +31,7 @@ class StrategyFavoriteResponse(BaseModel):
     user_id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StrategyCommentBase(BaseModel):
@@ -55,8 +53,7 @@ class StrategyCommentResponse(StrategyCommentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StrategySocialSummary(BaseModel):
@@ -70,5 +67,4 @@ class StrategySocialSummary(BaseModel):
     user_rating: Optional[int] = Field(None, description="当前用户的评分（已登录时）")
     user_favorited: bool = Field(False, description="当前用户是否收藏")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
