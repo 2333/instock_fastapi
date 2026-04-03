@@ -120,10 +120,23 @@
           <div class="criteria-group">
             <label>价格范围</label>
             <div class="range-inputs">
-              <input type="number" v-model.number="criteria.priceMin" placeholder="最小" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.priceMin"
+                placeholder="最小"
+                class="input-small"
+                :class="{ invalid: priceMinInvalid, valid: priceMinValid }"
+              >
               <span>-</span>
-              <input type="number" v-model.number="criteria.priceMax" placeholder="最大" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.priceMax"
+                placeholder="最大"
+                class="input-small"
+                :class="{ invalid: priceMaxInvalid, valid: priceMaxValid }"
+              >
             </div>
+            <div v-if="priceRangeError" class="criteria-hint error">{{ priceRangeError }}</div>
           </div>
         </div>
 
@@ -132,10 +145,23 @@
           <div class="criteria-group">
             <label>日涨跌 (%)</label>
             <div class="range-inputs">
-              <input type="number" v-model.number="criteria.changeMin" placeholder="最小" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.changeMin"
+                placeholder="最小"
+                class="input-small"
+                :class="{ invalid: changeMinInvalid, valid: changeMinValid }"
+              >
               <span>-</span>
-              <input type="number" v-model.number="criteria.changeMax" placeholder="最大" class="input-small">
+              <input
+                type="number"
+                v-model.number="criteria.changeMax"
+                placeholder="最大"
+                class="input-small"
+                :class="{ invalid: changeMaxInvalid, valid: changeMaxValid }"
+              >
             </div>
+            <div v-if="changeRangeError" class="criteria-hint error">{{ changeRangeError }}</div>
           </div>
         </div>
 
@@ -920,6 +946,33 @@ const startCompare = async () => {
   }
 }
 
+// 实时验证计算属性
+const priceMinValid = computed(() => criteria.priceMin === null || criteria.priceMin === undefined || criteria.priceMin >= 0)
+const priceMaxValid = computed(() => criteria.priceMax === null || criteria.priceMax === undefined || criteria.priceMax >= 0)
+const priceMinInvalid = computed(() => !priceMinValid.value && criteria.priceMin !== null && criteria.priceMin !== undefined)
+const priceMaxInvalid = computed(() => !priceMaxValid.value && criteria.priceMax !== null && criteria.priceMax !== undefined)
+const priceRangeError = computed(() => {
+  if (priceMinInvalid.value) return '最小价格不能为负数'
+  if (priceMaxInvalid.value) return '最大价格不能为负数'
+  if (criteria.priceMin != null && criteria.priceMax != null && criteria.priceMin > criteria.priceMax) {
+    return '最小价格不能大于最大价格'
+  }
+  return ''
+})
+
+const changeMinValid = computed(() => criteria.changeMin === null || criteria.changeMin === undefined || (criteria.changeMin >= -100 && criteria.changeMin <= 100))
+const changeMaxValid = computed(() => criteria.changeMax === null || criteria.changeMax === undefined || (criteria.changeMax >= -100 && criteria.changeMax <= 100))
+const changeMinInvalid = computed(() => !changeMinValid.value && criteria.changeMin !== null && criteria.changeMin !== undefined)
+const changeMaxInvalid = computed(() => !changeMaxValid.value && criteria.changeMax !== null && criteria.changeMax !== undefined)
+const changeRangeError = computed(() => {
+  if (changeMinInvalid.value) return '最小涨跌幅需在 -100% ~ +100% 范围内'
+  if (changeMaxInvalid.value) return '最大涨跌幅需在 -100% ~ +100% 范围内'
+  if (criteria.changeMin != null && criteria.changeMax != null && criteria.changeMin > criteria.changeMax) {
+    return '最小涨跌幅不能大于最大涨跌幅'
+  }
+  return ''
+})
+
 const toggleCriteriaPanel = () => {
   criteriaCollapsed.value = !criteriaCollapsed.value
   window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
@@ -1298,6 +1351,26 @@ onMounted(async () => {
   &:focus {
     outline: none;
     border-color: #2962FF;
+  }
+
+  &.invalid {
+    border-color: #ff5252;
+    background: rgba(255, 82, 82, 0.08);
+  }
+
+  &.valid {
+    border-color: #4CAF50;
+    background: rgba(76, 175, 80, 0.08);
+  }
+}
+
+.criteria-hint {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 4px;
+
+  &.error {
+    color: #ff5252;
   }
 }
 
