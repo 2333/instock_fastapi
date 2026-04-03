@@ -226,8 +226,15 @@
 
         <div v-if="!hasResults" class="empty-state">
           <div class="empty-icon">🎯</div>
-          <h3>暂无结果</h3>
-          <p>运行筛选后可查看命中原因，并进入个股详情复核验证数据</p>
+          <h3>暂无匹配结果</h3>
+          <p>当前筛选条件未命中任何股票，可以尝试：</p>
+          <ul class="empty-suggestions">
+            <li>放宽价格或涨跌幅范围</li>
+            <li>减少条件数量（同时满足过多条件可能导致零命中）</li>
+            <li>检查市场数据是否已更新（盘后运行）</li>
+            <li>切换至"形态"或"指标"条件，增加命中机会</li>
+          </ul>
+          <button class="btn btn-primary" @click="resetCriteria">重置条件</button>
         </div>
 
         <template v-else>
@@ -929,6 +936,27 @@ const categoryClass = (category: string | null | undefined): string => {
   return 'category-default'
 }
 
+const resetCriteria = () => {
+  criteria.priceMin = null
+  criteria.priceMax = null
+  criteria.market = ''
+  criteria.changeMin = null
+  criteria.changeMax = null
+  criteria.marketCapMin = null
+  criteria.marketCapMax = null
+  criteria.weekChangeMin = null
+  criteria.weekChangeMax = null
+  criteria.peMin = null
+  criteria.peMax = null
+  criteria.rsiMin = null
+  criteria.rsiMax = null
+  criteria.macdBullish = false
+  criteria.macdBearish = false
+  criteria.pattern = ''
+  criteria.volumeRatioMin = null
+  criteria.volumeRatioMax = null
+}
+
 onMounted(async () => {
   await Promise.all([
     fetchMyConditions(),
@@ -1387,6 +1415,29 @@ onMounted(async () => {
   p {
     margin: 0;
     color: rgba(255, 255, 255, 0.5);
+  }
+
+  .empty-suggestions {
+    margin: 16px 0 24px;
+    padding: 0;
+    list-style: none;
+    text-align: left;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 13px;
+    line-height: 1.6;
+
+    li {
+      margin-bottom: 4px;
+      padding-left: 16px;
+      position: relative;
+
+      &::before {
+        content: "•";
+        position: absolute;
+        left: 0;
+        color: rgba(255, 255, 255, 0.3);
+      }
+    }
   }
 }
 
