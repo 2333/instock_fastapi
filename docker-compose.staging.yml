@@ -32,7 +32,7 @@ services:
       - FUND_FLOW_STOCK_SOURCE=eastmoney
       - FUND_FLOW_SECTOR_SOURCE=tushare
     ports:
-      - "8001:8000"
+      - "${STAGING_APP_PORT:-8002}:8000"
     volumes:
       - ./app:/app/app
       - ./core:/app/core
@@ -59,9 +59,9 @@ services:
         APP_GIT_SHA: local-staging
     container_name: instock_staging_frontend
     environment:
-      - VITE_API_URL=http://localhost:8001
+      - VITE_API_URL=http://localhost:${STAGING_APP_PORT:-8002}
     ports:
-      - "3002:80"
+      - "${STAGING_FRONTEND_PORT:-3003}:80"
     depends_on:
       - app
     restart: unless-stopped

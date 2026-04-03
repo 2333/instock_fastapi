@@ -107,6 +107,53 @@
         </div>
       </div>
     </div>
+
+    <!-- 快速预警模态框 -->
+    <div v-if="alertModal.show" class="alert-modal-overlay" @click.self="closeAlertModal">
+      <div class="alert-modal">
+        <div class="alert-modal-header">
+          <h3>快速设置预警</h3>
+          <button class="close-btn" @click="closeAlertModal">×</button>
+        </div>
+        <div class="alert-modal-body">
+          <div class="form-group">
+            <label>预警名称</label>
+            <input v-model="alertForm.name" type="text" />
+          </div>
+          <div class="form-group">
+            <label>股票代码</label>
+            <input v-model="alertForm.code" type="text" disabled />
+          </div>
+          <div class="form-group">
+            <label>条件类型</label>
+            <select v-model="alertForm.condition.type">
+              <option value="price">价格</option>
+              <option value="rsi">RSI</option>
+              <option value="change">涨跌幅</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>比较符</label>
+            <select v-model="alertForm.condition.operator">
+              <option value="gt">大于 (>)</option>
+              <option value="gte">大于等于 (≥)</option>
+              <option value="lt">小于 (&lt;)</option>
+              <option value="lte">小于等于 (≤)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>阈值</label>
+            <input v-model.number="alertForm.condition.value" type="number" step="0.01" />
+          </div>
+        </div>
+        <div class="alert-modal-footer">
+          <button class="btn btn-secondary" @click="closeAlertModal">取消</button>
+          <button class="btn btn-primary" @click="saveQuickAlert" :disabled="!alertForm.name || !alertForm.condition.value">
+            创建
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -671,50 +718,3 @@ onMounted(() => {
   border-top: 1px solid var(--color-border);
 }
 </style>
-
-<!-- 快速预警模态框 -->
-<div v-if="alertModal.show" class="alert-modal-overlay" @click.self="closeAlertModal">
-  <div class="alert-modal">
-    <div class="alert-modal-header">
-      <h3>快速设置预警</h3>
-      <button class="close-btn" @click="closeAlertModal">×</button>
-    </div>
-    <div class="alert-modal-body">
-      <div class="form-group">
-        <label>预警名称</label>
-        <input v-model="alertForm.name" type="text" />
-      </div>
-      <div class="form-group">
-        <label>股票代码</label>
-        <input v-model="alertForm.code" type="text" disabled />
-      </div>
-      <div class="form-group">
-        <label>条件类型</label>
-        <select v-model="alertForm.condition.type">
-          <option value="price">价格</option>
-          <option value="rsi">RSI</option>
-          <option value="change">涨跌幅</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>比较符</label>
-        <select v-model="alertForm.condition.operator">
-          <option value="gt">大于 (>)</option>
-          <option value="gte">大于等于 (≥)</option>
-          <option value="lt">小于 (<)</option>
-          <option value="lte">小于等于 (≤)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>阈值</label>
-        <input v-model.number="alertForm.condition.value" type="number" step="0.01" />
-      </div>
-    </div>
-    <div class="alert-modal-footer">
-      <button class="btn btn-secondary" @click="closeAlertModal">取消</button>
-      <button class="btn btn-primary" @click="saveQuickAlert" :disabled="!alertForm.name || !alertForm.condition.value">
-        创建
-      </button>
-    </div>
-  </div>
-</div>

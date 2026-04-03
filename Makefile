@@ -63,14 +63,14 @@ help:
 	@echo "  make frontend-dev-local - 本地启动前端 (:3002)"
 	@echo ""
 	@echo "预发布环境 (复用生产 DB, 测试新代码):"
-	@echo "  make staging-up       - 构建并启动预发布容器 (:8001 后端, :3002 前端)"
+	@echo "  make staging-up       - 构建并启动预发布容器 (:$(STAGING_APP_PORT) 后端, :$(STAGING_FRONTEND_PORT) 前端)"
 	@echo "  make staging-down     - 停止预发布容器"
 	@echo "  make staging-rebuild  - 重建预发布容器"
 	@echo "  make staging-status   - 查看预发布容器状态"
 	@echo "  make staging-logs     - 查看预发布容器日志"
 	@echo "  make staging-smoke    - 预发布容器健康检查"
-	@echo "  make staging-local    - 本地启动后端 (:8001, 连生产 DB)"
-	@echo "  make frontend-staging-local - 本地启动前端 (:3002)"
+	@echo "  make staging-local    - 本地启动后端 (:$(STAGING_APP_PORT), 连生产 DB)"
+	@echo "  make frontend-staging-local - 本地启动前端 (:$(STAGING_FRONTEND_PORT))"
 	@echo ""
 	@echo "代码质量:"
 	@echo "  make lint           - 运行基础静态检查"
@@ -188,6 +188,8 @@ docker-clean:
 # ============ 测试环境 (Docker, 隔离端口) ============
 
 DEV_COMPOSE = docker compose -f docker-compose.dev.yml
+STAGING_APP_PORT ?= 8002
+STAGING_FRONTEND_PORT ?= 3003
 
 dev-up:
 	@echo "Building and starting dev environment..."
@@ -269,10 +271,10 @@ staging-up:
 	@echo "Waiting for services..."
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		sleep 2; \
-		if curl -s http://localhost:8001/health > /dev/null 2>&1; then \
-			echo "Backend:  http://localhost:8001 ✅"; \
-			echo "Docs:     http://localhost:8001/docs"; \
-			echo "Frontend: http://localhost:3002"; \
+		if curl -s http://localhost:$(STAGING_APP_PORT)/health > /dev/null 2>&1; then \
+			echo "Backend:  http://localhost:$(STAGING_APP_PORT) ✅"; \
+			echo "Docs:     http://localhost:$(STAGING_APP_PORT)/docs"; \
+			echo "Frontend: http://localhost:$(STAGING_FRONTEND_PORT)"; \
 			echo "DB:       production (localhost:5432)"; \
 			break; \
 		fi; \
@@ -290,19 +292,19 @@ staging-rebuild:
 	@echo "Waiting for services..."
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		sleep 2; \
-		curl -s http://localhost:8001/health > /dev/null 2>&1 && echo "Backend: OK" && break; \
+		curl -s http://localhost:$(STAGING_APP_PORT)/health > /dev/null 2>&1 && echo "Backend: OK" && break; \
 	done
-	@curl -s http://localhost:3002 > /dev/null 2>&1 && echo "Frontend: OK" || echo "Frontend: Starting..."
+	@curl -s http://localhost:$(STAGING_FRONTEND_PORT) > /dev/null 2>&1 && echo "Frontend: OK" || echo "Frontend: Starting..."
 
 staging-status:
 	@echo "=== Staging Environment Status ==="
 	@$(STAGING_COMPOSE) ps
 	@echo ""
 	@echo "=== Endpoints ==="
-	@echo "Backend:  http://localhost:8001/"
-	@echo "Docs:     http://localhost:8001/docs"
-	@echo "Health:   http://localhost:8001/health"
-	@echo "Frontend: http://localhost:3002/"
+	@echo "Backend:  http://localhost:$(STAGING_APP_PORT)/"
+	@echo "Docs:     http://localhost:$(STAGING_APP_PORT)/docs"
+	@echo "Health:   http://localhost:$(STAGING_APP_PORT)/health"
+	@echo "Frontend: http://localhost:$(STAGING_FRONTEND_PORT)/"
 	@echo "DB:       production (localhost:5432)"
 
 staging-logs:
@@ -310,8 +312,8 @@ staging-logs:
 
 staging-smoke:
 	@echo "=== Staging Health Check ==="
-	@curl -s http://localhost:8001/health | python3 -m json.tool && echo "Backend: ✅" || echo "Backend: ❌"
-	@curl -s -o /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:3002/ && echo "Frontend: ✅" || echo "Frontend: ❌"
+	@curl -s http://localhost:$(STAGING_APP_PORT)/health | python3 -m json.tool && echo "Backend: ✅" || echo "Backend: ❌"
+	@curl -s -o /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:$(STAGING_FRONTEND_PORT)/ && echo "Frontend: ✅" || echo "Frontend: ❌"
 
 # 本地热重载 + 生产 DB
 STAGING_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:5432/instock \
@@ -321,11 +323,11 @@ STAGING_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:5
               LOG_LEVEL=DEBUG DEBUG=true
 
 staging-local:
-	@echo "Starting backend on :8001 (connecting to production DB)..."
-	$(STAGING_ENV) $(UV_RUN) uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+	@echo "Starting backend on :$(STAGING_APP_PORT) (connecting to production DB)..."
+	$(STAGING_ENV) $(UV_RUN) uvicorn app.main:app --reload --host 0.0.0.0 --port $(STAGING_APP_PORT)
 
 frontend-staging-local:
-	cd web && VITE_API_URL=http://localhost:8001 npm run dev -- --port 3002
+	cd web && VITE_API_URL=http://localhost:$(STAGING_APP_PORT) npm run dev -- --port $(STAGING_FRONTEND_PORT)
 
 # ============ 数据库 ============
 
