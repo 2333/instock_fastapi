@@ -76,6 +76,12 @@ const routes = [
     meta: { title: '策略市场' }
   },
   {
+    path: '/optimization',
+    name: 'Optimization',
+    component: () => import('@/views/Optimization.vue'),
+    meta: { title: '参数优化' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),
