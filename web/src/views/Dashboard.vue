@@ -30,7 +30,7 @@
           <div>
             <span class="card-kicker">市场温度计</span>
             <h2>盘后市场概览</h2>
-            <span v-if="marketSummary.tradeDate" class="card-date">数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}</span>
+            <span v-if="marketSummary.tradeDate" class="card-date" title="行情数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}">数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}</span>
           </div>
           <router-link to="/stocks" class="card-link">查看股票列表</router-link>
         </div>
@@ -107,7 +107,7 @@
           <div>
             <span class="card-kicker">我的关注</span>
             <h2>关注列表联动</h2>
-            <span class="card-date">最后刷新：{{ lastSyncedLabel }}</span>
+            <span class="card-date" title="关注列表最后更新时间：{{ lastSyncedLabel }}">最后刷新：{{ lastSyncedLabel }}</span>
           </div>
           <div class="card-meta">
             <span :class="['freshness-dot', freshnessClass]" title="数据新鲜度"></span>
@@ -177,7 +177,7 @@
           <div>
             <span class="card-kicker">今日扫描发现</span>
             <h2>已保存条件的命中概要</h2>
-            <span v-if="todaySummary.tradeDate" class="card-date">数据日期：{{ formatTradeDate(todaySummary.tradeDate) }}</span>
+            <span v-if="todaySummary.tradeDate" class="card-date" title="筛选执行日期：{{ formatTradeDate(todaySummary.tradeDate) }}">数据日期：{{ formatTradeDate(todaySummary.tradeDate) }}</span>
           </div>
           <router-link to="/selection" class="card-link">进入筛选页</router-link>
         </div>
@@ -234,7 +234,7 @@
           <div>
             <span class="card-kicker">策略信号 / 回测更新</span>
             <h2>最近回测与策略记录</h2>
-            <span v-if="latestBacktest?.createdAt" class="card-date">最近回测：{{ formatDate(latestBacktest.createdAt) }}</span>
+            <span v-if="latestBacktest?.createdAt" class="card-date" title="回测完成时间：{{ formatDate(latestBacktest.createdAt) }}">最近回测：{{ formatDate(latestBacktest.createdAt) }}</span>
           </div>
           <router-link to="/backtest" class="card-link">查看回测页</router-link>
         </div>
