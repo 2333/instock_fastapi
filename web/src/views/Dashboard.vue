@@ -96,6 +96,10 @@
             </div>
           </div>
         </div>
+
+        <div class="card-footer">
+          <span class="data-source">数据来源：Tushare 行情</span>
+        </div>
       </section>
 
       <section class="workbench-card">
@@ -136,6 +140,7 @@
           <template v-else>
             还没有关注股票，可以从个股详情或关注页补充观察名单。
           </template>
+          <span class="data-source">数据来源：本地关注列表</span>
         </p>
 
         <div v-if="attentionItems.length" class="list-stack">
@@ -194,6 +199,7 @@
           <template v-else>
             还没有可展示的今日扫描概要，等待后端把今日摘要接口接上后会自动显示。
           </template>
+          <span class="data-source">数据来源：Tushare 行情 + 本地筛选</span>
         </p>
 
         <div v-if="todaySummary.items.length" class="list-stack">
@@ -250,6 +256,7 @@
           <template v-else>
             暂无回测记录，进入回测页后可直接发起新的策略验证。
           </template>
+          <span class="data-source">数据来源：本地回测引擎</span>
         </p>
 
         <div v-if="backtestItems.length" class="list-stack">
@@ -988,6 +995,18 @@ onMounted(() => {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.35);
   margin-top: 2px;
+}
+
+.card-footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: right;
+}
+
+.data-source {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
 }
 
 .card-link {
