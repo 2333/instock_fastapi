@@ -103,6 +103,7 @@
           <div>
             <span class="card-kicker">我的关注</span>
             <h2>关注列表联动</h2>
+            <span class="card-date">最后刷新：{{ lastSyncedLabel }}</span>
           </div>
           <router-link to="/attention" class="card-link">管理关注</router-link>
         </div>
