@@ -118,7 +118,7 @@ export const stockApi = {
   getStocks: (params?: { page?: number; page_size?: number; date?: string }) =>
     api.get('/stocks', { params }) as Promise<{ items: any[]; total: number; page: number; page_size: number }>,
 
-  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq' }) =>
+  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq'; period?: 'day' | 'week' | 'month' }) =>
     api.get(`/stocks/${code}`, { params }) as Promise<any>,
 }
 
