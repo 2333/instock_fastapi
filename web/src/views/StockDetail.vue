@@ -44,6 +44,19 @@
                 {{ t('stock_chart_tv') }}
               </button>
             </div>
+
+            <div v-if="activeChartMode === 'native'" class="period-selector">
+              <button
+                v-for="p in ['day','week','month']"
+                :key="p"
+                class="period-btn"
+                :class="{ active: selectedPeriod === p }"
+                @click="handlePeriodChange(p)"
+              >
+                {{ t(`period_${p}`) }}
+              </button>
+            </div>
+
             <p class="chart-mode-copy">
               {{
                 activeChartMode === 'native'
@@ -73,6 +86,7 @@
             :data="klineData"
             :loading="loading"
             :adjust="currentAdjust"
+            :selected-period="selectedPeriod"
             :external-hint="chartHint"
             :show-pattern-marks="showPatternMarks"
             :pattern-marks="chartPatternMarks"
@@ -80,6 +94,7 @@
             :highlighted-pattern-key="activePatternKey"
             :focus-range-request-id="focusRangeRequestId"
             @adjustChange="handleAdjustChange"
+            @periodChange="handlePeriodChange"
           />
           <TradingViewWidget
             v-else
@@ -310,6 +325,7 @@ const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
 const patterns = ref<PatternDetail[]>([])
 const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
+const selectedPeriod = ref<'day' | 'week' | 'month'>('day')
 const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
@@ -531,7 +547,8 @@ const getChartWindow = () => {
 
 const fetchStockDetail = async (
   adjust: 'bfq' | 'qfq' | 'hfq' = currentAdjust.value,
-  refreshPatterns = false
+  refreshPatterns = false,
+  period: 'day' | 'week' | 'month' = selectedPeriod.value
 ) => {
   loading.value = true
   try {
@@ -542,6 +559,7 @@ const fetchStockDetail = async (
       start_date: chartWindow.start,
       end_date: chartWindow.end,
       adjust,
+      period,
     })
     const patternPromise = refreshPatterns
       ? patternApi.getPatterns(code.value, {
@@ -599,7 +617,7 @@ const handleAdjustChange = (adjust: string) => {
   const nextAdjust = (adjust || 'bfq') as 'bfq' | 'qfq' | 'hfq'
   if (nextAdjust === currentAdjust.value) return
   currentAdjust.value = nextAdjust
-  fetchStockDetail(nextAdjust)
+  fetchStockDetail(nextAdjust, true)
 }
 
 const addToWatchlist = async () => {
@@ -626,6 +644,11 @@ const analyzePatterns = () => {
 
 const goBacktest = () => {
   router.push({ path: '/backtest', query: { code: code.value } })
+}
+
+const handlePeriodChange = (value: string) => {
+  selectedPeriod.value = value as 'day' | 'week' | 'month'
+  fetchStockDetail(currentAdjust.value, true)
 }
 
 const syncWatchlistStatus = async () => {
@@ -797,6 +820,34 @@ onMounted(() => {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
+
+  .period-selector {
+    display: flex;
+    gap: 6px;
+    margin-left: auto; // 推到右侧，位于 tabs 和 copy 之间
+
+    .period-btn {
+      padding: 6px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.85);
+        border-color: rgba(255, 255, 255, 0.24);
+      }
+
+      &.active {
+        background: rgba(255, 152, 0, 0.15);
+        color: #FFB74D;
+        border-color: rgba(255, 152, 0, 0.35);
+      }
+    }
+  }
 }
 
 .chart-mode-tabs {

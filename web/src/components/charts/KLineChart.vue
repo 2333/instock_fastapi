@@ -105,6 +105,7 @@ interface Props {
   showVolume?: boolean
   showPatternMarks?: boolean
   adjust?: 'bfq' | 'qfq' | 'hfq'
+  selectedPeriod?: 'day' | 'week' | 'month'
   externalHint?: string
   patternMarks?: PatternMark[]
   highlightedPatternKey?: string
@@ -118,6 +119,7 @@ const props = withDefaults(defineProps<Props>(), {
   showVolume: true,
   showPatternMarks: true,
   adjust: 'bfq',
+  selectedPeriod: 'day',
   externalHint: '',
   patternMarks: () => [],
   highlightedPatternKey: '',
@@ -135,11 +137,19 @@ const { t } = useLocale()
 
 const chartRef = ref<HTMLDivElement>()
 const chartInstance = shallowRef<any>(null)
-const selectedPeriod = ref('day')
-const selectedAdjust = ref('bfq')
+const selectedPeriod = ref(props.selectedPeriod || 'day')
+const selectedAdjust = ref(props.adjust)
 const activeIndicators = ref<string[]>([])
 const noDataText = ref('')
 const hintText = ref('')
+
+// 同步外部 period 与 adjust 变化
+watch(() => props.selectedPeriod, (newPeriod) => {
+  if (newPeriod) selectedPeriod.value = newPeriod
+})
+watch(() => props.adjust, (newAdjust) => {
+  if (newAdjust) selectedAdjust.value = newAdjust
+})
 
 const periods = computed(() => [
   { label: t('period_1min'), value: '1min' },
@@ -459,13 +469,13 @@ const calculateBOLL = (
 }
 
 const setPeriod = (period: string) => {
-  selectedPeriod.value = period
+  selectedPeriod.value = period as 'day' | 'week' | 'month'
   emit('periodChange', period)
   updateChart()
 }
 
 const setAdjust = (adjust: string) => {
-  selectedAdjust.value = adjust
+  selectedAdjust.value = adjust as 'bfq' | 'qfq' | 'hfq'
   emit('adjustChange', adjust)
   updateChart()
 }
