@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,7 +9,7 @@ from app.services.auth_service import AuthService
 from core.providers.market_data_provider import MarketDataProvider
 from core.providers.postgres_provider import PostgreSQLProvider
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
 async def get_db() -> AsyncSession:
@@ -39,6 +39,25 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if not user or not user.is_active:
         raise credentials_exception
+    return user
+
+
+async def get_current_user_optional(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """可选认证：未登录返回 None，不抛异常"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header.split(" ")[1]
+    try:
+        user_id = AuthService.verify_access_token(token)
+    except JWTError:
+        return None
+    user = await db.get(User, user_id)
+    if not user or not user.is_active:
+        return None
     return user
 
 
