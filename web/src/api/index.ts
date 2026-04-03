@@ -313,4 +313,46 @@ export const strategySocialApi = {
   deleteComment: (commentId: number) => api.delete(`/strategies/comments/${commentId}`) as Promise<any>,
 }
 
+export const optimizationApi = {
+  // 创建优化任务
+  createJob: (params: {
+    strategy: string
+    param_space: Record<string, { min: number; max: number; step: number }>
+    method: 'random' | 'bayesian'
+    metric: 'sharpe' | 'total_return' | 'max_drawdown'
+    n_trials: number
+    concurrent_limit?: number
+    stock_code?: string
+    start_date?: string
+    end_date?: string
+    initial_capital?: number
+  }) => api.post('/optimization/jobs', params) as Promise<any>,
+
+  // 列出优化任务
+  listJobs: (params?: {
+    status?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/optimization/jobs', { params }) as Promise<any>,
+
+  // 任务详情
+  getJob: (jobId: string) => api.get(`/optimization/jobs/${jobId}`) as Promise<any>,
+
+  // 任务进度
+  getProgress: (jobId: string) => api.get(`/optimization/jobs/${jobId}/progress`) as Promise<any>,
+
+  // 取消任务
+  cancelJob: (jobId: string) => api.post(`/optimization/jobs/${jobId}/cancel`) as Promise<any>,
+
+  // 获取试验列表
+  getTrials: (jobId: string, params?: { limit?: number; offset?: number }) =>
+    api.get(`/optimization/jobs/${jobId}/trials`, { params }) as Promise<any>,
+
+  // 获取最优参数
+  getBestParams: (jobId: string) => api.get(`/optimization/jobs/${jobId}/best`) as Promise<any>,
+
+  // 获取所有试验记录（用于分析）
+  getAllTrials: (jobId: string) => api.get(`/optimization/jobs/${jobId}/all-trials`) as Promise<any>,
+}
+
 export default api

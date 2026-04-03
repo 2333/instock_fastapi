@@ -304,6 +304,13 @@
             >
               公共策略库
             </button>
+            <button
+              class="tab-btn"
+              :class="{ active: strategySourceTab === 'optimization' }"
+              @click="strategySourceTab = 'optimization'"
+            >
+              参数优化
+            </button>
           </div>
 
           <div v-if="strategySourceTab === 'my'" class="strategy-select">
@@ -330,6 +337,52 @@
                 @rate="onPublicRate"
                 @close="openStrategyDetails = null"
               />
+            </div>
+          </div>
+
+          <!-- 参数优化标签页 -->
+          <div v-else class="optimization-tab">
+            <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
+            <div v-else-if="optimizationJobs.length === 0" class="empty-state">
+              <p>暂无优化任务</p>
+              <button class="btn btn-primary btn-small" @click="goToOptimizationPage">
+                创建优化任务
+              </button>
+            </div>
+            <div v-else class="optimization-jobs">
+              <div
+                v-for="job in optimizationJobs"
+                :key="job.id"
+                class="optimization-job-card"
+                :class="job.status"
+              >
+                <div class="job-header">
+                  <div class="job-title">{{ job.strategy }}</div>
+                  <div class="job-status" :class="job.status">{{ statusLabels[job.status] }}</div>
+                </div>
+                <div class="job-meta">
+                  <span>方法：{{ methodLabels[job.method] }}</span>
+                  <span>目标：{{ metricLabels[job.metric] }}</span>
+                  <span>{{ job.completed_trials }}/{{ job.n_trials }}</span>
+                </div>
+                <div class="progress-bar">
+                  <div
+                    class="progress-fill"
+                    :style="{ width: `${(job.completed_trials / job.n_trials) * 100}%` }"
+                  ></div>
+                </div>
+                <div v-if="job.best_params" class="best-params-mini">
+                  <span class="best-label">最优得分：</span>
+                  <span class="best-value">{{ job.best_metric?.toFixed(4) }}</span>
+                  <button
+                    class="btn btn-secondary btn-small"
+                    @click.stop="applyBestParams(job)"
+                    :disabled="job.status !== 'completed'"
+                  >
+                    应用到回测
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -612,7 +665,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useAnalytics } from '@/composables/useAnalytics'
-import { backtestApi, strategyApi, strategySocialApi } from '@/api'
+import { backtestApi, strategyApi, strategySocialApi, optimizationApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 import StrategyCard from '@/components/StrategyCard.vue'
 
@@ -748,13 +801,17 @@ const config = reactive({
   strategyType: 'ma_crossover',
 })
 
-// 策略来源标签页：my（我的模板） / public（公共策略库）
-const strategySourceTab = ref<'my' | 'public'>('my')
+// 策略来源标签页：my（我的模板） / public（公共策略库） / optimization（参数优化）
+const strategySourceTab = ref<'my' | 'public' | 'optimization'>('my')
 
 // 公共策略数据
 const publicStrategies = ref<any[]>([])
 const loadingPublicStrategies = ref(false)
-const openStrategyDetails = ref<number | null>(null)  // 当前打开的 StrategyDetailModal 策略ID
+const openStrategyDetails = ref<number | null>(null)
+
+// 参数优化相关
+const optimizationJobs = ref<any[]>([])
+const loadingOptimizationJobs = ref(false)
 
 const strategyParams = reactive<Record<string, string | number>>({})
 
@@ -1670,6 +1727,20 @@ const loadPublicStrategies = async () => {
   }
 }
 
+const loadOptimizationJobs = async () => {
+  loadingOptimizationJobs.value = true
+  try {
+    const res = await optimizationApi.listJobs({ limit: 10, status: 'completed' })
+    optimizationJobs.value = (res.data?.items || []).sort((a: any, b: any) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+  } catch (error) {
+    console.error('Failed to load optimization jobs:', error)
+  } finally {
+    loadingOptimizationJobs.value = false
+  }
+}
+
 function onPublicFavoriteToggle(strategyId: number, favorited: boolean) {
   // 更新本地公共策略状态
   const strategy = publicStrategies.value.find(s => s.id === strategyId)
@@ -1682,9 +1753,19 @@ function onPublicRate(strategyId: number, rating: number) {
   // 更新本地评分
   const strategy = publicStrategies.value.find(s => s.id === strategyId)
   if (strategy) {
-    // 重新计算平均分（简化：直接替换）
     strategy.rating = rating
   }
+}
+
+function goToOptimizationPage() {
+  router.push('/optimization')
+}
+
+function applyBestParams(job: any) {
+  if (!job.best_params) return
+  // 将最优参数应用到当前配置
+  Object.assign(config, job.best_params)
+  showNotification?.('success', '最优参数已应用到回测配置')
 }
 
 const saveStrategy = async () => {
@@ -2031,6 +2112,26 @@ const initCompareEquityChart = async () => {
   compareChartInstance.value.setOption(option)
 }
 
+// 标签常量
+const statusLabels: Record<string, string> = {
+  pending: '等待中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+}
+
+const methodLabels: Record<string, string> = {
+  random: '随机搜索',
+  bayesian: '贝叶斯优化',
+}
+
+const metricLabels: Record<string, string> = {
+  sharpe: '夏普比率',
+  total_return: '总收益',
+  max_drawdown: '最大回撤',
+}
+
 onMounted(() => {
   pageView('/backtest')
   hydrateConfigWidth()
@@ -2042,6 +2143,7 @@ onMounted(() => {
     await loadSavedStrategies()
     await loadBacktestHistory()
     await loadPublicStrategies()  // 加载公共策略
+    await loadOptimizationJobs()  // 加载优化任务
     if (currentBacktestId.value) {
       await loadBacktestResult(currentBacktestId.value)
     }
@@ -2901,6 +3003,71 @@ onBeforeUnmount(() => {
     color: var(--color-text-secondary);
     background: var(--color-bg-secondary);
     border-radius: 8px;
+  }
+}
+
+// 参数优化标签页
+.optimization-tab {
+  .optimization-jobs {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .optimization-job-card {
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 16px;
+    transition: all 0.2s;
+
+    &.running {
+      border-left: 3px solid #00C853;
+    }
+
+    &.completed {
+      border-left: 3px solid #2196F3;
+    }
+
+    &.failed {
+      border-left: 3px solid #FF1744;
+    }
+  }
+
+  .optimization-job-card .job-header,
+  .optimization-job-card .job-meta {
+    // 复用 .job-card 样式
+  }
+
+  .best-params-mini {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+
+    .best-label {
+      color: var(--color-text-secondary);
+    }
+
+    .best-value {
+      font-weight: 600;
+      color: var(--color-accent);
+    }
+  }
+
+  .loading-state,
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-secondary);
+    border-radius: 8px;
+
+    .btn {
+      margin-top: 12px;
+    }
   }
 }
 </style>
