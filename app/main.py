@@ -1,7 +1,7 @@
 import asyncio
-from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,12 +9,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.build_info import get_build_info
 from app.api.routers import (
     attention_router,
     auth_router,
     backtest_router,
     etf_router,
+    events_router,
     fund_flow_router,
     indicator_router,
     market_router,
@@ -23,6 +23,7 @@ from app.api.routers import (
     stock_router,
     strategy_router,
 )
+from app.build_info import get_build_info
 from app.config import get_settings
 from app.database import close_db, init_db
 from app.jobs.scheduler import recover_missed_market_jobs, start_scheduler, stop_scheduler
@@ -104,6 +105,7 @@ app.include_router(fund_flow_router.router, prefix="/api/v1")
 app.include_router(attention_router.router, prefix="/api/v1")
 app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(market_router.router, prefix="/api/v1")
+app.include_router(events_router.router, prefix="/api/v1")
 
 
 @app.get("/", response_class=HTMLResponse)

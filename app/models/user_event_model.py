@@ -1,12 +1,10 @@
-import asyncio
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import Index, String, Text, DateTime, Integer
+from sqlalchemy import DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.database import Base
+from app.models.stock_model import Base
 
 
 class UserEvent(Base):
