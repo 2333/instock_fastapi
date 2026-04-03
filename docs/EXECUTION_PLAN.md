@@ -1,8 +1,10 @@
 # InStock 执行计划(Execution Plan)
 
-> 版本:v2.0 | 更新日期:2026-04-02
+> 版本:v2.0 | 更新日期:2026-04-03
 > 基于 PRD v2.0 / ROADMAP v2.0 + 代码实际进度重写
 > v1.0 归档:[EXECUTION_PLAN_v1_archive.md](./EXECUTION_PLAN_v1_archive.md)
+>
+> **当前状态**: Phase 0 核心功能 + 非功能基线 2/3 完成 | Phase 1 策略验证闭环全部就绪 | Phase 2 体验打磨可启动
 
 ---
 
