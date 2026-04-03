@@ -1,4 +1,5 @@
 from app.models.alert_models import AlertCondition, Notification
+from app.models.optimization_models import ParameterOptimizationJob, ParameterOptimizationTrial
 from app.models.stock_model import (
     Attention,
     BacktestResult,
@@ -25,6 +26,8 @@ __all__ = [
     "FundFlow",
     "Indicator",
     "Notification",
+    "ParameterOptimizationJob",
+    "ParameterOptimizationTrial",
     "Pattern",
     "SelectionCondition",
     "SelectionResult",
