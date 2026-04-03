@@ -3,19 +3,19 @@ database:
   host: "localhost"
   port: 3306
   user: "root"
-  password: "password"
+  password: "replace-with-mysql-password"
   database: "instock"
 
 postgresql:
   host: "localhost"
   port: 5432
   user: "instock"
-  password: "instock_pass"
+  password: "replace-with-postgres-password"
   database: "instock"
 
 # Tushare API Configuration
 tushare:
-  token: "a417d287cdb8a1693af8d9d2aef6c1c915f060a72f3a7ffbf1b2b59eb8e0"
+  token: "replace-with-your-tushare-token"
 
 # Redis Configuration (optional, for caching)
 redis:
