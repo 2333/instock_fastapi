@@ -301,6 +301,31 @@
             </div>
           </div>
 
+          <div v-if="sortedResults.length > pageSize" class="results-pagination">
+            <span class="pagination-info">共 {{ sortedResults.length }} 条，显示第 {{ (currentPage - 1) * pageSize + 1 }} - {{ Math.min(currentPage * pageSize, sortedResults.length) }} 条</span>
+            <div class="pagination-controls">
+              <button
+                class="pagination-btn"
+                :disabled="currentPage === 1"
+                @click="currentPage--"
+              >上一页</button>
+              <span class="pagination-pages">
+                <button
+                  v-for="page in visiblePages"
+                  :key="page"
+                  class="pagination-page"
+                  :class="{ active: page === currentPage }"
+                  @click="currentPage = page"
+                >{{ page }}</button>
+              </span>
+              <button
+                class="pagination-btn"
+                :disabled="currentPage === totalPages"
+                @click="currentPage++"
+              >下一页</button>
+            </div>
+          </div>
+
           <div class="results-table-wrapper">
             <table class="results-table">
               <thead>
@@ -323,7 +348,7 @@
               </thead>
               <tbody>
                 <tr
-                  v-for="stock in sortedResults"
+                  v-for="stock in paginatedResults"
                   :key="stock.code"
                   :class="{ 'row-selected': compareMode && selectedHistoryIds.has(extractSelectionId(stock)) }"
                   @click="compareMode ? handleRowClick(stock) : openStockDetail(stock)"
@@ -417,7 +442,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { attentionApi, selectionApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
@@ -598,6 +623,34 @@ const sortedResults = computed(() => {
     }
   })
   return sorted
+})
+
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(20)
+
+const totalPages = computed(() => Math.ceil(sortedResults.value.length / pageSize.value))
+
+const paginatedResults = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return sortedResults.value.slice(start, end)
+})
+
+const visiblePages = computed(() => {
+  const total = totalPages.value
+  const current = currentPage.value
+  const delta = 2
+  const pages: number[] = []
+  for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) {
+    pages.push(i)
+  }
+  return pages
+})
+
+// 重置分页当结果变化
+watch(sortedResults, () => {
+  currentPage.value = 1
 })
 
 const getTopBacktestStockCode = () => {
@@ -1540,6 +1593,75 @@ onMounted(async () => {
 .results-actions {
   display: flex;
   gap: 12px;
+}
+
+.results-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+
+  .pagination-info {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pagination-btn {
+    padding: 4px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+      color: rgba(255, 255, 255, 0.9);
+      border-color: rgba(255, 255, 255, 0.24);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+
+  .pagination-pages {
+    display: flex;
+    gap: 4px;
+  }
+
+  .pagination-page {
+    min-width: 28px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    &.active {
+      background: rgba(41, 98, 255, 0.16);
+      color: #6ab0ff;
+      border-color: rgba(41, 98, 255, 0.35);
+    }
+  }
 }
 
 .filter-select {
