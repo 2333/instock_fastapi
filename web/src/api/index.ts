@@ -355,4 +355,37 @@ export const optimizationApi = {
   getAllTrials: (jobId: string) => api.get(`/optimization/jobs/${jobId}/all-trials`) as Promise<any>,
 }
 
+export const reportApi = {
+  // 报告列表
+  list: (params?: {
+    type?: 'daily' | 'weekly' | 'monthly'
+    status?: 'generated' | 'generating' | 'failed'
+    start_date?: string
+    end_date?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/reports', { params }) as Promise<any>,
+
+  // 报告详情
+  getDetail: (reportId: string) => api.get(`/reports/${reportId}`) as Promise<any>,
+
+  // 手动生成报告
+  generate: (params: {
+    type: 'daily' | 'weekly' | 'monthly'
+    date?: string  // 指定日期，默认为今天/本周/本月
+  }) => api.post('/reports/generate', params) as Promise<any>,
+
+  // 获取报告偏好
+  getPreferences: () => api.get('/reports/preferences') as Promise<any>,
+
+  // 更新报告偏好
+  updatePreferences: (preferences: {
+    daily_enabled?: boolean
+    weekly_enabled?: boolean
+    monthly_enabled?: boolean
+    email?: string
+    metrics?: string[]
+  }) => api.put('/reports/preferences', preferences) as Promise<any>,
+}
+
 export default api

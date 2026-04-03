@@ -213,6 +213,44 @@
         </p>
       </section>
 
+      <!-- 最新报告卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">最新报告</span>
+            <h2 class="card-title">最近生成的数据洞察报告</h2>
+          </div>
+          <router-link to="/reports" class="card-link">查看全部</router-link>
+        </div>
+
+        <div v-if="loadingReports" class="loading-state">加载中...</div>
+        <div v-else-if="recentReports.length === 0" class="empty-state">
+          <p>暂无报告，前往报告页面创建</p>
+          <router-link to="/reports" class="btn btn-primary btn-small">创建报告</router-link>
+        </div>
+        <div v-else class="reports-list">
+          <div
+            v-for="report in recentReports"
+            :key="report.id"
+            class="report-item"
+            @click="viewReport(report.id)"
+          >
+            <div class="report-type" :class="report.type">
+              {{ typeLabels[report.type] }}
+            </div>
+            <div class="report-info">
+              <div class="report-title">{{ report.title }}</div>
+              <div class="report-date">{{ formatDate(report.generated_at) }}</div>
+            </div>
+            <div v-if="report.summary" class="report-metric">
+              <span :class="report.summary.total_return >= 0 ? 'positive' : 'negative'">
+                {{ formatPercent(report.summary.total_return) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="workbench-card">
         <div class="card-header">
           <div>
@@ -336,7 +374,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAnalytics } from '@/composables/useAnalytics'
-import { attentionApi, backtestApi, marketApi, selectionApi, strategySocialApi } from '@/api'
+import { attentionApi, backtestApi, marketApi, reportApi, selectionApi, strategySocialApi } from '@/api'
 
 const router = useRouter()
 const { pageView } = useAnalytics()
@@ -434,6 +472,8 @@ const todaySummary = ref<TodaySummaryState>({
   triggeredCodes: [],
 })
 const backtestItems = ref<BacktestEntry[]>([])
+const recentReports = ref<any[]>([])
+const loadingReports = ref(false)
 const topStrategies = ref<any[]>([])
 const loadingStrategies = ref(false)
 
@@ -809,8 +849,9 @@ function refreshWorkbench() {
     attentionApi.getList(),
     selectionApi.getTodaySummary({ limit: 12 }),
     backtestApi.getBacktestHistory(5),
+    reportApi.list({ limit: 3 }),
   ])
-    .then(([marketResult, attentionResult, todayResult, backtestResult]) => {
+    .then(([marketResult, attentionResult, todayResult, backtestResult, reportsResult]) => {
       if (marketResult.status === 'fulfilled') {
         marketSummary.value = normalizeMarketSummary(marketResult.value)
       } else {
@@ -861,6 +902,12 @@ function refreshWorkbench() {
         loadWarnings.value.push('策略信号 / 回测更新')
       }
 
+      if (reportsResult.status === 'fulfilled') {
+        recentReports.value = (reportsResult.value?.data?.items || []).slice(0, 3)
+      } else {
+        recentReports.value = []
+      }
+
       lastSyncedAt.value = new Date().toISOString()
     })
     .finally(() => {
@@ -906,6 +953,17 @@ function copyStrategy(strategy: any) {
     path: '/backtest',
     query: { strategy: strategy.name },
   })
+}
+
+// 报告相关
+function viewReport(reportId: string) {
+  router.push(`/reports/${reportId}`)
+}
+
+const typeLabels: Record<string, string> = {
+  daily: '日报',
+  weekly: '周报',
+  monthly: '月报',
 }
 
 onMounted(() => {
@@ -1323,5 +1381,70 @@ onMounted(() => {
   padding: 24px;
   color: rgba(255, 255, 255, 0.4);
   font-size: 13px;
+}
+
+// 报告列表
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.report-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  .report-type {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    min-width: 40px;
+    text-align: center;
+
+    &.daily { background: rgba(33, 150, 243, 0.2); color: #2196F3; }
+    &.weekly { background: rgba(76, 175, 80, 0.2); color: #4CAF50; }
+    &.monthly { background: rgba(156, 39, 176, 0.2); color: #9C27B0; }
+  }
+
+  .report-info {
+    flex: 1;
+    min-width: 0;
+
+    .report-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .report-date {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      margin-top: 2px;
+    }
+  }
+
+  .report-metric {
+    font-size: 14px;
+    font-weight: 600;
+
+    .positive { color: #00C853; }
+    .negative { color: #FF1744; }
+  }
 }
 </style>
