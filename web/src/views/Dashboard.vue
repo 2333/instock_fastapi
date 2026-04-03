@@ -172,6 +172,47 @@
         </div>
       </section>
 
+      <!-- 热门策略卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">热门策略</span>
+            <h2 class="card-title">本周最多人使用的策略</h2>
+          </div>
+          <router-link to="/strategies" class="card-link">浏览策略市场</router-link>
+        </div>
+
+        <div v-if="loadingStrategies" class="loading-state">加载中...</div>
+        <div v-else-if="topStrategies.length === 0" class="empty-state">
+          <p>暂无策略数据</p>
+        </div>
+        <div v-else class="strategy-list">
+          <div
+            v-for="(strategy, idx) in topStrategies"
+            :key="strategy.id"
+            class="strategy-item"
+            @click="goToStrategy(strategy)"
+          >
+            <div class="strategy-rank">{{ idx + 1 }}</div>
+            <div class="strategy-info">
+              <div class="strategy-name">{{ strategy.name }}</div>
+              <div class="strategy-stats">
+                <span class="rating">★ {{ strategy.rating?.toFixed(1) }}</span>
+                <span class="backtests">📊 {{ strategy.backtest_count }}次回测</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-small" @click.stop="copyStrategy(strategy)">
+              复制
+            </button>
+          </div>
+        </div>
+
+        <p class="card-description">
+          基于本周用户回测数据统计，展示最受欢迎的策略模板。点击查看详情或一键复制到个人模板。
+          <span class="data-source">数据来源：用户行为追踪</span>
+        </p>
+      </section>
+
       <section class="workbench-card">
         <div class="card-header">
           <div>
@@ -295,7 +336,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAnalytics } from '@/composables/useAnalytics'
-import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
+import { attentionApi, backtestApi, marketApi, selectionApi, strategySocialApi } from '@/api'
 
 const router = useRouter()
 const { pageView } = useAnalytics()
@@ -393,6 +434,8 @@ const todaySummary = ref<TodaySummaryState>({
   triggeredCodes: [],
 })
 const backtestItems = ref<BacktestEntry[]>([])
+const topStrategies = ref<any[]>([])
+const loadingStrategies = ref(false)
 
 const unwrapPayload = (value: unknown) => {
   if (value && typeof value === 'object' && 'data' in value) {
@@ -834,9 +877,41 @@ const addAllToScreening = () => {
   })
 }
 
+async function loadTopStrategies() {
+  loadingStrategies.value = true
+  try {
+    const res = await strategySocialApi.listPublic({
+      sort_by: 'backtest_count',
+      limit: 5,
+    })
+    topStrategies.value = (res.data?.items || []).slice(0, 5)
+  } catch (e) {
+    console.error('Failed to load top strategies:', e)
+  } finally {
+    loadingStrategies.value = false
+  }
+}
+
+function goToStrategy(strategy: any) {
+  // 可扩展：跳转到策略详情页（待建）
+  // 暂时复制到回测
+  router.push({
+    path: '/backtest',
+    query: { strategy: strategy.name },
+  })
+}
+
+function copyStrategy(strategy: any) {
+  router.push({
+    path: '/backtest',
+    query: { strategy: strategy.name },
+  })
+}
+
 onMounted(() => {
   pageView('/dashboard')
   refreshWorkbench()
+  loadTopStrategies()
 })
 </script>
 
