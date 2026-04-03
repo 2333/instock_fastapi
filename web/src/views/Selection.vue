@@ -108,7 +108,9 @@
               @click="loadSavedCondition(cond)"
             >
               <span class="saved-condition-name">{{ cond.name }}</span>
-              <span class="saved-condition-date">{{ cond.category }}</span>
+              <span :class="['saved-condition-category', categoryClass(cond.category)]">
+                {{ cond.category }}
+              </span>
             </button>
           </div>
         </div>
@@ -916,6 +918,17 @@ const toggleCriteriaPanel = () => {
   window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
 }
 
+const categoryClass = (category: string | null | undefined): string => {
+  const c = String(category || '').toLowerCase()
+  if (c.includes('price') || c.includes('价格')) return 'category-price'
+  if (c.includes('change') || c.includes('涨跌')) return 'category-change'
+  if (c.includes('macd')) return 'category-macd'
+  if (c.includes('rsi')) return 'category-rsi'
+  if (c.includes('pattern') || c.includes('形态')) return 'category-pattern'
+  if (c.includes('fund') || c.includes('资金')) return 'category-fund'
+  return 'category-default'
+}
+
 onMounted(async () => {
   await Promise.all([
     fetchMyConditions(),
@@ -1172,6 +1185,49 @@ onMounted(async () => {
     font-size: 12px;
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.saved-conditions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-condition-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .saved-condition-name {
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .saved-condition-category {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 500;
+
+    &.category-price { background: rgba(41, 98, 255, 0.15); color: #7aa7ff; border: 1px solid rgba(41, 98, 255, 0.3); }
+    &.category-change { background: rgba(255, 152, 0, 0.15); color: #FFB74D; border: 1px solid rgba(255, 152, 0, 0.3); }
+    &.category-macd { background: rgba(139, 195, 74, 0.15); color: #AED581; border: 1px solid rgba(139, 195, 74, 0.3); }
+    &.category-rsi { background: rgba(233, 30, 99, 0.15); color: #F06292; border: 1px solid rgba(233, 30, 99, 0.3); }
+    &.category-pattern { background: rgba(156, 39, 176, 0.15); color: #BA68C8; border: 1px solid rgba(156, 39, 176, 0.3); }
+    &.category-fund { background: rgba(0, 188, 212, 0.15); color: #4DD0E1; border: 1px solid rgba(0, 188, 212, 0.3); }
+    &.category-default { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6); border: 1px solid rgba(255, 255, 255, 0.2); }
   }
 }
 
