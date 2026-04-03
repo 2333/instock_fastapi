@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routers import (
+    alert_router,
     attention_router,
     auth_router,
     backtest_router,
@@ -29,5 +30,6 @@ router.include_router(attention_router.router, prefix="/api/v1")
 router.include_router(auth_router.router, prefix="/api/v1")
 router.include_router(market_router.router, prefix="/api/v1")
 router.include_router(events_router.router, prefix="/api/v1")
+router.include_router(alert_router.router, prefix="/api/v1")
 
 __all__ = ["router"]
