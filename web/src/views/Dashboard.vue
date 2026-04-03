@@ -366,6 +366,55 @@
           </router-link>
         </div>
       </section>
+
+      <!-- 优化任务卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">参数优化</span>
+            <h2 class="card-title">最近优化任务</h2>
+          </div>
+          <router-link to="/optimization" class="card-link">查看全部</router-link>
+        </div>
+
+        <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
+        <div v-else-if="optimizationJobs.length === 0" class="empty-state">
+          <p>暂无优化任务，前往参数优化页面创建</p>
+          <router-link to="/optimization" class="btn btn-primary btn-small">创建任务</router-link>
+        </div>
+        <div v-else class="optimization-jobs">
+          <div
+            v-for="job in optimizationJobs"
+            :key="job.id"
+            class="optimization-job-card"
+            :class="job.status"
+          >
+            <div class="job-header">
+              <div class="job-title">{{ job.strategy }}</div>
+              <div class="job-status" :class="job.status">{{ statusLabels[job.status] }}</div>
+            </div>
+            <div class="job-meta">
+              <span>方法：{{ methodLabels[job.method] }}</span>
+              <span>目标：{{ metricLabels[job.metric] }}</span>
+              <span>{{ job.completed_trials }}/{{ job.n_trials }}</span>
+            </div>
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                :style="{ width: `${(job.completed_trials / job.n_trials) * 100}%` }"
+              ></div>
+            </div>
+            <div v-if="job.best_metric !== null" class="best-meta">
+              最优得分：{{ job.best_metric?.toFixed(4) }}
+            </div>
+          </div>
+        </div>
+
+        <p class="card-description">
+          自动搜索策略最优参数组合。点击查看详情或创建新优化任务。
+          <span class="data-source">数据来源：参数优化引擎</span>
+        </p>
+      </section>
     </div>
   </div>
 </template>
@@ -374,7 +423,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAnalytics } from '@/composables/useAnalytics'
-import { attentionApi, backtestApi, marketApi, reportApi, selectionApi, strategySocialApi } from '@/api'
+import { attentionApi, backtestApi, marketApi, optimizationApi, reportApi, selectionApi, strategySocialApi } from '@/api'
 
 const router = useRouter()
 const { pageView } = useAnalytics()
@@ -474,6 +523,8 @@ const todaySummary = ref<TodaySummaryState>({
 const backtestItems = ref<BacktestEntry[]>([])
 const recentReports = ref<any[]>([])
 const loadingReports = ref(false)
+const optimizationJobs = ref<any[]>([])
+const loadingOptimizationJobs = ref(false)
 const topStrategies = ref<any[]>([])
 const loadingStrategies = ref(false)
 
@@ -850,8 +901,9 @@ function refreshWorkbench() {
     selectionApi.getTodaySummary({ limit: 12 }),
     backtestApi.getBacktestHistory(5),
     reportApi.list({ limit: 3 }),
+    optimizationApi.listJobs({ limit: 5, status: 'completed' }),
   ])
-    .then(([marketResult, attentionResult, todayResult, backtestResult, reportsResult]) => {
+    .then(([marketResult, attentionResult, todayResult, backtestResult, reportsResult, optResult]) => {
       if (marketResult.status === 'fulfilled') {
         marketSummary.value = normalizeMarketSummary(marketResult.value)
       } else {
@@ -906,6 +958,12 @@ function refreshWorkbench() {
         recentReports.value = (reportsResult.value?.data?.items || []).slice(0, 3)
       } else {
         recentReports.value = []
+      }
+
+      if (optResult.status === 'fulfilled') {
+        optimizationJobs.value = (optResult.value?.data?.items || []).slice(0, 5)
+      } else {
+        optimizationJobs.value = []
       }
 
       lastSyncedAt.value = new Date().toISOString()
@@ -964,6 +1022,25 @@ const typeLabels: Record<string, string> = {
   daily: '日报',
   weekly: '周报',
   monthly: '月报',
+}
+
+const statusLabels: Record<string, string> = {
+  pending: '等待中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+}
+
+const methodLabels: Record<string, string> = {
+  random: '随机搜索',
+  bayesian: '贝叶斯优化',
+}
+
+const metricLabels: Record<string, string> = {
+  sharpe: '夏普比率',
+  total_return: '总收益',
+  max_drawdown: '最大回撤',
 }
 
 onMounted(() => {
@@ -1446,5 +1523,90 @@ onMounted(() => {
     .positive { color: #00C853; }
     .negative { color: #FF1744; }
   }
+}
+
+// 优化任务卡片
+.optimization-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.optimization-job-card {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  &.running {
+    border-left: 3px solid #00C853;
+  }
+
+  &.completed {
+    border-left: 3px solid #2196F3;
+  }
+
+  &.failed {
+    border-left: 3px solid #FF1744;
+  }
+}
+
+.optimization-job-card .job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+
+  .job-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .job-status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+
+    &.running { background: rgba(0, 200, 83, 0.2); color: #00C853; }
+    &.completed { background: rgba(33, 150, 243, 0.2); color: #2196F3; }
+    &.failed { background: rgba(255, 23, 68, 0.2); color: #FF1744; }
+  }
+}
+
+.optimization-job-card .job-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.optimization-job-card .progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+    transition: width 0.3s;
+  }
+}
+
+.optimization-job-card .best-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  color: var(--color-accent);
 }
 </style>
