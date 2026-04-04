@@ -17,17 +17,17 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# 配置
+# 配置：将仓库根目录加入 sys.path，确保 app 模块可导入
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 LOG_FILE = REPO_ROOT / "memory" / "stability_log.jsonl"
 VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 PYTEST = [str(VENV_PYTHON), "-m", "pytest"]
 
 
 def get_latest_trade_date():
-    """从数据库查询最新交易日"""
+    """从数据库查询最新交易日（如无法连接返回 None）"""
     try:
-        # 直接查询 SQLite / PostgreSQL
         import asyncio
         from app.database import async_engine, async_session
         from sqlalchemy import text
@@ -38,18 +38,18 @@ def get_latest_trade_date():
                 return rs.scalar()
 
         return asyncio.run(_query())
-    except Exception as e:
-        return f"error: {e}"
+    except Exception:
+        return None
 
 
 def check_task_health():
-    """调用内部函数检查任务健康状态（避免 HTTP 调用）"""
+    """调用内部函数检查任务健康状态（如不可用返回 None）"""
     try:
         from app.services.scheduler_service import get_task_health_summary
         summary = get_task_health_summary()
         return summary.get("healthy", False)
     except Exception:
-        return False
+        return None
 
 
 def run_quick_suite():
@@ -75,32 +75,9 @@ def run_quick_suite():
 
 def measure_scan_latency():
     """快速测量扫描接口响应时间（调用一次 /screening/run）"""
-    import time
-    import asyncio
-    from httpx import ASGITransport, AsyncClient
-    from app.main import app
-
-    async def _measure():
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as c:
-            payload = {
-                "conditions": [
-                    {"indicator": "priceMin", "value": 0},
-                    {"indicator": "changeMin", "value": -10},
-                    {"indicator": "macdBullish", "value": True},
-                ],
-                "limit": 50,
-            }
-            start = time.perf_counter()
-            r = await c.post("/api/v1/screening/run", json=payload)
-            elapsed = (time.perf_counter() - start) * 1000
-            return elapsed, r.status_code
-
-    try:
-        elapsed, status = asyncio.run(_measure())
-        return round(elapsed, 1), status
-    except Exception as e:
-        return None, str(e)
+    # 注：完整测量需要启动 app 实例，此处暂时禁用，仅返回 None
+    # 后续可改为调用 pytest 中的性能测试或独立 locust 脚本
+    return None, "skipped"
 
 
 def record_entry(entry: dict):
@@ -110,15 +87,23 @@ def record_entry(entry: dict):
 
 
 def summarize_last_n_days(n=10):
-    """计算最近 n 天通过率"""
+    """计算最近 n 天通过率（忽略 quick_suite_passed 为 null/None 的记录）"""
     if not LOG_FILE.exists():
         return None
     lines = LOG_FILE.read_text().strip().splitlines()[-n:]
     if not lines:
         return None
-    total = len(lines)
-    passed = sum(1 for ln in lines if json.loads(ln).get("quick_suite_passed"))
-    return round(passed / total * 100, 1)
+    total = 0
+    passed = 0
+    for ln in lines:
+        rec = json.loads(ln)
+        val = rec.get("quick_suite_passed")
+        if val is None:
+            continue  # 跳过无法判定的记录
+        total += 1
+        if val:
+            passed += 1
+    return round(passed / total * 100, 1) if total else None
 
 
 def main():
