@@ -325,7 +325,7 @@
             </select>
           </div>
 
-          <div v-else class="public-strategies">
+          <div v-else-if="strategySourceTab === 'public'" class="public-strategies">
             <div v-if="loadingPublicStrategies" class="loading-state">加载中...</div>
             <div v-else-if="publicStrategies.length === 0" class="empty-state">暂无公共策略</div>
             <div v-else class="public-strategies-grid">
@@ -340,7 +340,6 @@
             </div>
           </div>
 
-          <!-- 参数优化标签页 -->
           <div v-else class="optimization-tab">
             <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
             <div v-else-if="optimizationJobs.length === 0" class="empty-state">
