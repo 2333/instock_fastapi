@@ -63,6 +63,8 @@ class AuthService:
 
     @staticmethod
     def verify_token(token: str, expected_type: str = "access") -> int:
+        if not token:
+            raise JWTError("Missing token")
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
             if payload.get("type") != expected_type:

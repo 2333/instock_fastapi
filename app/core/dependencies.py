@@ -31,6 +31,8 @@ async def get_current_user(
         detail="无法验证凭据",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if not token:
+        raise credentials_exception
     try:
         user_id = AuthService.verify_access_token(token)
     except JWTError:

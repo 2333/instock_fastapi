@@ -85,3 +85,11 @@ async def test_selection_today_summary_aggregates_saved_conditions(client, curre
     assert hammer["pattern"] == "HAMMER"
     assert hammer["top_hits"][0]["code"] == "000001"
     assert hammer["top_hits"][0]["reason_summary"] == "Pattern = HAMMER"
+
+
+@pytest.mark.asyncio
+async def test_selection_today_summary_requires_authentication(client):
+    response = await client.get("/api/v1/selection/today-summary")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "无法验证凭据"
