@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""
+每日稳定性监测脚本（Heartbeat 驱动）
+
+记录内容:
+- latest_trade_date: 最新交易日（从数据库或 API 获取）
+- task_healthy: /api/v1/market/task-health 返回的健康状态
+- quick_suite_passed: Phase 0/1 快速回归套件执行结果
+- scan_latency_ms: 全市场扫描基线耗时（快速测量）
+
+输出: memory/stability_log.jsonl（每行一条 JSON 记录）
+"""
+
+import json
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# 配置
+REPO_ROOT = Path(__file__).resolve().parents[1]
+LOG_FILE = REPO_ROOT / "memory" / "stability_log.jsonl"
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+PYTEST = [str(VENV_PYTHON), "-m", "pytest"]
+
+
+def get_latest_trade_date():
+    """从数据库查询最新交易日"""
+    try:
+        # 直接查询 SQLite / PostgreSQL
+        import asyncio
+        from app.database import async_engine, async_session
+        from sqlalchemy import text
+
+        async def _query():
+            async with async_session() as s:
+                rs = await s.execute(text("SELECT MAX(trade_date) FROM daily_bars"))
+                return rs.scalar()
+
+        return asyncio.run(_query())
+    except Exception as e:
+        return f"error: {e}"
+
+
+def check_task_health():
+    """调用内部函数检查任务健康状态（避免 HTTP 调用）"""
+    try:
+        from app.services.scheduler_service import get_task_health_summary
+        summary = get_task_health_summary()
+        return summary.get("healthy", False)
+    except Exception:
+        return False
+
+
+def run_quick_suite():
+    """运行 Phase 0/1 快速回归套件"""
+    tests = [
+        "tests/test_screening_baseline.py",
+        "tests/test_api.py::TestMarketTaskHealthAPI",
+        "tests/test_selection_market_services.py",
+        "tests/test_selection_today_summary.py",
+        "tests/test_backtest_report_structure.py",
+        "tests/test_strategy_selection_bridge.py",
+    ]
+    result = subprocess.run(
+        PYTEST + tests,
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+    )
+    passed = result.returncode == 0
+    # 提取passed数量（简单解析）
+    return passed, result.stdout + result.stderr
+
+
+def measure_scan_latency():
+    """快速测量扫描接口响应时间（调用一次 /screening/run）"""
+    import time
+    import asyncio
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+
+    async def _measure():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            payload = {
+                "conditions": [
+                    {"indicator": "priceMin", "value": 0},
+                    {"indicator": "changeMin", "value": -10},
+                    {"indicator": "macdBullish", "value": True},
+                ],
+                "limit": 50,
+            }
+            start = time.perf_counter()
+            r = await c.post("/api/v1/screening/run", json=payload)
+            elapsed = (time.perf_counter() - start) * 1000
+            return elapsed, r.status_code
+
+    try:
+        elapsed, status = asyncio.run(_measure())
+        return round(elapsed, 1), status
+    except Exception as e:
+        return None, str(e)
+
+
+def record_entry(entry: dict):
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def summarize_last_n_days(n=10):
+    """计算最近 n 天通过率"""
+    if not LOG_FILE.exists():
+        return None
+    lines = LOG_FILE.read_text().strip().splitlines()[-n:]
+    if not lines:
+        return None
+    total = len(lines)
+    passed = sum(1 for ln in lines if json.loads(ln).get("quick_suite_passed"))
+    return round(passed / total * 100, 1)
+
+
+def main():
+    timestamp = datetime.now(timezone.utc).isoformat()
+    print(f"[{timestamp}] Stability check starting...")
+
+    # 1. 交易日
+    trade_date = get_latest_trade_date()
+    print(f"  Latest trade date: {trade_date}")
+
+    # 2. 任务健康
+    healthy = check_task_health()
+    print(f"  Task healthy: {healthy}")
+
+    # 3. quick suite
+    suite_ok, suite_out = run_quick_suite()
+    print(f"  Quick suite: {'PASS' if suite_ok else 'FAIL'}")
+
+    # 4. 扫描耗时（可选，仅测量一次）
+    latency_ms, status = measure_scan_latency()
+    print(f"  Scan latency: {latency_ms}ms (status={status})")
+
+    # 5. 记录
+    entry = {
+        "timestamp": timestamp,
+        "trading_day": str(trade_date) if trade_date else None,
+        "task_healthy": healthy,
+        "quick_suite_passed": suite_ok,
+        "scan_latency_ms": latency_ms,
+        "scan_status": status,
+    }
+    record_entry(entry)
+    print(f"  Recorded to {LOG_FILE}")
+
+    # 6. 汇总
+    rate_10d = summarize_last_n_days(10)
+    if rate_10d is not None:
+        print(f"  Last 10-day stability rate: {rate_10d}%")
+        if rate_10d < 95:
+            print("  ⚠️  WARNING: Stability below 95% threshold")
+    else:
+        print("  (accumulating data, need 10 days)")
+
+    return 0 if suite_ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
