@@ -68,3 +68,6 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 web/node_modules/
+
+# Runtime logs
+memory/*.jsonl
