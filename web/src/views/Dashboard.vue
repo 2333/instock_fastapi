@@ -1,524 +1,1612 @@
 <template>
-  <div class="dashboard">
-    <div class="dashboard-header">
-      <div class="header-left">
-        <h1>数据看板</h1>
-        <p class="subtitle">实时监控与分析</p>
+  <div class="dashboard-page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Phase 0b 工作台</p>
+        <h1>四个入口，把扫描、关注、验证收回来</h1>
+        <p class="subtitle">
+          首页只保留真实入口：市场温度计、我的关注、今日扫描发现、策略信号与回测更新。
+        </p>
       </div>
-      <div class="header-right">
-        <span class="last-updated">更新时间: {{ lastUpdated }}</span>
-        <button class="btn btn-primary" @click="refreshData" :disabled="loading">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-          </svg>
-          刷新
+      <div class="header-actions">
+        <div class="sync-meta">
+          <span class="sync-label">最近刷新</span>
+          <strong>{{ lastSyncedLabel }}</strong>
+        </div>
+        <button class="refresh-btn" :disabled="loading" @click="refreshWorkbench">
+          {{ loading ? '刷新中...' : '刷新工作台' }}
         </button>
       </div>
+    </header>
+
+    <div v-if="loadWarnings.length" class="warning-banner">
+      <strong>部分数据暂不可用</strong>
+      <span>{{ loadWarnings.join(' / ') }}</span>
     </div>
 
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
-      <p>加载中...</p>
-    </div>
-
-    <div v-else class="dashboard-grid">
-      <!-- 今日形态 -->
-      <div class="card">
+    <div class="card-grid">
+      <section class="workbench-card workbench-card--market">
         <div class="card-header">
-          <h3>今日形态</h3>
-          <router-link to="/patterns" class="card-link">查看全部</router-link>
-        </div>
-        <div class="pattern-list">
-          <div v-if="recentPatterns.length === 0" class="empty-state">
-            暂无形态数据
+          <div>
+            <span class="card-kicker">市场温度计</span>
+            <h2>盘后市场概览</h2>
+            <span v-if="marketSummary.tradeDate" class="card-date" title="行情数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}">数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}</span>
           </div>
-          <div 
-            v-else
-            v-for="pattern in recentPatterns" 
-            :key="`${pattern.code}-${pattern.type}`"
-            class="pattern-item"
-            @click="$router.push(`/stock/${pattern.code}`)"
+          <router-link to="/stocks" class="card-link">查看股票列表</router-link>
+        </div>
+
+        <div class="metric-strip metric-strip--market">
+          <div class="metric-block">
+            <span class="metric-value metric-value--positive">{{ formatCount(marketSummary.advancers) }}</span>
+            <span class="metric-label">上涨家数</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--negative">{{ formatCount(marketSummary.decliners) }}</span>
+            <span class="metric-label">下跌家数</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ formatCount(marketSummary.unchanged) }}</span>
+            <span class="metric-label">平盘家数</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--positive">{{ formatCount(marketSummary.limitUp) }}</span>
+            <span class="metric-label">涨停</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--negative">{{ formatCount(marketSummary.limitDown) }}</span>
+            <span class="metric-label">跌停</span>
+          </div>
+        </div>
+
+        <div class="mood-panel">
+          <div class="mood-panel__header">
+            <span class="card-kicker">情绪摘要</span>
+            <span :class="toneBadgeClass(marketSummary.moodTone)">{{ marketSummary.moodLabel }}</span>
+          </div>
+          <p class="card-description">
+            <template v-if="marketSummary.headline">
+              {{ marketSummary.headline }}
+            </template>
+            <template v-else-if="marketSummary.tradeDate">
+              已完成 {{ formatDisplayDate(marketSummary.tradeDate) }} 的市场聚合，等待后端补充情绪摘要。
+            </template>
+            <template v-else>
+              市场温度计暂未返回数据，刷新后会自动回落为空状态。
+            </template>
+          </p>
+        </div>
+
+        <div v-if="marketSummary.majorIndices.length" class="list-stack">
+          <div
+            v-for="indexItem in marketSummary.majorIndices"
+            :key="indexItem.code"
+            class="list-row list-row--static"
           >
-            <div class="pattern-info">
-              <span class="pattern-code">{{ pattern.code }}</span>
-              <span class="pattern-name">{{ pattern.name }}</span>
+            <div>
+              <strong>{{ indexItem.name }}</strong>
+              <span>{{ indexItem.code }}</span>
             </div>
-            <div class="pattern-meta">
-              <span class="badge" :class="getSignalClass(pattern.signal)">{{ pattern.signal }}</span>
-              <span class="pattern-confidence">{{ pattern.confidence }}%</span>
+            <div class="row-meta">
+              <span :class="trendBadgeClass(indexItem.changeRate)">
+                {{ formatSignedPercent(indexItem.changeRate) }}
+              </span>
+              <span class="row-note">
+                {{ indexItem.current !== null ? formatCount(indexItem.current) : formatIndexMeta(indexItem) }}
+              </span>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 精选回顾 -->
-      <div class="card">
-        <div class="card-header">
-          <h3>精选回顾</h3>
-          <router-link to="/selection" class="card-link">查看全部</router-link>
+        <div class="card-footer">
+          <span class="data-source">数据来源：Tushare 行情</span>
         </div>
-        <div class="selection-summary">
-          <div class="selection-stat">
-            <span class="selection-value">{{ selectionStats.total }}</span>
-            <span class="selection-label">精选总数</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value price-up">{{ selectionStats.winning }}</span>
-            <span class="selection-label">盈利交易</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value">{{ selectionStats.winRate }}%</span>
-            <span class="selection-label">胜率</span>
-          </div>
-          <div class="selection-stat">
-            <span class="selection-value">{{ formatReturn(selectionStats.avgReturn) }}%</span>
-            <span class="selection-label">平均收益</span>
-          </div>
-        </div>
-      </div>
+      </section>
 
-      <!-- 快速跳转 -->
-      <div class="card full-width">
+      <section class="workbench-card">
         <div class="card-header">
-          <h3>快速导航</h3>
+          <div>
+            <span class="card-kicker">我的关注</span>
+            <h2>关注列表联动</h2>
+            <span class="card-date" title="关注列表最后更新时间：{{ lastSyncedLabel }}">最后刷新：{{ lastSyncedLabel }}</span>
+          </div>
+          <div class="card-meta">
+            <span :class="['freshness-dot', freshnessClass]" title="数据新鲜度"></span>
+            <router-link to="/attention" class="card-link">管理关注</router-link>
+            <button
+              v-if="attentionItems.length > 0"
+              class="card-action-btn"
+              @click="addAllToScreening"
+              title="将所有关注股票加入今日扫描"
+            >
+              全部扫描
+            </button>
+          </div>
         </div>
-        <div class="quick-nav">
-          <router-link to="/stocks" class="nav-item">
-            <span class="nav-icon">📊</span>
-            <span class="nav-label">股票列表</span>
-          </router-link>
-          <router-link to="/patterns" class="nav-item">
-            <span class="nav-icon">🔄</span>
-            <span class="nav-label">形态分析</span>
-          </router-link>
-          <router-link to="/selection" class="nav-item">
-            <span class="nav-icon">✨</span>
-            <span class="nav-label">精选策略</span>
-          </router-link>
-          <router-link to="/backtest" class="nav-item">
-            <span class="nav-icon">📈</span>
-            <span class="nav-label">回测分析</span>
-          </router-link>
-          <router-link to="/attention" class="nav-item">
-            <span class="nav-icon">⭐</span>
-            <span class="nav-label">我的关注</span>
+
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ attentionItems.length }}</span>
+            <span class="metric-label">关注股票</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ triggeredAttentionCount }}</span>
+            <span class="metric-label">今日命中</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--small">{{ attentionLatestDateLabel }}</span>
+            <span class="metric-label">最近加入</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="triggeredAttentionCount > 0">
+            今日扫描结果已和关注列表联动，命中的个股会直接标记出来，方便继续核对验证。
+          </template>
+          <template v-else-if="attentionItems.length > 0">
+            关注列表已加载，但当前暂无命中提示。后端补上今日扫描概要后，这里会自动点亮。
+          </template>
+          <template v-else>
+            还没有关注股票，可以从个股详情或关注页补充观察名单。
+          </template>
+          <span class="data-source">数据来源：本地关注列表</span>
+        </p>
+
+        <div v-if="attentionItems.length" class="list-stack">
+          <router-link
+            v-for="item in topAttentionItems"
+            :key="item.code"
+            :to="buildStockLink(item.code, todaySummary.tradeDate)"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.code }}</strong>
+              <span>{{ item.name }}</span>
+            </div>
+            <div class="row-meta">
+              <span v-if="isAttentionTriggered(item.code)" class="signal-badge signal-badge--bullish">
+                今日命中
+              </span>
+              <span>{{ formatDisplayDate(item.createdAt) }}</span>
+            </div>
           </router-link>
         </div>
-      </div>
+      </section>
+
+      <!-- 热门策略卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">热门策略</span>
+            <h2 class="card-title">本周最多人使用的策略</h2>
+          </div>
+          <router-link to="/strategies" class="card-link">浏览策略市场</router-link>
+        </div>
+
+        <div v-if="loadingStrategies" class="loading-state">加载中...</div>
+        <div v-else-if="topStrategies.length === 0" class="empty-state">
+          <p>暂无策略数据</p>
+        </div>
+        <div v-else class="strategy-list">
+          <div
+            v-for="(strategy, idx) in topStrategies"
+            :key="strategy.id"
+            class="strategy-item"
+            @click="goToStrategy(strategy)"
+          >
+            <div class="strategy-rank">{{ idx + 1 }}</div>
+            <div class="strategy-info">
+              <div class="strategy-name">{{ strategy.name }}</div>
+              <div class="strategy-stats">
+                <span class="rating">★ {{ strategy.rating?.toFixed(1) }}</span>
+                <span class="backtests">📊 {{ strategy.backtest_count }}次回测</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-small" @click.stop="copyStrategy(strategy)">
+              复制
+            </button>
+          </div>
+        </div>
+
+        <p class="card-description">
+          基于本周用户回测数据统计，展示最受欢迎的策略模板。点击查看详情或一键复制到个人模板。
+          <span class="data-source">数据来源：用户行为追踪</span>
+        </p>
+      </section>
+
+      <!-- 最新报告卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">最新报告</span>
+            <h2 class="card-title">最近生成的数据洞察报告</h2>
+          </div>
+          <router-link to="/reports" class="card-link">查看全部</router-link>
+        </div>
+
+        <div v-if="loadingReports" class="loading-state">加载中...</div>
+        <div v-else-if="recentReports.length === 0" class="empty-state">
+          <p>暂无报告，前往报告页面创建</p>
+          <router-link to="/reports" class="btn btn-primary btn-small">创建报告</router-link>
+        </div>
+        <div v-else class="reports-list">
+          <div
+            v-for="report in recentReports"
+            :key="report.id"
+            class="report-item"
+            @click="viewReport(report.id)"
+          >
+            <div class="report-type" :class="report.type">
+              {{ typeLabels[report.type] }}
+            </div>
+            <div class="report-info">
+              <div class="report-title">{{ report.title }}</div>
+              <div class="report-date">{{ formatDate(report.generated_at) }}</div>
+            </div>
+            <div v-if="report.summary" class="report-metric">
+              <span :class="report.summary.total_return >= 0 ? 'positive' : 'negative'">
+                {{ formatPercent(report.summary.total_return) }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="workbench-card">
+        <div class="card-header">
+          <div>
+            <span class="card-kicker">今日扫描发现</span>
+            <h2>已保存条件的命中概要</h2>
+            <span v-if="todaySummary.tradeDate" class="card-date" title="筛选执行日期：{{ formatTradeDate(todaySummary.tradeDate) }}">数据日期：{{ formatTradeDate(todaySummary.tradeDate) }}</span>
+          </div>
+          <router-link to="/selection" class="card-link">进入筛选页</router-link>
+        </div>
+
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ formatCount(todaySummary.savedConditionCount) }}</span>
+            <span class="metric-label">已保存条件</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ formatCount(todaySummary.totalHits) }}</span>
+            <span class="metric-label">今日命中</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value metric-value--small">{{ todaySummaryDateLabel }}</span>
+            <span class="metric-label">筛选交易日</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="todaySummary.note">
+            {{ todaySummary.note }}
+          </template>
+          <template v-else-if="todaySummary.items.length > 0">
+            今天命中的条件已经按保存列表聚合，点开筛选页可以继续回看命中股票和证据。
+          </template>
+          <template v-else>
+            还没有可展示的今日扫描概要，等待后端把今日摘要接口接上后会自动显示。
+          </template>
+          <span class="data-source">数据来源：Tushare 行情 + 本地筛选</span>
+        </p>
+
+        <div v-if="todaySummary.items.length" class="list-stack">
+          <router-link
+            v-for="item in topTodayConditions"
+            :key="item.id"
+            to="/selection"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.category || '保存条件' }}</span>
+            </div>
+            <div class="row-meta">
+              <span class="row-note">{{ item.hitCount }} 只</span>
+              <span>{{ item.topCodes.length ? item.topCodes.slice(0, 2).join(' / ') : '暂无代码' }}</span>
+            </div>
+          </router-link>
+        </div>
+      </section>
+
+      <section class="workbench-card">
+        <div class="card-header">
+          <div>
+            <span class="card-kicker">策略信号 / 回测更新</span>
+            <h2>最近回测与策略记录</h2>
+            <span v-if="latestBacktest?.createdAt" class="card-date" title="回测完成时间：{{ formatDate(latestBacktest.createdAt) }}">最近回测：{{ formatDate(latestBacktest.createdAt) }}</span>
+          </div>
+          <router-link to="/backtest" class="card-link">查看回测页</router-link>
+        </div>
+
+        <div class="metric-strip metric-strip--compact">
+          <div class="metric-block">
+            <span class="metric-value">{{ backtestSummary.totalReturnLabel }}</span>
+            <span class="metric-label">最新收益</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ backtestSummary.drawdownLabel }}</span>
+            <span class="metric-label">最大回撤</span>
+          </div>
+          <div class="metric-block">
+            <span class="metric-value">{{ backtestSummary.winRateLabel }}</span>
+            <span class="metric-label">胜率</span>
+          </div>
+        </div>
+
+        <p class="card-description">
+          <template v-if="latestBacktest">
+            最新回测来自 {{ latestBacktest.strategyLabel }}，覆盖 {{ latestBacktest.rangeLabel }}。
+          </template>
+          <template v-else-if="backtestItems.length > 0">
+            已加载回测历史，但暂未解析出最新摘要。
+          </template>
+          <template v-else>
+            暂无回测记录，进入回测页后可直接发起新的策略验证。
+          </template>
+          <span class="data-source">数据来源：本地回测引擎</span>
+        </p>
+
+        <div v-if="backtestItems.length" class="list-stack">
+          <router-link
+            v-for="item in topBacktestItems"
+            :key="item.id"
+            :to="buildBacktestLink(item)"
+            class="list-row"
+          >
+            <div>
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.strategyLabel }}</span>
+            </div>
+            <div class="row-meta">
+              <span :class="trendBadgeClass(item.totalReturn)">
+                {{ formatSignedPercent(item.totalReturn) }}
+              </span>
+              <span>{{ formatDisplayDate(item.createdAt) }}</span>
+            </div>
+          </router-link>
+        </div>
+      </section>
+
+      <!-- 优化任务卡片 -->
+      <section class="workbench-card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <span class="card-kicker">参数优化</span>
+            <h2 class="card-title">最近优化任务</h2>
+          </div>
+          <router-link to="/optimization" class="card-link">查看全部</router-link>
+        </div>
+
+        <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
+        <div v-else-if="optimizationJobs.length === 0" class="empty-state">
+          <p>暂无优化任务，前往参数优化页面创建</p>
+          <router-link to="/optimization" class="btn btn-primary btn-small">创建任务</router-link>
+        </div>
+        <div v-else class="optimization-jobs">
+          <div
+            v-for="job in optimizationJobs"
+            :key="job.id"
+            class="optimization-job-card"
+            :class="job.status"
+          >
+            <div class="job-header">
+              <div class="job-title">{{ job.strategy }}</div>
+              <div class="job-status" :class="job.status">{{ statusLabels[job.status] }}</div>
+            </div>
+            <div class="job-meta">
+              <span>方法：{{ methodLabels[job.method] }}</span>
+              <span>目标：{{ metricLabels[job.metric] }}</span>
+              <span>{{ job.completed_trials }}/{{ job.n_trials }}</span>
+            </div>
+            <div class="progress-bar">
+              <div
+                class="progress-fill"
+                :style="{ width: `${(job.completed_trials / job.n_trials) * 100}%` }"
+              ></div>
+            </div>
+            <div v-if="job.best_metric !== null" class="best-meta">
+              最优得分：{{ job.best_metric?.toFixed(4) }}
+            </div>
+          </div>
+        </div>
+
+        <p class="card-description">
+          自动搜索策略最优参数组合。点击查看详情或创建新优化任务。
+          <span class="data-source">数据来源：参数优化引擎</span>
+        </p>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { patternApi, selectionApi } from '@/api'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAnalytics } from '@/composables/useAnalytics'
+import { attentionApi, backtestApi, marketApi, optimizationApi, reportApi, selectionApi, strategySocialApi } from '@/api'
 
-const lastUpdated = ref(new Date().toLocaleString())
-const loading = ref(false)
+const router = useRouter()
+const { pageView } = useAnalytics()
 
-interface PatternItem {
+interface AttentionEntry {
   code: string
   name: string
-  type: string
-  signal: string
-  confidence: number
+  group: string
+  notes: string
+  createdAt: string
 }
 
-const recentPatterns = ref<PatternItem[]>([])
+interface MarketIndexEntry {
+  code: string
+  name: string
+  current: number | null
+  changeRate: number | null
+  constituentCount: number | null
+  source: string
+}
 
-const selectionStats = reactive({
-  total: 0,
-  winning: 0,
-  winRate: 0,
-  avgReturn: 0,
+interface MarketSummaryState {
+  tradeDate: string
+  advancers: number | null
+  decliners: number | null
+  unchanged: number | null
+  limitUp: number | null
+  limitDown: number | null
+  headline: string
+  moodLabel: string
+  moodTone: 'bullish' | 'neutral' | 'bearish'
+  majorIndices: MarketIndexEntry[]
+}
+
+interface TodayConditionEntry {
+  id: string
+  name: string
+  category: string
+  hitCount: number
+  tradeDate: string
+  summary: string
+  topCodes: string[]
+}
+
+interface TodaySummaryState {
+  tradeDate: string
+  totalHits: number | null
+  savedConditionCount: number | null
+  note: string
+  items: TodayConditionEntry[]
+  triggeredCodes: string[]
+}
+
+interface BacktestEntry {
+  id: string
+  name: string
+  strategy: string
+  strategyLabel: string
+  code: string
+  stockName: string
+  createdAt: string
+  startDate: string
+  endDate: string
+  rangeLabel: string
+  totalReturn: number
+  annualReturn: number
+  maxDrawdown: number
+  winRate: number
+  totalTrades: number
+}
+
+const loading = ref(false)
+const lastSyncedAt = ref('')
+const loadWarnings = ref<string[]>([])
+
+const attentionItems = ref<AttentionEntry[]>([])
+const marketSummary = ref<MarketSummaryState>({
+  tradeDate: '',
+  advancers: null,
+  decliners: null,
+  unchanged: null,
+  limitUp: null,
+  limitDown: null,
+  headline: '',
+  moodLabel: '待更新',
+  moodTone: 'neutral',
+  majorIndices: [],
+})
+const todaySummary = ref<TodaySummaryState>({
+  tradeDate: '',
+  totalHits: null,
+  savedConditionCount: null,
+  note: '',
+  items: [],
+  triggeredCodes: [],
+})
+const backtestItems = ref<BacktestEntry[]>([])
+const recentReports = ref<any[]>([])
+const loadingReports = ref(false)
+const optimizationJobs = ref<any[]>([])
+const loadingOptimizationJobs = ref(false)
+const topStrategies = ref<any[]>([])
+const loadingStrategies = ref(false)
+
+const unwrapPayload = (value: unknown) => {
+  if (value && typeof value === 'object' && 'data' in value) {
+    return (value as { data?: unknown }).data ?? value
+  }
+  return value
+}
+
+const asObject = (value: unknown): Record<string, any> => {
+  const payload = unwrapPayload(value)
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, any>
+  }
+  return {}
+}
+
+const asArray = (value: unknown): any[] => {
+  const payload = unwrapPayload(value)
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === 'object') {
+    const candidates = ['items', 'list', 'results', 'data']
+    for (const key of candidates) {
+      const candidate = (payload as Record<string, unknown>)[key]
+      if (Array.isArray(candidate)) return candidate
+    }
+  }
+  return []
+}
+
+const toNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const toNullableNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const toString = (value: unknown, fallback = '') => {
+  if (value === null || value === undefined) return fallback
+  return String(value)
+}
+
+const formatDisplayDate = (value?: string | null) => {
+  if (!value) return '--'
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+const formatTradeDate = (value?: string | null) => {
+  if (!value) return '--'
+  if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}/${value.slice(4, 6)}/${value.slice(6, 8)}`
+  return value
+}
+
+const formatDate = (value?: string | null) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+const formatCount = (value: number | null | undefined) => {
+  if (value === null || value === undefined) return '--'
+  return new Intl.NumberFormat('zh-CN').format(value)
+}
+
+const formatPercent = (value: unknown, digits = 1) => {
+  const numeric = toNumber(value, Number.NaN)
+  if (Number.isNaN(numeric)) return '--'
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}%`
+}
+
+const formatSignedPercent = (value: unknown, digits = 1) => {
+  const numeric = toNumber(value, Number.NaN)
+  if (Number.isNaN(numeric)) return '--'
+  return `${numeric > 0 ? '+' : ''}${numeric.toFixed(digits)}%`
+}
+
+const toneBadgeClass = (tone: 'bullish' | 'neutral' | 'bearish') => {
+  if (tone === 'bullish') return 'signal-badge signal-badge--bullish'
+  if (tone === 'bearish') return 'signal-badge signal-badge--bearish'
+  return 'signal-badge signal-badge--neutral'
+}
+
+const trendBadgeClass = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return 'signal-badge signal-badge--neutral'
+  const numeric = toNumber(value, 0)
+  if (numeric > 0) return 'signal-badge signal-badge--bullish'
+  if (numeric < 0) return 'signal-badge signal-badge--bearish'
+  return 'signal-badge signal-badge--neutral'
+}
+
+const formatIndexMeta = (item: MarketIndexEntry) => {
+  if (item.constituentCount !== null) {
+    return `成分 ${formatCount(item.constituentCount)}`
+  }
+  if (item.source === 'proxy') return '代理口径'
+  if (item.source === 'fallback') return '待补数'
+  return '--'
+}
+
+const normalizeAttentionEntry = (item: any): AttentionEntry => ({
+  code: toString(item?.code || item?.symbol || item?.ts_code?.split?.('.')?.[0] || ''),
+  name: toString(item?.stock_name || item?.name || item?.code || '--'),
+  group: toString(item?.group || 'watch'),
+  notes: toString(item?.notes || ''),
+  createdAt: toString(item?.created_at || item?.createdAt || ''),
 })
 
-const getSignalClass = (signal: string) => {
-  if (!signal) return 'neutral'
-  const s = signal.toLowerCase()
-  if (s.includes('bull') || s.includes('买') || s.includes('多')) return 'bullish'
-  if (s.includes('bear') || s.includes('卖') || s.includes('空')) return 'bearish'
-  return 'neutral'
-}
+const normalizeMarketSummary = (response: unknown): MarketSummaryState => {
+  const payload = asObject(response)
+  const counts = payload.counts && typeof payload.counts === 'object' ? payload.counts : payload
+  const indicesSource = asArray(payload.indices || payload.major_indices || payload.majorIndices || payload.indexes)
 
-const formatReturn = (value: number) => {
-  if (!value || isNaN(value)) return '0.00'
-  return value.toFixed(2)
-}
+  const tradeDate = toString(
+    payload.trade_date || payload.tradeDate || payload.date || counts.trade_date || counts.date || '',
+  )
+  const advancers = toNullableNumber(
+    payload.advancers ?? counts.advancers ?? payload.up_count ?? counts.up_count ?? payload.rise_count ?? counts.rise_count,
+  )
+  const decliners = toNullableNumber(
+    payload.decliners ?? counts.decliners ?? payload.down_count ?? counts.down_count ?? payload.fall_count ?? counts.fall_count,
+  )
+  const unchanged = toNullableNumber(
+    payload.unchanged ?? counts.unchanged ?? payload.flat_count ?? counts.flat_count ?? payload.neutral_count ?? counts.neutral_count,
+  )
+  const limitUp = toNullableNumber(
+    payload.limit_up ?? counts.limit_up ?? payload.limitUp ?? counts.limitUp ?? payload.limit_up_count ?? counts.limit_up_count,
+  )
+  const limitDown = toNullableNumber(
+    payload.limit_down ?? counts.limit_down ?? payload.limitDown ?? counts.limitDown ?? payload.limit_down_count ?? counts.limit_down_count,
+  )
 
-const fetchPatterns = async () => {
-  try {
-    const patterns = await patternApi.getTodayPatterns({ 
-      limit: 10,
-      min_confidence: 0,
-    })
-    if (patterns && patterns.length > 0) {
-      recentPatterns.value = patterns.map((p: any) => ({
-        code: p.code || p.ts_code?.split('.')[0] || '',
-        name: p.stock_name || p.name || p.ts_code || '',
-        type: p.pattern_name || '',
-        signal: p.pattern_type || p.signal || 'neutral',
-        confidence: parseFloat(p.confidence) || 0,
-      }))
-    } else {
-      recentPatterns.value = []
-    }
-  } catch (e) {
-    console.error('获取形态数据失败:', e)
-    recentPatterns.value = []
+  const majorIndices = indicesSource.slice(0, 5).map((item: any) => ({
+    code: toString(item?.code || item?.symbol || item?.index_code || item?.ts_code || ''),
+    name: toString(item?.name || item?.index_name || item?.label || '指数'),
+    current: toNullableNumber(item?.current ?? item?.close ?? item?.value ?? item?.last),
+    changeRate: toNullableNumber(item?.change_rate ?? item?.pct_chg ?? item?.rate ?? item?.changeRate),
+    constituentCount: toNullableNumber(item?.constituent_count ?? item?.constituentCount ?? item?.sample_size),
+    source: toString(item?.source || 'unknown'),
+  }))
+
+  const headline = toString(
+    payload.headline ||
+      payload.summary ||
+      payload.mood_summary ||
+      payload.sentiment_summary ||
+      payload.description ||
+      '',
+  )
+
+  const sentiment = toString(payload.mood || payload.tone || '').toLowerCase()
+  const advancerValue = advancers ?? 0
+  const declinerValue = decliners ?? 0
+  const moodTone: 'bullish' | 'neutral' | 'bearish' =
+    sentiment.includes('bull') || sentiment.includes('强') || sentiment.includes('热')
+      ? 'bullish'
+      : sentiment.includes('bear') || sentiment.includes('弱') || sentiment.includes('冷')
+        ? 'bearish'
+        : advancerValue > declinerValue
+          ? 'bullish'
+          : declinerValue > advancerValue
+            ? 'bearish'
+            : 'neutral'
+
+  const moodLabel = toString(payload.mood_label || payload.moodLabel || payload.sentiment_label || '').trim() || (() => {
+    if (moodTone === 'bullish') return '偏强'
+    if (moodTone === 'bearish') return '偏弱'
+    return '中性'
+  })()
+
+  return {
+    tradeDate,
+    advancers,
+    decliners,
+    unchanged,
+    limitUp,
+    limitDown,
+    headline,
+    moodLabel,
+    moodTone,
+    majorIndices,
   }
 }
 
-const fetchSelectionStats = async () => {
-  try {
-    const history = await selectionApi.getHistory({ limit: 100 })
-    if (history && history.length > 0) {
-      selectionStats.total = history.length
-      const winning = history.filter((r: any) => r.signal === 'buy' || r.score > 0).length
-      selectionStats.winning = winning
-      selectionStats.winRate = Math.round((winning / history.length) * 100 * 10) / 10
-      
-      const totalReturn = history.reduce((sum: number, r: any) => sum + (parseFloat(r.score) || 0), 0)
-      selectionStats.avgReturn = totalReturn / history.length
+const normalizeTodaySummary = (response: unknown): TodaySummaryState => {
+  const payload = asObject(response)
+  const rawItems = asArray(
+    payload.items ||
+      payload.conditions ||
+      payload.saved_conditions ||
+      payload.condition_hits ||
+      payload.results ||
+      payload.data,
+  )
+
+  const items = rawItems.map((item: any, index) => {
+    const topCodes = [
+      ...asArray(item?.top_codes || item?.codes || item?.matched_codes || item?.top_matches || item?.hits),
+      ...asArray(item?.stocks),
+    ]
+      .map((code) => toString(code?.code || code?.symbol || code?.ts_code?.split?.('.')?.[0] || code))
+      .filter(Boolean)
+
+    return {
+      id: toString(item?.id || item?.condition_id || item?.name || `condition-${index}`),
+      name: toString(item?.name || item?.condition_name || item?.label || '未命名条件'),
+      category: toString(item?.category || item?.group || item?.type || ''),
+      hitCount: toNumber(item?.hit_count ?? item?.total ?? item?.count ?? item?.matches ?? topCodes.length),
+      tradeDate: toString(item?.trade_date || payload.trade_date || payload.date || ''),
+      summary: toString(item?.summary || item?.reason_summary || item?.note || ''),
+      topCodes,
+    } as TodayConditionEntry
+  })
+
+  const triggeredCodes = new Set<string>()
+  const topLevelCodeSources = [
+    payload.triggered_codes,
+    payload.matched_codes,
+    payload.matched_codes_today,
+    payload.watchlist_hits,
+    payload.codes,
+    payload.symbols,
+  ]
+  for (const source of topLevelCodeSources) {
+    for (const code of asArray(source)) {
+      const normalized = toString(code?.code || code?.symbol || code?.ts_code?.split?.('.')?.[0] || code)
+      if (normalized) triggeredCodes.add(normalized)
     }
-  } catch (e) {
-    console.error('获取精选数据失败:', e)
+  }
+  for (const item of items) {
+    for (const code of item.topCodes) triggeredCodes.add(code)
+  }
+
+  const hasMeaningfulPayload = Object.keys(payload).length > 0 || rawItems.length > 0
+  const totalHits =
+    toNullableNumber(
+      payload.total ?? payload.total_hits ?? payload.hit_count ?? payload.matches ?? payload.hits,
+    ) ?? (hasMeaningfulPayload ? items.reduce((sum, item) => sum + item.hitCount, 0) : null)
+  const savedConditionCount =
+    toNullableNumber(
+      payload.saved_condition_count ?? payload.condition_count ?? payload.conditions_count ?? payload.total_conditions,
+    ) ?? (hasMeaningfulPayload ? items.length : null)
+  const note = toString(payload.note || payload.summary || payload.message || '')
+  const tradeDate = toString(payload.trade_date || payload.tradeDate || payload.date || items[0]?.tradeDate || '')
+
+  return {
+    tradeDate,
+    totalHits,
+    savedConditionCount,
+    note,
+    items,
+    triggeredCodes: Array.from(triggeredCodes),
   }
 }
 
-const refreshData = async () => {
+const normalizeBacktestEntry = (item: any): BacktestEntry => {
+  const strategy = toString(item?.strategy || item?.meta?.strategy || item?.name || 'backtest')
+  const startDate = toString(item?.start_date || item?.startDate || '')
+  const endDate = toString(item?.end_date || item?.endDate || '')
+
+  return {
+    id: toString(item?.id || item?.backtest_id || `${strategy}-${startDate}-${endDate}`),
+    name: toString(item?.name || item?.title || strategy),
+    strategy,
+    strategyLabel: toString(item?.strategy_label || item?.strategyLabel || strategy),
+    code: toString(item?.code || item?.stock_code || item?.symbol || ''),
+    stockName: toString(item?.stock_name || item?.stockName || ''),
+    createdAt: toString(item?.created_at || item?.createdAt || ''),
+    startDate,
+    endDate,
+    rangeLabel: startDate && endDate ? `${formatDisplayDate(startDate)} → ${formatDisplayDate(endDate)}` : '未提供区间',
+    totalReturn: toNumber(item?.total_return ?? item?.summary?.total_return ?? 0),
+    annualReturn: toNumber(item?.annual_return ?? item?.summary?.annual_return ?? 0),
+    maxDrawdown: toNumber(item?.max_drawdown ?? item?.summary?.max_drawdown ?? 0),
+    winRate: toNumber(item?.win_rate ?? item?.summary?.win_rate ?? 0),
+    totalTrades: toNumber(item?.total_trades ?? item?.summary?.total_trades ?? 0),
+  }
+}
+
+const attentionLatestDateLabel = computed(() => {
+  const latest = attentionItems.value[0]?.createdAt
+  return latest ? formatDisplayDate(latest) : '--'
+})
+
+const triggeredAttentionCount = computed(() => {
+  if (!attentionItems.value.length) return 0
+  return attentionItems.value.filter((item) => isAttentionTriggered(item.code)).length
+})
+
+const topAttentionItems = computed(() => attentionItems.value.slice(0, 4))
+
+const topTodayConditions = computed(() =>
+  [...todaySummary.value.items]
+    .sort((a, b) => b.hitCount - a.hitCount || a.name.localeCompare(b.name))
+    .slice(0, 4),
+)
+
+const todaySummaryDateLabel = computed(() => formatDisplayDate(todaySummary.value.tradeDate))
+
+const latestBacktest = computed(() => backtestItems.value[0] || null)
+
+const topBacktestItems = computed(() => backtestItems.value.slice(0, 3))
+
+const backtestSummary = computed(() => {
+  const latest = latestBacktest.value
+  return {
+    totalReturnLabel: latest ? formatSignedPercent(latest.totalReturn) : '--',
+    drawdownLabel: latest ? formatSignedPercent(latest.maxDrawdown) : '--',
+    winRateLabel: latest ? formatPercent(latest.winRate) : '--',
+  }
+})
+
+const lastSyncedLabel = computed(() => {
+  if (!lastSyncedAt.value) return '--'
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(lastSyncedAt.value))
+})
+
+const freshnessClass = computed(() => {
+  if (!lastSyncedAt.value) return 'stale'
+  const elapsedMs = Date.now() - new Date(lastSyncedAt.value).getTime()
+  const elapsedMin = elapsedMs / 60000
+  if (elapsedMin < 1) return 'fresh'    // < 1 分钟
+  if (elapsedMin < 5) return 'recent'   // < 5 分钟
+  return 'stale'
+})
+
+const buildStockLink = (code: string, screeningDate?: string) => ({
+  path: `/stock/${code}`,
+  query: screeningDate ? { screening_date: screeningDate } : undefined,
+})
+
+const buildBacktestLink = (item: BacktestEntry) => ({
+  path: '/backtest',
+  query: item.id ? { backtest_id: item.id } : undefined,
+})
+
+const isAttentionTriggered = (code: string) => {
+  return todaySummary.value.triggeredCodes.includes(code)
+}
+
+function refreshWorkbench() {
   loading.value = true
-  lastUpdated.value = new Date().toLocaleString()
-  await Promise.all([
-    fetchPatterns(),
-    fetchSelectionStats(),
+  loadWarnings.value = []
+
+  return Promise.allSettled([
+    marketApi.getSummary(),
+    attentionApi.getList(),
+    selectionApi.getTodaySummary({ limit: 12 }),
+    backtestApi.getBacktestHistory(5),
+    reportApi.list({ limit: 3 }),
+    optimizationApi.listJobs({ limit: 5, status: 'completed' }),
   ])
-  loading.value = false
+    .then(([marketResult, attentionResult, todayResult, backtestResult, reportsResult, optResult]) => {
+      if (marketResult.status === 'fulfilled') {
+        marketSummary.value = normalizeMarketSummary(marketResult.value)
+      } else {
+        marketSummary.value = {
+          tradeDate: '',
+          advancers: null,
+          decliners: null,
+          unchanged: null,
+          limitUp: null,
+          limitDown: null,
+          headline: '',
+          moodLabel: '待更新',
+          moodTone: 'neutral',
+          majorIndices: [],
+        }
+        loadWarnings.value.push('市场温度计')
+      }
+
+      if (attentionResult.status === 'fulfilled') {
+        attentionItems.value = asArray(attentionResult.value)
+          .map(normalizeAttentionEntry)
+          .filter((item: AttentionEntry) => Boolean(item.code))
+      } else {
+        attentionItems.value = []
+        loadWarnings.value.push('我的关注')
+      }
+
+      if (todayResult.status === 'fulfilled') {
+        todaySummary.value = normalizeTodaySummary(todayResult.value)
+      } else {
+        todaySummary.value = {
+          tradeDate: '',
+          totalHits: null,
+          savedConditionCount: null,
+          note: '',
+          items: [],
+          triggeredCodes: [],
+        }
+        loadWarnings.value.push('今日扫描发现')
+      }
+
+      if (backtestResult.status === 'fulfilled') {
+        backtestItems.value = asArray(backtestResult.value)
+          .map(normalizeBacktestEntry)
+          .sort((a: BacktestEntry, b: BacktestEntry) => b.createdAt.localeCompare(a.createdAt))
+      } else {
+        backtestItems.value = []
+        loadWarnings.value.push('策略信号 / 回测更新')
+      }
+
+      if (reportsResult.status === 'fulfilled') {
+        recentReports.value = (reportsResult.value?.data?.items || []).slice(0, 3)
+      } else {
+        recentReports.value = []
+      }
+
+      if (optResult.status === 'fulfilled') {
+        optimizationJobs.value = (optResult.value?.data?.items || []).slice(0, 5)
+      } else {
+        optimizationJobs.value = []
+      }
+
+      lastSyncedAt.value = new Date().toISOString()
+    })
+    .finally(() => {
+      loading.value = false
+    })
+}
+
+const addAllToScreening = () => {
+  const codes = attentionItems.value.map((item: any) => item.code).filter(Boolean)
+  if (!codes.length) return
+  router.push({
+    path: '/selection',
+    query: { watchlist: codes.join(',') },
+  })
+}
+
+async function loadTopStrategies() {
+  loadingStrategies.value = true
+  try {
+    const res = await strategySocialApi.listPublic({
+      sort_by: 'backtest_count',
+      limit: 5,
+    })
+    topStrategies.value = (res.data?.items || []).slice(0, 5)
+  } catch (e) {
+    console.error('Failed to load top strategies:', e)
+  } finally {
+    loadingStrategies.value = false
+  }
+}
+
+function goToStrategy(strategy: any) {
+  // 可扩展：跳转到策略详情页（待建）
+  // 暂时复制到回测
+  router.push({
+    path: '/backtest',
+    query: { strategy: strategy.name },
+  })
+}
+
+function copyStrategy(strategy: any) {
+  router.push({
+    path: '/backtest',
+    query: { strategy: strategy.name },
+  })
+}
+
+// 报告相关
+function viewReport(reportId: string) {
+  router.push(`/reports/${reportId}`)
+}
+
+const typeLabels: Record<string, string> = {
+  daily: '日报',
+  weekly: '周报',
+  monthly: '月报',
+}
+
+const statusLabels: Record<string, string> = {
+  pending: '等待中',
+  running: '运行中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+}
+
+const methodLabels: Record<string, string> = {
+  random: '随机搜索',
+  bayesian: '贝叶斯优化',
+}
+
+const metricLabels: Record<string, string> = {
+  sharpe: '夏普比率',
+  total_return: '总收益',
+  max_drawdown: '最大回撤',
 }
 
 onMounted(() => {
-  refreshData()
+  pageView('/dashboard')
+  refreshWorkbench()
+  loadTopStrategies()
 })
 </script>
 
 <style scoped lang="scss">
-.dashboard {
+.dashboard-page {
   padding: 24px;
+  position: relative;
+  isolation: isolate;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -18px -18px auto;
+    height: 300px;
+    z-index: -1;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(88, 121, 255, 0.22), transparent 34%),
+      radial-gradient(circle at 80% 0%, rgba(47, 207, 133, 0.12), transparent 28%),
+      linear-gradient(180deg, rgba(18, 24, 38, 0.94), rgba(13, 18, 29, 0.66));
+    filter: blur(8px);
+    pointer-events: none;
+  }
 }
 
-.dashboard-header {
+.page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 24px;
+  gap: 24px;
+  margin-bottom: 20px;
 
   h1 {
-    margin: 0;
-    font-size: 28px;
+    margin: 6px 0 0;
+    font-size: 30px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .subtitle {
-    margin: 4px 0 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.92);
   }
 }
 
-.header-right {
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8ba8ff;
+}
+
+.subtitle {
+  max-width: 720px;
+  margin: 10px 0 0;
+  color: rgba(255, 255, 255, 0.58);
+  line-height: 1.6;
+}
+
+.header-actions {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.last-updated {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+.sync-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 120px;
+
+  strong {
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+  }
 }
 
-.btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.sync-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.44);
+}
+
+.refresh-btn {
   padding: 10px 16px;
-  border: none;
-  border-radius: 8px;
+  border: 1px solid rgba(122, 162, 255, 0.24);
+  border-radius: 10px;
+  background: rgba(41, 98, 255, 0.16);
+  color: #dfe8ff;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+
+  &:hover:not(:disabled) {
+    background: rgba(41, 98, 255, 0.24);
+    border-color: rgba(122, 162, 255, 0.4);
+  }
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: wait;
+  }
+}
+
+.warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 184, 77, 0.24);
+  border-radius: 12px;
+  background: rgba(255, 184, 77, 0.08);
+  color: rgba(255, 235, 204, 0.88);
+
+  span {
+    color: rgba(255, 235, 204, 0.68);
+  }
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.workbench-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 280px;
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(18, 24, 38, 0.98), rgba(13, 18, 29, 0.98)),
+    rgba(16, 19, 28, 0.92);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.18);
+}
+
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+
+  h2 {
+    margin: 4px 0 0;
+    font-size: 22px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+  }
+}
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.freshness-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+
+  &.fresh { background: #00C853; box-shadow: 0 0 6px rgba(0, 200, 83, 0.6); }
+  &.recent { background: #FFB74D; box-shadow: 0 0 6px rgba(255, 183, 77, 0.5); }
+  &.stale { background: rgba(255, 255, 255, 0.3); }
+}
+
+.card-kicker {
+  font-size: 12px;
+  color: rgba(139, 168, 255, 0.88);
+  letter-spacing: 0.04em;
+}
+
+.card-date {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
+}
+
+.card-footer {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: right;
+}
+
+.data-source {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.card-action-btn {
+  padding: 6px 12px;
+  border: 1px solid rgba(41, 98, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(41, 98, 255, 0.1);
+  color: #9ab7ff;
+  font-size: 12px;
+  cursor: pointer;
   transition: all 0.2s;
+
+  &:hover {
+    background: rgba(41, 98, 255, 0.2);
+    border-color: rgba(41, 98, 255, 0.5);
+  }
 
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
-
-  &.btn-primary {
-    background: #2962FF;
-    color: white;
-
-    &:hover:not(:disabled) {
-      background: #1E53E5;
-    }
-  }
-}
-
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px;
-  background: rgba(26, 26, 26, 0.5);
-  border-radius: 12px;
-
-  p {
-    margin: 16px 0;
-    color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
-  border-top-color: #2962FF;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-
-.card {
-  background: rgba(26, 26, 26, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.card.full-width {
-  grid-column: span 2;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-
-  h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
-  }
 }
 
 .card-link {
+  color: #c6d5ff;
   font-size: 13px;
-  color: #2962FF;
   text-decoration: none;
 
   &:hover {
-    text-decoration: underline;
+    color: #ffffff;
   }
 }
 
-.pattern-list {
-  max-height: 300px;
-  overflow-y: auto;
+.metric-strip {
+  display: grid;
+  gap: 12px;
 }
 
-.empty-state {
-  padding: 40px 20px;
-  text-align: center;
-  color: rgba(255, 255, 255, 0.4);
+.metric-strip--market {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-.pattern-item {
+.metric-strip--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-value {
+  font-size: 26px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.metric-value--small {
+  font-size: 20px;
+}
+
+.metric-value--positive {
+  color: #59d38c;
+}
+
+.metric-value--negative {
+  color: #ff7b7b;
+}
+
+.metric-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.mood-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mood-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition: background 0.2s;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  &:last-child {
-    border-bottom: none;
-  }
+  gap: 12px;
 }
 
-.pattern-info {
+.card-description {
+  margin: 0;
+  min-height: 44px;
+  color: rgba(255, 255, 255, 0.64);
+  line-height: 1.6;
+}
+
+.list-stack {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 10px;
+  margin-top: auto;
 }
 
-.pattern-code {
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.pattern-name {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.pattern-meta {
+.list-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.badge {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-
-  &.bullish {
-    background: rgba(0, 200, 83, 0.15);
-    color: #00C853;
-  }
-
-  &.bearish {
-    background: rgba(255, 23, 68, 0.15);
-    color: #FF1744;
-  }
-
-  &.neutral {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.6);
-  }
-}
-
-.pattern-confidence {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.selection-summary {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  padding: 20px;
-  gap: 20px;
-}
-
-.selection-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.selection-value {
-  font-size: 28px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', monospace;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.selection-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.quick-nav {
-  display: flex;
-  gap: 16px;
-  padding: 20px;
-  overflow-x: auto;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
   text-decoration: none;
-  transition: all 0.2s;
-  min-width: 100px;
+  transition: background 0.2s ease, transform 0.2s ease;
 
   &:hover {
-    background: rgba(41, 98, 255, 0.1);
-    transform: translateY(-2px);
+    background: rgba(41, 98, 255, 0.12);
+    transform: translateY(-1px);
+  }
+
+  strong {
+    display: block;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 15px;
+  }
+
+  span {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 13px;
   }
 }
 
-.nav-icon {
-  font-size: 24px;
+.list-row--static {
+  cursor: default;
+
+  &:hover {
+    transform: none;
+  }
 }
 
-.nav-label {
-  font-size: 13px;
+.row-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.row-note {
   color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
 }
 
-@media (max-width: 1200px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .card.full-width {
-    grid-column: span 1;
-  }
-
-  .selection-summary {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.signal-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
 }
 
-@media (max-width: 768px) {
-  .dashboard {
-    padding: 16px;
-  }
+.signal-badge--bullish {
+  background: rgba(89, 211, 140, 0.14);
+  color: #72e2a1;
+}
 
-  .dashboard-header {
+.signal-badge--neutral {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.signal-badge--bearish {
+  background: rgba(255, 123, 123, 0.14);
+  color: #ff9d9d;
+}
+
+@media (max-width: 1100px) {
+  .page-header {
     flex-direction: column;
-    gap: 16px;
   }
 
-  .header-right {
+  .header-actions {
     width: 100%;
     justify-content: space-between;
   }
 
-  .selection-summary {
+  .sync-meta {
+    align-items: flex-start;
+  }
+
+  .card-grid {
     grid-template-columns: 1fr;
-    gap: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-page {
+    padding: 18px;
   }
 
-  .quick-nav {
-    flex-wrap: wrap;
+  .header-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .nav-item {
-    min-width: calc(50% - 8px);
+  .metric-strip--market,
+  .metric-strip--compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+.empty-hint {
+  text-align: center;
+  padding: 24px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
+}
+
+// 报告列表
+.reports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.report-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  .report-type {
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    min-width: 40px;
+    text-align: center;
+
+    &.daily { background: rgba(33, 150, 243, 0.2); color: #2196F3; }
+    &.weekly { background: rgba(76, 175, 80, 0.2); color: #4CAF50; }
+    &.monthly { background: rgba(156, 39, 176, 0.2); color: #9C27B0; }
+  }
+
+  .report-info {
+    flex: 1;
+    min-width: 0;
+
+    .report-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .report-date {
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      margin-top: 2px;
+    }
+  }
+
+  .report-metric {
+    font-size: 14px;
+    font-weight: 600;
+
+    .positive { color: #00C853; }
+    .negative { color: #FF1744; }
+  }
+}
+
+// 优化任务卡片
+.optimization-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.optimization-job-card {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  &.running {
+    border-left: 3px solid #00C853;
+  }
+
+  &.completed {
+    border-left: 3px solid #2196F3;
+  }
+
+  &.failed {
+    border-left: 3px solid #FF1744;
+  }
+}
+
+.optimization-job-card .job-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+
+  .job-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .job-status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+
+    &.running { background: rgba(0, 200, 83, 0.2); color: #00C853; }
+    &.completed { background: rgba(33, 150, 243, 0.2); color: #2196F3; }
+    &.failed { background: rgba(255, 23, 68, 0.2); color: #FF1744; }
+  }
+}
+
+.optimization-job-card .job-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.optimization-job-card .progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+    transition: width 0.3s;
+  }
+}
+
+.optimization-job-card .best-meta {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  color: var(--color-accent);
 }
 </style>

@@ -48,6 +48,7 @@ config/proxy.txt
 *.db
 *.sqlite
 *.sqlite3
+backups/
 
 # Docker
 .docker/
@@ -67,3 +68,6 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 web/node_modules/
+
+# Runtime logs
+memory/*.jsonl

@@ -1,22 +1,21 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timedelta, date
-from typing import List, Optional
+from datetime import datetime, timedelta
 
-from sqlalchemy import inspect, select, and_, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import inspect, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import is_trading_day, should_skip_market_task
 from app.jobs.tasks.fetch_audit import record_fetch_audit, upsert_fetch_audit
-from app.models.stock_model import Stock, DailyBar
+from app.models.stock_model import DailyBar, Stock
 from app.utils.stock_codes import extract_symbol, normalize_exchange_name, normalize_ts_code
-from core.crawling.eastmoney import EastMoneyCrawler
-from core.crawling.base import AdjustType, ProxyPool
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.base import AdjustType, ProxyPool
+from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,7 @@ TS_CODE_CHILD_TABLES = (
 )
 
 
-def _build_proxy_pool() -> Optional[ProxyPool]:
+def _build_proxy_pool() -> ProxyPool | None:
     if os.getenv("CRAWLER_PROXY_ENABLED", "false").strip().lower() not in {
         "1",
         "true",
@@ -79,18 +78,14 @@ def _should_use_eastmoney_direct(*, exchange: str | None = None, is_etf: bool = 
 
 
 async def _ensure_backfill_state_table(session: AsyncSession) -> None:
-    await session.execute(
-        text(
-            """
+    await session.execute(text("""
             CREATE TABLE IF NOT EXISTS backfill_daily_state (
               ts_code VARCHAR(20) PRIMARY KEY,
               status VARCHAR(20) NOT NULL,
               note TEXT NULL,
               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-            """
-        )
-    )
+            """))
     await session.commit()
 
 
@@ -108,7 +103,9 @@ async def _migrate_legacy_stock_code(
     is_etf: bool,
 ) -> None:
     connection = await session.connection()
-    existing_tables = set(await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names()))
+    existing_tables = set(
+        await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+    )
 
     current = await session.scalar(select(Stock).where(Stock.ts_code == ts_code))
     if current is None:
@@ -146,20 +143,18 @@ async def _migrate_legacy_stock_code(
 
     if "data_fetch_audit" in existing_tables:
         await session.execute(
-            text(
-                """
+            text("""
                 UPDATE data_fetch_audit
                 SET entity_key = :new_ts_code
                 WHERE entity_key = :old_ts_code
-                """
-            ),
+                """),
             {"new_ts_code": ts_code, "old_ts_code": old_ts_code},
         )
 
     await session.delete(legacy_stock)
 
 
-async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = False) -> int:
+async def save_stocks(session: AsyncSession, stocks: list[dict], is_etf: bool = False) -> int:
     """保存股票/ETF列表"""
     count = 0
     for stock in stocks:
@@ -236,7 +231,7 @@ async def save_stocks(session: AsyncSession, stocks: List[dict], is_etf: bool = 
     return count
 
 
-async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict]) -> int:
+async def save_daily_bars(session: AsyncSession, ts_code: str, bars: list[dict]) -> int:
     """保存每日K线数据"""
     values = []
     for bar in bars:
@@ -249,7 +244,7 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict])
         # 解析日期为 date 对象
         try:
             trade_date_dt = datetime.strptime(bar_date, "%Y-%m-%d").date()
-        except:
+        except ValueError:
             trade_date_dt = None
 
         close = bar.get("close", 0) or 0
@@ -326,6 +321,108 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: List[dict])
             existing.pct_chg = item["pct_chg"]
             existing.vol = item["vol"]
             existing.amount = item["amount"]
+        else:
+            session.add(DailyBar(**item))
+        count += 1
+    await session.commit()
+    return count
+
+
+async def save_daily_bars_batch(
+    session: AsyncSession,
+    data: dict[str, list[dict]],
+) -> int:
+    """批量保存多只股票的日线数据（来自 fetch_daily_by_date）。
+
+    data: {ts_code: [bar_dict, ...]}
+    """
+    all_values = []
+    for ts_code, bars in data.items():
+        for bar in bars:
+            bar_date = bar.get("date")
+            if not bar_date:
+                continue
+            date_str = bar_date.replace("-", "")
+            try:
+                trade_date_dt = datetime.strptime(bar_date, "%Y-%m-%d").date()
+            except ValueError:
+                trade_date_dt = None
+
+            close = bar.get("close", 0) or 0
+            change = bar.get("change", 0) or 0
+            pre_close = bar.get("pre_close")
+            if pre_close in (None, ""):
+                pre_close = close - change
+
+            all_values.append(
+                {
+                    "ts_code": ts_code,
+                    "trade_date": date_str,
+                    "trade_date_dt": trade_date_dt,
+                    "open": bar.get("open", 0) or 0,
+                    "high": bar.get("high", 0) or 0,
+                    "low": bar.get("low", 0) or 0,
+                    "close": close,
+                    "pre_close": pre_close or 0,
+                    "change": change,
+                    "pct_chg": bar.get("change_pct", 0) or 0,
+                    "vol": bar.get("volume", 0) or 0,
+                    "amount": bar.get("amount", 0) or 0,
+                }
+            )
+
+    if not all_values:
+        return 0
+
+    # 分批写入，每批 2000 行
+    batch_size = 2000
+    total = 0
+    for i in range(0, len(all_values), batch_size):
+        chunk = all_values[i : i + batch_size]
+        global _supports_daily_bar_upsert
+        if _supports_daily_bar_upsert:
+            daily_bar_insert = insert(DailyBar)
+            stmt = daily_bar_insert.values(chunk).on_conflict_do_update(
+                constraint="uq_daily_bars_ts_code_trade_date",
+                set_={
+                    "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
+                    "open": daily_bar_insert.excluded.open,
+                    "high": daily_bar_insert.excluded.high,
+                    "low": daily_bar_insert.excluded.low,
+                    "close": daily_bar_insert.excluded.close,
+                    "pre_close": daily_bar_insert.excluded.pre_close,
+                    "change": daily_bar_insert.excluded.change,
+                    "pct_chg": daily_bar_insert.excluded.pct_chg,
+                    "vol": daily_bar_insert.excluded.vol,
+                    "amount": daily_bar_insert.excluded.amount,
+                },
+            )
+            try:
+                await session.execute(stmt)
+                total += len(chunk)
+            except SQLAlchemyError as exc:
+                await session.rollback()
+                _supports_daily_bar_upsert = False
+                logger.warning("batch upsert 不可用，降级为逐行写入: %s", exc)
+
+    if total > 0:
+        await session.commit()
+        return total
+
+    # 降级：逐行写入
+    count = 0
+    for item in all_values:
+        result = await session.execute(
+            select(DailyBar).where(
+                DailyBar.ts_code == item["ts_code"],
+                DailyBar.trade_date == item["trade_date"],
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in item.items():
+                if k != "ts_code":
+                    setattr(existing, k, v)
         else:
             session.add(DailyBar(**item))
         count += 1
@@ -429,7 +526,7 @@ async def _fetch_bars_with_fallback(
     max_retries: int = 3,
     exchange: str | None = None,
     is_etf: bool = False,
-) -> tuple[List[dict], str, str, str]:
+) -> tuple[list[dict], str, str, str]:
     bars = []
     source = "tushare"
     last_error = None
@@ -612,56 +709,84 @@ async def _fetch_single_stock(
 
 
 async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
-    """抓取并保存K线数据"""
-    proxy_pool = _build_proxy_pool()
-    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
-    baostock_provider = BaoStockProvider(proxy_pool=proxy_pool)
+    """抓取并保存K线数据
+
+    优化策略：
+    - Tushare 走批量接口（按日期，一次全市场）
+    - Tushare 未覆盖的股票降级到 EastMoney / BaoStock 逐只补
+    """
     tushare_provider = TushareProvider()
 
-    end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(days=days)
 
     async with async_session_factory() as session:
-        result = await session.execute(
-            select(Stock).where(Stock.list_status == "L").order_by(Stock.ts_code)
+        # 构建交易日列表（简单遍历，非交易日 Tushare 返回空自动跳过）
+        from datetime import date as date_type
+
+        trading_days = []
+        current = start_dt.date()
+        end_date = end_dt.date()
+        while current <= end_date:
+            # 周末跳过
+            if current.weekday() < 5:
+                trading_days.append(current.strftime("%Y%m%d"))
+            current += date_type.resolution * 1  # +1 day via timedelta trick
+
+        # 由于 timedelta trick 不好用，改用标准方式
+        from datetime import timedelta as td
+
+        trading_days = []
+        current = start_dt.date()
+        while current <= end_date:
+            if current.weekday() < 5:
+                trading_days.append(current.strftime("%Y%m%d"))
+            current += td(days=1)
+
+        logger.info(
+            "开始批量抓取日线数据: %d 个交易日 (%s ~ %s)",
+            len(trading_days),
+            trading_days[0] if trading_days else "?",
+            trading_days[-1] if trading_days else "?",
         )
-        stocks = result.scalars().all()
-        total = len(stocks)
-        logger.info(f"开始抓取 {total} 只股票的K线数据，并发数: {concurrency}")
 
-        semaphore = asyncio.Semaphore(concurrency)
+        total_saved = 0
+        total_days_ok = 0
 
-        tasks = [
-            _fetch_single_stock(
-                semaphore=semaphore,
-                tushare_provider=tushare_provider,
-                baostock_provider=baostock_provider,
-                em_crawler=em_crawler,
-                stock=stock,
-                start_date=start_date,
-                end_date=end_date,
-                idx=idx,
-                total=total,
-            )
-            for idx, stock in enumerate(stocks, 1)
-        ]
+        for td_str in trading_days:
+            try:
+                batch_data = await tushare_provider.fetch_daily_by_date(td_str)
+                if batch_data:
+                    count = await save_daily_bars_batch(session, batch_data)
+                    total_saved += count
+                    total_days_ok += 1
+                    logger.info(
+                        "[%s] Tushare 批量写入 %d 只股票 (%d 条)",
+                        td_str,
+                        len(batch_data),
+                        count,
+                    )
+                else:
+                    logger.debug("[%s] Tushare 批量无数据（非交易日？）", td_str)
+            except Exception as exc:
+                logger.error("[%s] Tushare 批量抓取异常: %s", td_str, exc)
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            # 每天之间间隔 0.5s，避免打爆网关
+            await asyncio.sleep(0.5)
 
-        success = sum(1 for r in results if isinstance(r, tuple) and r[2])
-        failed = total - success
-        logger.info(f"抓取完成: 成功 {success}, 失败 {failed}")
-
-    await em_crawler.close()
+        logger.info(
+            "批量抓取完成: %d 个交易日成功，共写入 %d 条日线",
+            total_days_ok,
+            total_saved,
+        )
 
 
 async def _get_backfill_targets(
     session: AsyncSession, start: str, end: str, batch_size: int
-) -> List[dict]:
+) -> list[dict]:
     await _ensure_backfill_state_table(session)
 
-    query = text(
-        """
+    query = text("""
         SELECT s.*
         FROM stocks s
         WHERE s.list_status = 'L'
@@ -685,8 +810,7 @@ async def _get_backfill_targets(
           )
         ORDER BY s.ts_code
         LIMIT :limit
-        """
-    )
+        """)
     result = await session.execute(query, {"start": start, "end": end, "limit": batch_size})
     rows = result.mappings().all()
     return [dict(row) for row in rows]
@@ -695,8 +819,7 @@ async def _get_backfill_targets(
 async def _get_backfill_progress(session: AsyncSession, start: str, end: str) -> tuple[int, int]:
     await _ensure_backfill_state_table(session)
 
-    total_q = text(
-        """
+    total_q = text("""
         SELECT COUNT(*)
         FROM stocks s
         WHERE s.list_status = 'L'
@@ -706,10 +829,8 @@ async def _get_backfill_progress(session: AsyncSession, start: str, end: str) ->
                 OR s.delist_date = ''
                 OR s.delist_date >= :start
               )
-        """
-    )
-    covered_q = text(
-        """
+        """)
+    covered_q = text("""
         SELECT COUNT(DISTINCT db.ts_code)
         FROM daily_bars db
         JOIN stocks s ON s.ts_code = db.ts_code
@@ -721,24 +842,20 @@ async def _get_backfill_progress(session: AsyncSession, start: str, end: str) ->
                 OR s.delist_date = ''
                 OR s.delist_date >= :start
               )
-        """
-    )
-    state_q = text(
-        """
+        """)
+    state_q = text("""
         SELECT COUNT(*)
         FROM backfill_daily_state
         WHERE status IN ('done', 'needs_fallback', 'nodata')
-        """
-    )
+        """)
     total = (await session.execute(total_q, {"start": start, "end": end})).scalar() or 0
     covered = (await session.execute(covered_q, {"start": start, "end": end})).scalar() or 0
     marked = (await session.execute(state_q)).scalar() or 0
     return int(total), int(max(covered, marked))
 
 
-async def _get_fallback_targets(session: AsyncSession, batch_size: int) -> List[dict]:
-    query = text(
-        """
+async def _get_fallback_targets(session: AsyncSession, batch_size: int) -> list[dict]:
+    query = text("""
         SELECT s.*
         FROM stocks s
         JOIN backfill_daily_state st ON st.ts_code = s.ts_code
@@ -746,8 +863,7 @@ async def _get_fallback_targets(session: AsyncSession, batch_size: int) -> List[
           AND s.list_status = 'L'
         ORDER BY s.ts_code
         LIMIT :limit
-        """
-    )
+        """)
     result = await session.execute(query, {"limit": batch_size})
     rows = result.mappings().all()
     return [dict(row) for row in rows]
@@ -761,8 +877,8 @@ async def _fetch_bars_from_fallback(
     end_date: str,
     adjust: AdjustType,
     max_retries: int = 3,
-) -> tuple[List[dict], str, str]:
-    bars: List[dict] = []
+) -> tuple[list[dict], str, str]:
+    bars: list[dict] = []
     last_error = None
 
     for attempt in range(max_retries):
@@ -856,14 +972,12 @@ async def run_historical_backfill() -> bool:
                         note=f"rows={count}",
                     )
                     await session.execute(
-                        text(
-                            """
+                        text("""
                             INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                             VALUES (:ts_code, 'done', :note, NOW())
                             ON CONFLICT (ts_code)
                             DO UPDATE SET status='done', note=:note, updated_at=NOW()
-                            """
-                        ),
+                            """),
                         {"ts_code": stock["ts_code"], "note": f"rows={count},source={source}"},
                     )
                     await session.commit()
@@ -887,14 +1001,12 @@ async def run_historical_backfill() -> bool:
                         note=note,
                     )
                     await session.execute(
-                        text(
-                            """
+                        text("""
                             INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                             VALUES (:ts_code, :status, :note, NOW())
                             ON CONFLICT (ts_code)
                             DO UPDATE SET status=:status, note=:note, updated_at=NOW()
-                            """
-                        ),
+                            """),
                         {"ts_code": stock["ts_code"], "status": status, "note": note},
                     )
                     await session.commit()
@@ -921,14 +1033,12 @@ async def run_historical_backfill() -> bool:
                     note=f"unexpected task error: {exc}",
                 )
                 await session.execute(
-                    text(
-                        """
+                    text("""
                         INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                         VALUES (:ts_code, 'needs_fallback', :note, NOW())
                         ON CONFLICT (ts_code)
                         DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
-                        """
-                    ),
+                        """),
                     {"ts_code": stock["ts_code"], "note": f"unexpected task error: {exc}"},
                 )
                 await session.commit()
@@ -941,8 +1051,12 @@ async def run_historical_backfill() -> bool:
 async def run_historical_fallback_backfill() -> bool:
     start = os.getenv("BACKFILL_START_DATE", "20200101")
     end = os.getenv("BACKFILL_END_DATE", "20251231")
-    batch_size = int(os.getenv("FALLBACK_BACKFILL_BATCH_SIZE", os.getenv("BACKFILL_BATCH_SIZE", "100")))
-    sleep_seconds = float(os.getenv("FALLBACK_BACKFILL_ITEM_SLEEP", os.getenv("BACKFILL_ITEM_SLEEP", "0.05")))
+    batch_size = int(
+        os.getenv("FALLBACK_BACKFILL_BATCH_SIZE", os.getenv("BACKFILL_BATCH_SIZE", "100"))
+    )
+    sleep_seconds = float(
+        os.getenv("FALLBACK_BACKFILL_ITEM_SLEEP", os.getenv("BACKFILL_ITEM_SLEEP", "0.05"))
+    )
 
     proxy_pool = _build_proxy_pool()
     em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
@@ -950,7 +1064,9 @@ async def run_historical_fallback_backfill() -> bool:
 
     async with async_session_factory() as session:
         await _ensure_backfill_state_table(session)
-        pending_q = text("SELECT COUNT(*) FROM backfill_daily_state WHERE status = 'needs_fallback'")
+        pending_q = text(
+            "SELECT COUNT(*) FROM backfill_daily_state WHERE status = 'needs_fallback'"
+        )
         pending = (await session.execute(pending_q)).scalar() or 0
         logger.info("降级补偿待处理: %s", pending)
         if pending == 0:
@@ -990,14 +1106,12 @@ async def run_historical_fallback_backfill() -> bool:
                         note=f"rows={count}",
                     )
                     await session.execute(
-                        text(
-                            """
+                        text("""
                             INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                             VALUES (:ts_code, 'done', :note, NOW())
                             ON CONFLICT (ts_code)
                             DO UPDATE SET status='done', note=:note, updated_at=NOW()
-                            """
-                        ),
+                            """),
                         {"ts_code": stock["ts_code"], "note": f"rows={count},source={source}"},
                     )
                     await session.commit()
@@ -1021,14 +1135,12 @@ async def run_historical_fallback_backfill() -> bool:
                         note=note,
                     )
                     await session.execute(
-                        text(
-                            """
+                        text("""
                             INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                             VALUES (:ts_code, 'needs_fallback', :note, NOW())
                             ON CONFLICT (ts_code)
                             DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
-                            """
-                        ),
+                            """),
                         {"ts_code": stock["ts_code"], "note": note},
                     )
                     await session.commit()
@@ -1054,14 +1166,12 @@ async def run_historical_fallback_backfill() -> bool:
                     note=f"unexpected fallback error: {exc}",
                 )
                 await session.execute(
-                    text(
-                        """
+                    text("""
                         INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
                         VALUES (:ts_code, 'needs_fallback', :note, NOW())
                         ON CONFLICT (ts_code)
                         DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
-                        """
-                    ),
+                        """),
                     {"ts_code": stock["ts_code"], "note": f"unexpected fallback error: {exc}"},
                 )
                 await session.commit()

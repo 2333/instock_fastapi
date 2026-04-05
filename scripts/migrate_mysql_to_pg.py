@@ -35,14 +35,31 @@ def load_config():
         return yaml.safe_load(f)
 
 
+def _get_db_config(config):
+    # Support both the legacy `mysql` key and the current `database` key.
+    db_config = config.get("mysql") or config.get("database")
+    if not db_config:
+        raise KeyError("config.yaml must define either a `mysql` or `database` section")
+    return db_config
+
+
+def _get_env_or_config(env_key: str, config_value, default=None):
+    value = os.getenv(env_key)
+    if value not in (None, ""):
+        return value
+    if config_value not in (None, ""):
+        return config_value
+    return default
+
+
 def get_mysql_connection(config):
-    db_config = config["mysql"]
+    db_config = _get_db_config(config)
     return pymysql.connect(
-        host=db_config["host"],
-        port=db_config["port"],
-        user=db_config["user"],
-        password=db_config["password"],
-        database=db_config["database"],
+        host=_get_env_or_config("MYSQL_HOST", db_config.get("host"), "localhost"),
+        port=int(_get_env_or_config("MYSQL_PORT", db_config.get("port"), 3306)),
+        user=_get_env_or_config("MYSQL_USER", db_config.get("user")),
+        password=_get_env_or_config("MYSQL_PASSWORD", db_config.get("password")),
+        database=_get_env_or_config("MYSQL_DATABASE", db_config.get("database")),
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )

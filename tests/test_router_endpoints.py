@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.build_info import get_build_info
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_provider
 from app.database import get_db
 from app.main import app
 
@@ -70,6 +70,31 @@ async def test_backtest_endpoints(client, current_user_override):
             new=AsyncMock(return_value={"id": "bt-1", "status": "success"}),
         ),
         patch(
+            "app.api.routers.backtest_router.BacktestService.list_results",
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "id": "12",
+                        "name": "demo",
+                        "start_date": "20240101",
+                        "end_date": "20240131",
+                        "initial_capital": 100000.0,
+                        "final_capital": 108000.0,
+                        "total_return": 8.0,
+                        "annual_return": 11.5,
+                        "max_drawdown": -3.2,
+                        "sharpe_ratio": 1.12,
+                        "win_rate": 100.0,
+                        "total_trades": 1,
+                        "strategy": "ma_crossover",
+                        "code": "000001",
+                        "stock_name": "平安银行",
+                        "created_at": "2024-01-31T08:30:00",
+                    }
+                ]
+            ),
+        ),
+        patch(
             "app.api.routers.backtest_router.BacktestService.get_result",
             new=AsyncMock(return_value={"id": "bt-1", "status": "done"}),
         ),
@@ -78,10 +103,15 @@ async def test_backtest_endpoints(client, current_user_override):
             "/api/v1/backtest",
             json={"strategy": "enter", "start_date": "20240101", "end_date": "20240131"},
         )
+        history_response = await client.get("/api/v1/backtest/history")
         get_response = await client.get("/api/v1/backtest/bt-1")
 
     assert run_response.status_code == 200
     assert run_response.json()["id"] == "bt-1"
+    assert history_response.status_code == 200
+    assert history_response.json()["success"] is True
+    assert history_response.json()["data"][0]["id"] == "12"
+    assert history_response.json()["data"][0]["code"] == "000001"
     assert get_response.json()["status"] == "done"
 
 
@@ -150,6 +180,24 @@ async def test_indicator_and_market_endpoints(client):
             "app.api.routers.market_router.MarketDataService.get_north_bound_funds",
             new=AsyncMock(return_value=[{"value": 123}]),
         ),
+        patch(
+            "app.api.routers.market_router.MarketDataService.get_task_health",
+            new=AsyncMock(
+                return_value={
+                    "baseline_trade_date": "20240102",
+                    "datasets": [{"dataset": "daily_bars", "latest_trade_date": "20240102", "baseline_trade_date": "20240102", "current": True}],
+                    "alerts": [
+                        {
+                            "task_name": "fetch_fund_flow",
+                            "entity_type": "stock_fund_flow",
+                            "entity_key": "ALL",
+                            "status": "needs_fallback",
+                        }
+                    ],
+                    "alert_count": 1,
+                }
+            ),
+        ),
     ):
         indicators = await client.get("/api/v1/indicators", params={"code": "000001"})
         latest_indicator = await client.get("/api/v1/indicators/latest", params={"code": "000001"})
@@ -157,6 +205,7 @@ async def test_indicator_and_market_endpoints(client):
         block_trades = await client.get("/api/v1/market/block-trades")
         lhb = await client.get("/api/v1/market/lhb")
         north_bound = await client.get("/api/v1/market/north-bound")
+        task_health = await client.get("/api/v1/market/task-health")
 
     assert indicators.status_code == 200
     assert indicators.json()[0]["code"] == "000001"
@@ -165,6 +214,10 @@ async def test_indicator_and_market_endpoints(client):
     assert block_trades.json()[0]["code"] == "000001"
     assert lhb.json()[0]["code"] == "000001"
     assert north_bound.json()[0]["value"] == 123
+    assert task_health.status_code == 200
+    assert task_health.json()["alert_count"] == 1
+    assert task_health.json()["datasets"][0]["current"] is True
+    assert task_health.json()["baseline_trade_date"] == "20240102"
 
 
 @pytest.mark.asyncio
@@ -239,23 +292,98 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         yield fake_db
 
     app.dependency_overrides[get_db] = override_router_db
+    app.dependency_overrides[get_provider] = lambda: None  # 强制回退到父类实现以便patch生效
 
     try:
         with (
             patch(
                 "app.api.routers.selection_router.SelectionService.get_conditions",
-                return_value=[{"name": "low_atr"}],
+                return_value={
+                    "markets": ["沪市", "深市", "创业板", "科创板"],
+                    "indicators": ["macd", "kdj", "boll", "rsi"],
+                    "strategies": ["放量上涨", "均线多头", "停机坪"],
+                },
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.run_selection",
-                new=AsyncMock(return_value=[{"code": "000001"}]),
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "ts_code": "000001.SZ",
+                            "code": "000001",
+                            "stock_name": "平安银行",
+                            "trade_date": "20240102",
+                            "date": "20240102",
+                            "close": 10.6,
+                            "change_rate": 2.5,
+                            "amount": 300000000.0,
+                            "score": 15.5,
+                            "signal": "buy",
+                            "reason_summary": "Change >= 1.50%; Market = sz",
+                            "evidence": [
+                                {
+                                    "key": "change_rate",
+                                    "label": "Daily change",
+                                    "value": 2.5,
+                                    "operator": ">=",
+                                    "condition": 1.5,
+                                    "matched": True,
+                                },
+                                {
+                                    "key": "market",
+                                    "label": "Market",
+                                    "value": "sz",
+                                    "operator": "=",
+                                    "condition": "sz",
+                                    "matched": True,
+                                },
+                            ],
+                            "reason": {
+                                "summary": "Change >= 1.50%; Market = sz",
+                                "evidence": [
+                                    {
+                                        "key": "change_rate",
+                                        "label": "Daily change",
+                                        "value": 2.5,
+                                        "operator": ">=",
+                                        "condition": 1.5,
+                                        "matched": True,
+                                    },
+                                    {
+                                        "key": "market",
+                                        "label": "Market",
+                                        "value": "sz",
+                                        "operator": "=",
+                                        "condition": "sz",
+                                        "matched": True,
+                                    },
+                                ],
+                            },
+                        }
+                    ]
+                ),
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.get_history",
-                new=AsyncMock(return_value=[{"code": "000001"}]),
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "selection_id": "sel-1",
+                            "ts_code": "000001.SZ",
+                            "code": "000001",
+                            "stock_name": "平安银行",
+                            "trade_date": "20240102",
+                            "date": "20240102",
+                            "score": 15.5,
+                            "signal": "hold",
+                            "reason_summary": "Historical screening record sel-1",
+                        }
+                    ]
+                ),
             ),
         ):
             conditions = await client.get("/api/v1/selection/conditions")
+            screening_metadata = await client.get("/api/v1/screening/metadata")
             my_conditions = await client.get("/api/v1/selection/my-conditions")
             create_response = await client.post(
                 "/api/v1/selection/my-conditions",
@@ -266,18 +394,43 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
                 json={"name": "低回撤2", "category": "technical", "description": "desc"},
             )
             delete_response = await client.delete("/api/v1/selection/my-conditions/1")
-            run_response = await client.post("/api/v1/selection", json={"rsi": 30})
+            run_response = await client.post(
+                "/api/v1/selection", json={"conditions": {"changeMin": 1.5, "market": "sz"}}
+            )
+            screening_run_response = await client.post(
+                "/api/v1/screening/run",
+                json={"filters": {"changeMin": 1.5}, "scope": {"market": "sz", "limit": 50}},
+            )
             history_response = await client.get("/api/v1/selection/history")
+            screening_history_response = await client.get("/api/v1/screening/history")
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_provider, None)
 
-    assert conditions.json()[0]["name"] == "low_atr"
+    assert conditions.json()["markets"] == ["沪市", "深市", "创业板", "科创板"]
+    assert screening_metadata.json()["data"]["filter_fields"][0]["key"] == "priceMin"
     assert my_conditions.json()[0]["name"] == "低回撤"
     assert create_response.status_code == 200
     assert update_response.json()["name"] == "低回撤2"
     assert delete_response.json()["status"] == "success"
-    assert run_response.json()[0]["code"] == "000001"
-    assert history_response.json()[0]["code"] == "000001"
+    assert run_response.json()["success"] is True
+    assert run_response.json()["data"][0]["code"] == "000001"
+    assert run_response.json()["data"][0]["signal"] == "buy"
+    assert run_response.json()["data"][0]["reason_summary"] == "Change >= 1.50%; Market = sz"
+    assert screening_run_response.json()["success"] is True
+    assert screening_run_response.json()["data"]["total"] == 1
+    assert screening_run_response.json()["data"]["query"]["scope"]["limit"] == 50
+    assert screening_run_response.json()["data"]["items"][0]["evidence"][0]["key"] == "change_rate"
+    assert (
+        screening_run_response.json()["data"]["items"][0]["reason"]["evidence"][1]["condition"]
+        == "sz"
+    )
+    assert history_response.json()["success"] is True
+    assert history_response.json()["data"][0]["code"] == "000001"
+    assert history_response.json()["data"][0]["signal"] == "hold"
+    assert history_response.json()["data"][0]["reason_summary"] == "Historical screening record sel-1"
+    assert screening_history_response.json()["data"]["total"] == 1
+    assert screening_history_response.json()["data"]["items"][0]["code"] == "000001"
 
 
 @pytest.mark.asyncio
@@ -304,6 +457,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
         ),
         add=Mock(),
         commit=AsyncMock(),
+        flush=AsyncMock(),  # Add flush method
         refresh=AsyncMock(side_effect=refresh_strategy),
         delete=AsyncMock(),
     )
@@ -320,6 +474,25 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
                 return_value=[{"name": "enter", "display_name": "放量上涨"}],
             ),
             patch(
+                "app.api.routers.strategy_router.StrategyService.get_strategy_templates",
+                return_value=[
+                    {
+                        "name": "ma_crossover",
+                        "display_name": "MA 交叉",
+                        "description": "短期均线上穿长期均线时生成买入信号。",
+                        "default_params": {"fast_ma": 5, "slow_ma": 20},
+                        "parameters": [
+                            {
+                                "name": "fast_ma",
+                                "label": "快速 MA",
+                                "type": "number",
+                                "default": 5,
+                            }
+                        ],
+                    }
+                ],
+            ),
+            patch(
                 "app.api.routers.strategy_router.StrategyService.run_strategy",
                 new=AsyncMock(return_value={"status": "success", "strategy": "enter"}),
             ),
@@ -329,6 +502,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
             ),
         ):
             strategy_list = await client.get("/api/v1/strategies")
+            strategy_templates = await client.get("/api/v1/strategies/templates")
             my_strategies = await client.get("/api/v1/strategies/my")
             create_response = await client.post(
                 "/api/v1/strategies/my",
@@ -347,9 +521,119 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
         app.dependency_overrides.pop(get_db, None)
 
     assert strategy_list.json()[0]["name"] == "enter"
+    assert strategy_templates.json()[0]["default_params"]["fast_ma"] == 5
     assert my_strategies.json()[0]["name"] == "enter"
     assert create_response.status_code == 200
     assert update_response.json()["name"] == "enter-2"
     assert delete_response.json()["status"] == "success"
     assert run_response.json()["strategy"] == "enter"
     assert results_response.json()[0]["strategy_name"] == "enter"
+
+
+@pytest.mark.asyncio
+async def test_strategy_create_persists_params_payload(client, current_user_override):
+    async def refresh_strategy(obj):
+        if getattr(obj, "id", None) is None:
+            obj.id = 9
+        if getattr(obj, "user_id", None) is None:
+            obj.user_id = 1
+
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
+        add=Mock(),
+        commit=AsyncMock(),
+        flush=AsyncMock(),  # Add flush method
+        refresh=AsyncMock(side_effect=refresh_strategy),
+    )
+
+    async def override_router_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = override_router_db
+
+    try:
+        response = await client.post(
+            "/api/v1/strategies/my",
+            json={
+                "name": "ma_crossover-600519",
+                "description": "saved from backtest",
+                "params": {
+                    "strategy_type": "ma_crossover",
+                    "stock_code": "600519",
+                    "strategy_params": {"fast_ma": 5, "slow_ma": 20},
+                },
+                "is_active": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    saved_strategy = fake_db.add.call_args.args[0]
+    assert saved_strategy.name == "ma_crossover-600519"
+    assert saved_strategy.params["source"] == "backtest"
+    assert saved_strategy.params["template_name"] == "ma_crossover"
+    assert saved_strategy.params["backtest_config"]["strategy_type"] == "ma_crossover"
+    assert saved_strategy.params["backtest_config"]["stock_code"] == "600519"
+    assert saved_strategy.params["entry_rules"]["mode"] == "template_signal"
+    assert saved_strategy.params["exit_rules"]["mode"] == "fixed_risk"
+    assert saved_strategy.params["exit_rules"]["stop_loss_pct"] is None
+    assert saved_strategy.params["strategy_params"]["fast_ma"] == 5
+    assert "strategy_type" not in saved_strategy.params
+
+
+@pytest.mark.asyncio
+async def test_strategy_update_normalizes_flat_backtest_payload(client, current_user_override):
+    existing_strategy = SimpleNamespace(
+        id=9,
+        user_id=1,
+        name="ma_crossover-600519",
+        description="old",
+        params={"source": "manual"},
+        is_active=True,
+    )
+
+    async def refresh_strategy(obj):
+        return obj
+
+    fake_db = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[
+                SimpleNamespace(scalar_one_or_none=lambda: existing_strategy),
+                SimpleNamespace(scalar_one_or_none=lambda: existing_strategy),
+            ]
+        ),
+        delete=Mock(),
+        commit=AsyncMock(),
+        refresh=AsyncMock(side_effect=refresh_strategy),
+    )
+
+    async def override_router_db():
+        yield fake_db
+
+    app.dependency_overrides[get_db] = override_router_db
+
+    try:
+        response = await client.put(
+            "/api/v1/strategies/my/9",
+            json={
+                "params": {
+                    "strategy_type": "rsi_oversold",
+                    "stock_code": "000001",
+                    "period": "1y",
+                    "initial_capital": 200000,
+                    "strategy_params": {"rsi_period": 14, "oversold_level": 30},
+                },
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+    assert response.status_code == 200
+    assert existing_strategy.params["source"] == "backtest"
+    assert existing_strategy.params["template_name"] == "rsi_oversold"
+    assert existing_strategy.params["backtest_config"]["strategy_type"] == "rsi_oversold"
+    assert existing_strategy.params["backtest_config"]["stock_code"] == "000001"
+    assert existing_strategy.params["entry_rules"]["mode"] == "template_signal"
+    assert existing_strategy.params["exit_rules"]["mode"] == "fixed_risk"
+    assert existing_strategy.params["strategy_params"]["rsi_period"] == 14

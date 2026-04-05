@@ -40,6 +40,9 @@ class TushareProvider:
         self.config = config or TushareConfig()
         self.token = (self.config.token or os.getenv("TUSHARE_TOKEN") or "").strip()
         self.http_url = os.getenv("TUSHARE_HTTP_URL", "http://lianghua.nanyangqiankun.top")
+        self._compat_http_url = os.getenv(
+            "TUSHARE_COMPAT_HTTP_URL", "http://lianghua.nanyangqiankun.top"
+        )
         self._compat_enabled = False
         requested_inflight = max(1, int(self.config.max_inflight))
         class_inflight = max(1, int(os.getenv("TUSHARE_MAX_INFLIGHT", "1")))
@@ -86,6 +89,121 @@ class TushareProvider:
     async def fetch_block_trade(self, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_block_trade_sync, trade_date)
 
+    async def fetch_daily_by_date(
+        self,
+        trade_date: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """按日期批量获取全市场日线数据（一次 API 调用）。
+
+        返回 {ts_code: [bar_dict, ...]} 结构。
+        单日数据约 5000-7000 行，在 Tushare 6000 条/次限制内，
+        如超出则自动分页。
+        """
+        return await asyncio.to_thread(self._fetch_daily_by_date_sync, trade_date)
+
+    async def fetch_daily_batch(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """按日期范围批量获取全市场日线数据。
+
+        逐日调用 fetch_daily_by_date，每天一次 API 调用。
+        返回 {ts_code: [bar_dict, ...]} 结构。
+        """
+        return await asyncio.to_thread(
+            self._fetch_daily_batch_sync, start_date, end_date
+        )
+
+    def _fetch_daily_by_date_sync(
+        self,
+        trade_date: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        pro = self._get_pro()
+        if not pro:
+            return {}
+        td = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+
+        try:
+            df = self._call_pro("daily", trade_date=td)
+        except Exception as exc:
+            logger.warning("Tushare daily 批量抓取失败 date=%s: %s", td, exc)
+            return {}
+
+        if df is None or df.empty:
+            return {}
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for _, row in df.iterrows():
+            ts_code = str(row.get("ts_code") or "")
+            if not ts_code:
+                continue
+            bar = self._row_to_bar(row)
+            if bar:
+                result.setdefault(ts_code, []).append(bar)
+        return result
+
+    def _fetch_daily_batch_sync(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        start = self._to_ymd(start_date, default="19900101")
+        end = self._to_ymd(end_date, default="20991231")
+
+        # 生成日期列表（仅交易日，由调用方保证或 Tushare 返回空）
+        from datetime import datetime, timedelta
+
+        try:
+            d0 = datetime.strptime(start, "%Y%m%d")
+            d1 = datetime.strptime(end, "%Y%m%d")
+        except ValueError:
+            logger.warning("日期格式错误: start=%s end=%s", start, end)
+            return {}
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        current = d0
+        while current <= d1:
+            td = current.strftime("%Y%m%d")
+            day_data = self._fetch_daily_by_date_sync(td)
+            for ts_code, bars in day_data.items():
+                result.setdefault(ts_code, []).extend(bars)
+            current += timedelta(days=1)
+
+        # 按 ts_code 内的日期排序
+        for bars in result.values():
+            bars.sort(key=lambda b: b.get("date", ""))
+
+        return result
+
+    def _row_to_bar(self, row: Any) -> Optional[Dict[str, Any]]:
+        """将 Tushare daily 行转换为标准 bar dict。"""
+        trade_date = str(row.get("trade_date") or "")
+        if len(trade_date) != 8:
+            return None
+        close = self._to_float(row.get("close")) or 0.0
+        pre_close = self._to_float(row.get("pre_close"))
+        change = self._to_float(row.get("change"))
+        if pre_close is None:
+            pre_close = close - (change or 0.0)
+        if change is None:
+            change = close - pre_close
+        pct = self._to_float(row.get("pct_chg"))
+        if pct is None and pre_close not in (None, 0):
+            pct = (change / pre_close) * 100
+        return {
+            "date": f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}",
+            "open": self._to_float(row.get("open")) or 0.0,
+            "high": self._to_float(row.get("high")) or 0.0,
+            "low": self._to_float(row.get("low")) or 0.0,
+            "close": close,
+            "pre_close": pre_close or 0.0,
+            "change": change or 0.0,
+            "change_pct": pct or 0.0,
+            "volume": self._to_float(row.get("vol")) or 0.0,
+            "amount": self._to_float(row.get("amount")) or 0.0,
+        }
+
     async def is_trade_date(self, trade_date: str) -> bool:
         return await asyncio.to_thread(self._is_trade_date_sync, trade_date)
 
@@ -109,9 +227,11 @@ class TushareProvider:
         """兼容部分渠道 token：注入私有 token 与自定义网关地址后重试。"""
         try:
             pro._DataApi__token = self.token
-            pro._DataApi__http_url = self.http_url
+            pro._DataApi__http_url = self._compat_http_url
             self._compat_enabled = True
-            logger.warning("已启用 Tushare 兼容模式，http_url=%s", self.http_url)
+            logger.warning(
+                "已启用 Tushare 兼容模式，http_url=%s", self._compat_http_url
+            )
         except Exception as exc:
             logger.error("启用 Tushare 兼容模式失败: %s", exc)
 
@@ -238,33 +358,9 @@ class TushareProvider:
 
         rows: List[Dict[str, Any]] = []
         for _, row in df.iterrows():
-            trade_date = str(row.get("trade_date") or "")
-            if len(trade_date) != 8:
-                continue
-            close = self._to_float(row.get("close")) or 0.0
-            pre_close = self._to_float(row.get("pre_close"))
-            change = self._to_float(row.get("change"))
-            if pre_close is None:
-                pre_close = close - (change or 0.0)
-            if change is None:
-                change = close - pre_close
-            pct = self._to_float(row.get("pct_chg"))
-            if pct is None and pre_close not in (None, 0):
-                pct = (change / pre_close) * 100
-            rows.append(
-                {
-                    "date": f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}",
-                    "open": self._to_float(row.get("open")) or 0.0,
-                    "high": self._to_float(row.get("high")) or 0.0,
-                    "low": self._to_float(row.get("low")) or 0.0,
-                    "close": close,
-                    "pre_close": pre_close or 0.0,
-                    "change": change or 0.0,
-                    "change_pct": pct or 0.0,
-                    "volume": self._to_float(row.get("vol")) or 0.0,
-                    "amount": self._to_float(row.get("amount")) or 0.0,
-                }
-            )
+            bar = self._row_to_bar(row)
+            if bar:
+                rows.append(bar)
         return rows
 
     def _fetch_fund_flow_rank_sync(self, trade_date: str) -> List[Dict[str, Any]]:

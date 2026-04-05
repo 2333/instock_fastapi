@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, List
+
 from app.database import get_db
 from app.schemas.stock_schema import EtfSpotResponse
 from app.services.stock_service import StockService
@@ -8,9 +8,9 @@ from app.services.stock_service import StockService
 router = APIRouter()
 
 
-@router.get("/etf", response_model=List[EtfSpotResponse])
+@router.get("/etf", response_model=list[EtfSpotResponse])
 async def get_etf_list(
-    date: Optional[str] = Query(None, description="交易日期"),
+    date: str | None = Query(None, description="交易日期"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

@@ -1,10 +1,8 @@
-from typing import List, Optional
-from decimal import Decimal
-from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import DailyBar as DailyBarModel
-from app.schemas.stock_schema import DailyBarResponse, DailyBarListResponse
+from app.schemas.stock_schema import DailyBarListResponse, DailyBarResponse
 
 
 class DailyBarRepository:
@@ -14,8 +12,8 @@ class DailyBarRepository:
     async def get_daily_bars(
         self,
         ts_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         page: int = 1,
         page_size: int = 100,
         order: str = "desc",
@@ -47,7 +45,7 @@ class DailyBarRepository:
             page_size=page_size,
         )
 
-    async def get_latest_bar(self, ts_code: str) -> Optional[DailyBarModel]:
+    async def get_latest_bar(self, ts_code: str) -> DailyBarModel | None:
         result = await self.session.execute(
             select(DailyBarModel)
             .where(DailyBarModel.ts_code == ts_code)
@@ -56,9 +54,7 @@ class DailyBarRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_bar_by_date(
-        self, ts_code: str, trade_date: str
-    ) -> Optional[DailyBarModel]:
+    async def get_bar_by_date(self, ts_code: str, trade_date: str) -> DailyBarModel | None:
         result = await self.session.execute(
             select(DailyBarModel).where(
                 and_(
@@ -75,7 +71,7 @@ class DailyBarRepository:
         await self.session.refresh(bar)
         return bar
 
-    async def bulk_create(self, bars: List[DailyBarModel]) -> List[DailyBarModel]:
+    async def bulk_create(self, bars: list[DailyBarModel]) -> list[DailyBarModel]:
         self.session.add_all(bars)
         await self.session.flush()
         return bars
@@ -84,7 +80,7 @@ class DailyBarRepository:
         self,
         trade_date: str,
         limit: int = 20,
-    ) -> List[DailyBarModel]:
+    ) -> list[DailyBarModel]:
         result = await self.session.execute(
             select(DailyBarModel)
             .where(DailyBarModel.trade_date == trade_date)
@@ -97,7 +93,7 @@ class DailyBarRepository:
         self,
         trade_date: str,
         limit: int = 20,
-    ) -> List[DailyBarModel]:
+    ) -> list[DailyBarModel]:
         result = await self.session.execute(
             select(DailyBarModel)
             .where(DailyBarModel.trade_date == trade_date)

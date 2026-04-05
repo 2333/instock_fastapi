@@ -1,10 +1,8 @@
-import os
-from datetime import datetime
-from decimal import Decimal
-from typing import Optional, Generator
-from sqlalchemy import text, create_engine, event
-from sqlalchemy.orm import sessionmaker, Session, declarative_base
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from collections.abc import Generator
+
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 from app.config import get_settings

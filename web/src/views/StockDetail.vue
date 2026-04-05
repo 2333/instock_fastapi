@@ -44,6 +44,19 @@
                 {{ t('stock_chart_tv') }}
               </button>
             </div>
+
+            <div v-if="activeChartMode === 'native'" class="period-selector">
+              <button
+                v-for="p in ['day','week','month']"
+                :key="p"
+                class="period-btn"
+                :class="{ active: selectedPeriod === p }"
+                @click="handlePeriodChange(p)"
+              >
+                {{ t(`period_${p}`) }}
+              </button>
+            </div>
+
             <p class="chart-mode-copy">
               {{
                 activeChartMode === 'native'
@@ -73,6 +86,7 @@
             :data="klineData"
             :loading="loading"
             :adjust="currentAdjust"
+            :selected-period="selectedPeriod"
             :external-hint="chartHint"
             :show-pattern-marks="showPatternMarks"
             :pattern-marks="chartPatternMarks"
@@ -80,6 +94,7 @@
             :highlighted-pattern-key="activePatternKey"
             :focus-range-request-id="focusRangeRequestId"
             @adjustChange="handleAdjustChange"
+            @periodChange="handlePeriodChange"
           />
           <TradingViewWidget
             v-else
@@ -124,6 +139,54 @@
             </div>
           </div>
 
+          <div class="panel-section validation-panel">
+            <div class="section-header">
+              <h3>筛选验证</h3>
+              <span v-if="screeningTradeDate" class="section-chip">来自 {{ formatDisplayDate(screeningTradeDate) }} 筛选</span>
+            </div>
+            <p class="validation-copy">
+              结合最新价格、指标和形态数据，帮助复核本次筛选结果是否仍然有效。
+            </p>
+            <div v-if="freshnessItems.length" class="freshness-grid">
+              <div v-for="item in freshnessItems" :key="item.key" class="freshness-item">
+                <span class="label">{{ item.label }}</span>
+                <div class="freshness-value">
+                  <span class="freshness-badge" :class="item.current ? 'is-current' : 'is-stale'">
+                    {{ item.current ? '最新' : '待确认' }}
+                  </span>
+                  <span>{{ formatDisplayDate(item.tradeDate) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="validationMetrics.length" class="validation-group">
+              <h4>筛选指标</h4>
+              <div class="validation-list">
+                <div v-for="item in validationMetrics" :key="`${item.metric}-${item.trade_date}`" class="validation-item">
+                  <div class="validation-item-header">
+                    <strong>{{ item.metric }}</strong>
+                    <span>{{ formatDisplayDate(item.trade_date) }}</span>
+                  </div>
+                  <p>{{ item.summary }}</p>
+                </div>
+              </div>
+            </div>
+            <div v-if="validationPatterns.length" class="validation-group">
+              <h4>形态注释</h4>
+              <div class="validation-list">
+                <div v-for="item in validationPatterns" :key="`${item.metric}-${item.trade_date}-${item.summary}`" class="validation-item">
+                  <div class="validation-item-header">
+                    <strong>{{ item.metric }}</strong>
+                    <span>{{ formatDisplayDate(item.trade_date) }}</span>
+                  </div>
+                  <p>{{ item.summary }}</p>
+                </div>
+              </div>
+            </div>
+            <div v-if="!validationMetrics.length && !validationPatterns.length" class="empty-state validation-empty">
+              暂无可展示的验证信息
+            </div>
+          </div>
+
           <div class="panel-section">
             <h3>{{ t('stock_actions') }}</h3>
             <div class="action-buttons">
@@ -164,7 +227,7 @@
                 @mouseleave="activePatternKey = ''"
                 @focus="activePatternKey = pattern.pattern_key"
                 @blur="activePatternKey = ''"
-                @click="activePatternKey = pattern.pattern_key"
+                @click="openPatternDetail(pattern)"
               >
                 <div class="pattern-info">
                   <span class="pattern-name">{{ getPatternLabel(pattern.pattern_name) }}</span>
@@ -184,6 +247,45 @@
           </div>
         </aside>
       </div>
+
+      <!-- Pattern Detail Modal -->
+      <div v-if="showPatternDetail && selectedPattern" class="pattern-modal-overlay" @click.self="closePatternDetail">
+        <div class="pattern-modal">
+          <div class="pattern-modal-header">
+            <h3>{{ getPatternLabel(selectedPattern.pattern_name) }}</h3>
+            <button class="modal-close-btn" @click="closePatternDetail">×</button>
+          </div>
+          <div class="pattern-modal-body">
+            <div class="pattern-detail-row">
+              <span class="label">信号方向</span>
+              <span class="value" :class="getSignalClass(selectedPattern.pattern_type)">
+                {{ getSignalText(selectedPattern.pattern_type) }}
+              </span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">发生日期</span>
+              <span class="value">{{ formatDisplayDate(selectedPattern.trade_date) }}</span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">置信度</span>
+              <span class="value">{{ selectedPattern.confidence }}%</span>
+            </div>
+            <div class="pattern-detail-row">
+              <span class="label">形态代码</span>
+              <span class="value">{{ selectedPattern.pattern_key }}</span>
+            </div>
+            <p class="pattern-description">
+              该形态出现在 {{ formatDisplayDate(selectedPattern.trade_date) }}，置信度 {{ selectedPattern.confidence }}%。
+              可在 K 线图中查看具体位置与形态结构。
+            </p>
+          </div>
+          <div class="pattern-modal-footer">
+            <button class="btn btn-secondary" @click="closePatternDetail">关闭</button>
+            <button class="btn btn-primary" @click="analyzePatterns">查看所有形态</button>
+          </div>
+        </div>
+      </div>
+
     </template>
 
     <div v-else class="error-state">
@@ -195,6 +297,7 @@
 <script setup lang="ts">
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { attentionApi, patternApi, stockApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
 import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
@@ -242,6 +345,12 @@ interface DateRange {
   end: string
 }
 
+interface ValidationItem {
+  metric: string
+  trade_date?: string | null
+  summary: string
+}
+
 const route = useRoute()
 const router = useRouter()
 const { locale, t } = useLocale()
@@ -250,16 +359,20 @@ const inWatchlist = ref(false)
 const activeChartMode = ref<'native' | 'tradingview'>('native')
 const showPatternMarks = ref(true)
 const activePatternKey = ref('')
+const selectedPattern = ref<PatternDetail | null>(null)
+const showPatternDetail = ref(false)
 const focusRangeRequestId = ref(0)
 
 const stockInfo = ref<any>(null)
 const klineData = ref<KlineData[]>([])
 const patterns = ref<PatternDetail[]>([])
 const currentAdjust = ref<'bfq' | 'qfq' | 'hfq'>('qfq')
+const selectedPeriod = ref<'day' | 'week' | 'month'>('day')
 const adjustFallbackActive = ref(false)
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 
 const code = computed(() => route.params.code as string)
+const screeningTradeDate = computed(() => toQueryDate(route.query.screening_date))
 const marketLabel = computed(() => {
   const exchange = String(stockInfo.value?.exchange || '').toUpperCase()
   if (exchange === 'SSE' || exchange === 'SH') return t('stock_market_sh')
@@ -298,6 +411,27 @@ const formatDisplayDate = (value?: string | null) => {
   return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
 }
 
+// Record recently viewed stock
+const recordRecentView = () => {
+  if (!stockInfo.value?.code || !stockInfo.value?.name) return
+  const recentKey = 'recently_viewed_stocks'
+  try {
+    const existing: Array<{ code: string; name: string; viewedAt: string }> = JSON.parse(localStorage.getItem(recentKey) || '[]')
+    const filtered = existing.filter((item) => item.code !== stockInfo.value.code)
+    const updated = [
+      {
+        code: stockInfo.value.code,
+        name: stockInfo.value.name,
+        viewedAt: new Date().toISOString(),
+      },
+      ...filtered,
+    ].slice(0, 10) // keep last 10
+    localStorage.setItem(recentKey, JSON.stringify(updated))
+  } catch (e) {
+    // ignore
+  }
+}
+
 const toQueryDate = (value: unknown) => {
   if (Array.isArray(value)) return String(value[0] || '').trim()
   return String(value || '').trim()
@@ -318,6 +452,32 @@ const requestedPatternRange = computed<DateRange | null>(() => {
 })
 
 const hasRequestedPatternRange = computed(() => !!requestedPatternRange.value)
+const freshnessItems = computed(() => {
+  const freshness = stockInfo.value?.data_freshness
+  if (!freshness) return []
+  return [
+    {
+      key: 'price',
+      label: '价格数据',
+      tradeDate: freshness.price_trade_date,
+      current: Boolean(freshness.price_current),
+    },
+    {
+      key: 'indicator',
+      label: '指标快照',
+      tradeDate: freshness.indicator_trade_date,
+      current: Boolean(freshness.indicator_current),
+    },
+    {
+      key: 'pattern',
+      label: '形态识别',
+      tradeDate: freshness.pattern_trade_date,
+      current: Boolean(freshness.pattern_current),
+    },
+  ].filter((item) => item.tradeDate)
+})
+const validationMetrics = computed<ValidationItem[]>(() => stockInfo.value?.validation_context?.screening_metrics || [])
+const validationPatterns = computed<ValidationItem[]>(() => stockInfo.value?.validation_context?.pattern_annotations || [])
 
 const patternRangeLabel = computed(() => {
   if (!requestedPatternRange.value) {
@@ -429,7 +589,8 @@ const getChartWindow = () => {
 
 const fetchStockDetail = async (
   adjust: 'bfq' | 'qfq' | 'hfq' = currentAdjust.value,
-  refreshPatterns = false
+  refreshPatterns = false,
+  period: 'day' | 'week' | 'month' = selectedPeriod.value
 ) => {
   loading.value = true
   try {
@@ -440,6 +601,7 @@ const fetchStockDetail = async (
       start_date: chartWindow.start,
       end_date: chartWindow.end,
       adjust,
+      period,
     })
     const patternPromise = refreshPatterns
       ? patternApi.getPatterns(code.value, {
@@ -455,6 +617,7 @@ const fetchStockDetail = async (
     const [stockData, patternsData] = await Promise.all([stockPromise, patternPromise])
 
     stockInfo.value = stockData
+    recordRecentView()
     adjustFallbackActive.value = stockData?.adjust_note === 'requested_adjust_data_unavailable_fallback_to_bfq'
     patterns.value = (patternsData || [])
       .map((pattern: any, index: number) => ({
@@ -496,7 +659,7 @@ const handleAdjustChange = (adjust: string) => {
   const nextAdjust = (adjust || 'bfq') as 'bfq' | 'qfq' | 'hfq'
   if (nextAdjust === currentAdjust.value) return
   currentAdjust.value = nextAdjust
-  fetchStockDetail(nextAdjust)
+  fetchStockDetail(nextAdjust, true)
 }
 
 const addToWatchlist = async () => {
@@ -521,8 +684,32 @@ const analyzePatterns = () => {
   })
 }
 
+const openPatternDetail = (pattern: PatternDetail) => {
+  // 追踪形态查看事件
+  const { patternView } = useAnalytics()
+  patternView(
+    pattern.pattern_name,
+    pattern.confidence,
+    pattern.trade_date,
+    pattern.pattern_key
+  )
+
+  selectedPattern.value = pattern
+  showPatternDetail.value = true
+}
+
+const closePatternDetail = () => {
+  showPatternDetail.value = false
+  selectedPattern.value = null
+}
+
 const goBacktest = () => {
   router.push({ path: '/backtest', query: { code: code.value } })
+}
+
+const handlePeriodChange = (value: string) => {
+  selectedPeriod.value = value as 'day' | 'week' | 'month'
+  fetchStockDetail(currentAdjust.value, true)
 }
 
 const syncWatchlistStatus = async () => {
@@ -545,6 +732,8 @@ watch(
 )
 
 onMounted(() => {
+  const { pageView } = useAnalytics()
+  pageView(`/stock/${code.value}`)
   fetchStockDetail(currentAdjust.value, true)
 })
 </script>
@@ -694,6 +883,34 @@ onMounted(() => {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.02);
+
+  .period-selector {
+    display: flex;
+    gap: 6px;
+    margin-left: auto; // 推到右侧，位于 tabs 和 copy 之间
+
+    .period-btn {
+      padding: 6px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 999px;
+      background: transparent;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.85);
+        border-color: rgba(255, 255, 255, 0.24);
+      }
+
+      &.active {
+        background: rgba(255, 152, 0, 0.15);
+        color: #FFB74D;
+        border-color: rgba(255, 152, 0, 0.35);
+      }
+    }
+  }
 }
 
 .chart-mode-tabs {
@@ -834,6 +1051,115 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
+}
+
+.validation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.validation-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.freshness-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.freshness-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+
+  .label {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+}
+
+.freshness-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.freshness-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+
+  &.is-current {
+    background: rgba(0, 200, 83, 0.15);
+    color: #00C853;
+  }
+
+  &.is-stale {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffd54f;
+  }
+}
+
+.validation-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  h4 {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.62);
+  }
+}
+
+.validation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.validation-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+
+  p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.72);
+  }
+}
+
+.validation-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.48);
+
+  strong {
+    color: rgba(255, 255, 255, 0.86);
+    text-transform: capitalize;
+  }
+}
+
+.validation-empty {
+  padding: 12px;
 }
 
 .profile-item {
@@ -1069,6 +1395,106 @@ onMounted(() => {
     .price-change {
       font-size: 12px;
     }
+  }
+}
+
+/* Pattern Detail Modal */
+.pattern-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pattern-modal {
+  background: linear-gradient(180deg, rgba(30, 34, 45, 0.98), rgba(20, 22, 28, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+
+  &-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.92);
+    }
+
+    .modal-close-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: rgba(255, 255, 255, 0.9);
+      }
+    }
+  }
+
+  &-body {
+    padding: 20px;
+
+    .pattern-detail-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+
+      .label {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .value {
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.9);
+
+        &.bullish { color: #00C853; }
+        &.bearish { color: #ff5252; }
+        &.neutral { color: rgba(255, 255, 255, 0.6); }
+      }
+    }
+
+    .pattern-description {
+      margin: 16px 0 0;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 13px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.6);
+    }
+  }
+
+  &-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 12px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
   }
 }
 </style>

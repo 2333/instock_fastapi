@@ -118,7 +118,7 @@ export const stockApi = {
   getStocks: (params?: { page?: number; page_size?: number; date?: string }) =>
     api.get('/stocks', { params }) as Promise<{ items: any[]; total: number; page: number; page_size: number }>,
 
-  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq' }) =>
+  getStockDetail: (code: string, params?: { start_date?: string; end_date?: string; adjust?: 'bfq' | 'qfq' | 'hfq'; period?: 'day' | 'week' | 'month' }) =>
     api.get(`/stocks/${code}`, { params }) as Promise<any>,
 }
 
@@ -162,6 +162,16 @@ export const patternApi = {
 export const strategyApi = {
   getStrategies: () => api.get('/strategies') as Promise<any>,
 
+  getTemplates: () => api.get('/strategies/templates') as Promise<any>,
+
+  getMyStrategies: () => api.get('/strategies/my') as Promise<any>,
+
+  createMyStrategy: (payload: { name: string; description?: string; params?: Record<string, unknown>; is_active?: boolean }) =>
+    api.post('/strategies/my', payload) as Promise<any>,
+
+  createMyStrategyFromSelection: (payload: { name: string; description?: string; params?: Record<string, unknown>; is_active?: boolean }) =>
+    api.post('/strategies/my/from-selection', payload) as Promise<any>,
+
   runStrategy: (strategy: string, date?: string) =>
     api.post('/strategies/run', { strategy, date }) as Promise<any>,
 
@@ -172,11 +182,15 @@ export const strategyApi = {
 export const backtestApi = {
   runBacktest: (params: {
     strategy: string
+    strategy_params?: Record<string, string | number>
     start_date: string
     end_date: string
     initial_capital: number
     stock_code?: string
   }) => api.post('/backtest', params) as Promise<any>,
+
+  getBacktestHistory: (limit = 10) =>
+    api.get('/backtest/history', { params: { limit } }) as Promise<any>,
 
   getBacktest: (id: string) => api.get(`/backtest/${id}`) as Promise<any>,
 }
@@ -184,10 +198,36 @@ export const backtestApi = {
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
 
+  getTemplates: () => api.get('/selection/templates') as Promise<any>,
+
+  getMyConditions: () => api.get('/selection/my-conditions') as Promise<any>,
+
+  createCondition: (condition: { name: string; category: string; description?: string; params?: Record<string, any>; is_active?: boolean }) =>
+    api.post('/selection/my-conditions', condition) as Promise<any>,
+
+  updateCondition: (id: number, condition: Partial<{ name: string; category: string; description: string; params: Record<string, any>; is_active: boolean }>) =>
+    api.put(`/selection/my-conditions/${id}`, condition) as Promise<any>,
+
+  deleteCondition: (id: number) => api.delete(`/selection/my-conditions/${id}`) as Promise<any>,
+
   runSelection: (conditions: any) => api.post('/selection', conditions) as Promise<any>,
 
   getHistory: (params?: { limit?: number }) =>
     api.get('/selection/history', { params }) as Promise<any>,
+
+  getScreeningMetadata: () => api.get('/screening/metadata') as Promise<any>,
+
+  getTodaySummary: (params?: { date?: string; limit?: number }) =>
+    api.get('/selection/today-summary', { params }) as Promise<any>,
+
+  runScreening: (payload: { filters?: Record<string, unknown>; scope?: Record<string, unknown> }) =>
+    api.post('/screening/run', payload) as Promise<any>,
+
+  getScreeningHistory: (params?: { date?: string; limit?: number }) =>
+    api.get('/screening/history', { params }) as Promise<any>,
+
+  compareScreeningResults: (historyIds: string[]) =>
+    api.post('/screening/compare', { history_ids: historyIds }) as Promise<any>,
 }
 
 export const fundFlowApi = {
@@ -202,6 +242,9 @@ export const fundFlowApi = {
 }
 
 export const marketApi = {
+  getSummary: (params?: { date?: string }) =>
+    api.get('/market/summary', { params }) as Promise<any>,
+
   getFundFlowRank: (date?: string, limit?: number) =>
     api.get('/market/fund-flow', { params: { date, limit } }) as Promise<any>,
 
@@ -213,14 +256,136 @@ export const marketApi = {
 
   getNorthBoundFunds: (date?: string, limit?: number) =>
     api.get('/market/north-bound', { params: { date, limit } }) as Promise<any>,
+
+  getTaskHealth: (alertLimit?: number) =>
+    api.get('/market/task-health', { params: { alert_limit: alertLimit } }) as Promise<any>,
 }
 
 export const attentionApi = {
   getList: () => api.get('/attention') as Promise<any>,
 
-  add: (code: string) => api.post('/attention', { code }) as Promise<any>,
+  add: (code: string, group?: string, notes?: string, alertConditions?: Record<string, any>) =>
+    api.post('/attention', { code, group, notes, alert_conditions: alertConditions }) as Promise<any>,
+
+  update: (id: number, updates: { group?: string; notes?: string; alert_conditions?: Record<string, any> }) =>
+    api.put(`/attention/${id}`, updates) as Promise<any>,
 
   remove: (code: string) => api.delete(`/attention/${code}`) as Promise<any>,
+}
+
+export const alertApi = {
+  list: () => api.get('/alerts/conditions') as Promise<any>,
+  create: (data: any) => api.post('/alerts/conditions', data) as Promise<any>,
+  get: (id: number) => api.get(`/alerts/conditions/${id}`) as Promise<any>,
+  update: (id: number, data: any) => api.put(`/alerts/conditions/${id}`, data) as Promise<any>,
+  remove: (id: number) => api.delete(`/alerts/conditions/${id}`) as Promise<any>,
+  listNotifications: (limit?: number) => api.get('/alerts/notifications', { params: { limit } }) as Promise<any>,
+  markRead: (notifId: number) => api.patch(`/alerts/notifications/${notifId}/read`) as Promise<any>,
+  getUnreadCount: () => api.get('/alerts/unread-count') as Promise<any>,
+}
+
+export const strategySocialApi = {
+  listPublic: (params?: {
+    strategy_type?: string
+    risk_level?: string
+    sort_by?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/strategies/public', { params }) as Promise<any>,
+
+  getDetails: (strategyId: number) => api.get(`/strategies/${strategyId}/details`) as Promise<any>,
+
+  rate: (strategyId: number, rating: number, comment?: string) =>
+    api.post(`/strategies/${strategyId}/rate`, { rating, comment }) as Promise<any>,
+
+  getMyRatings: (limit?: number) => api.get('/strategies/my-ratings', { params: { limit } }) as Promise<any>,
+
+  toggleFavorite: (strategyId: number) => api.post(`/strategies/${strategyId}/favorite`) as Promise<any>,
+
+  getMyFavorites: (limit?: number) => api.get('/strategies/my-favorites', { params: { limit } }) as Promise<any>,
+
+  getComments: (strategyId: number, limit?: number, offset?: number) =>
+    api.get(`/strategies/${strategyId}/comments`, { params: { limit, offset } }) as Promise<any>,
+
+  addComment: (strategyId: number, content: string, parentId?: number) =>
+    api.post(`/strategies/${strategyId}/comments`, { content, parent_id: parentId }) as Promise<any>,
+
+  deleteComment: (commentId: number) => api.delete(`/strategies/comments/${commentId}`) as Promise<any>,
+}
+
+export const optimizationApi = {
+  // 创建优化任务
+  createJob: (params: {
+    strategy: string
+    param_space: Record<string, { min: number; max: number; step: number }>
+    method: 'random' | 'bayesian'
+    metric: 'sharpe' | 'total_return' | 'max_drawdown'
+    n_trials: number
+    concurrent_limit?: number
+    stock_code?: string
+    start_date?: string
+    end_date?: string
+    initial_capital?: number
+  }) => api.post('/optimization/jobs', params) as Promise<any>,
+
+  // 列出优化任务
+  listJobs: (params?: {
+    status?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/optimization/jobs', { params }) as Promise<any>,
+
+  // 任务详情
+  getJob: (jobId: string) => api.get(`/optimization/jobs/${jobId}`) as Promise<any>,
+
+  // 任务进度
+  getProgress: (jobId: string) => api.get(`/optimization/jobs/${jobId}/progress`) as Promise<any>,
+
+  // 取消任务
+  cancelJob: (jobId: string) => api.post(`/optimization/jobs/${jobId}/cancel`) as Promise<any>,
+
+  // 获取试验列表
+  getTrials: (jobId: string, params?: { limit?: number; offset?: number }) =>
+    api.get(`/optimization/jobs/${jobId}/trials`, { params }) as Promise<any>,
+
+  // 获取最优参数
+  getBestParams: (jobId: string) => api.get(`/optimization/jobs/${jobId}/best`) as Promise<any>,
+
+  // 获取所有试验记录（用于分析）
+  getAllTrials: (jobId: string) => api.get(`/optimization/jobs/${jobId}/all-trials`) as Promise<any>,
+}
+
+export const reportApi = {
+  // 报告列表
+  list: (params?: {
+    type?: 'daily' | 'weekly' | 'monthly'
+    status?: 'generated' | 'generating' | 'failed'
+    start_date?: string
+    end_date?: string
+    limit?: number
+    offset?: number
+  }) => api.get('/reports', { params }) as Promise<any>,
+
+  // 报告详情
+  getDetail: (reportId: string) => api.get(`/reports/${reportId}`) as Promise<any>,
+
+  // 手动生成报告
+  generate: (params: {
+    type: 'daily' | 'weekly' | 'monthly'
+    date?: string  // 指定日期，默认为今天/本周/本月
+  }) => api.post('/reports/generate', params) as Promise<any>,
+
+  // 获取报告偏好
+  getPreferences: () => api.get('/reports/preferences') as Promise<any>,
+
+  // 更新报告偏好
+  updatePreferences: (preferences: {
+    daily_enabled?: boolean
+    weekly_enabled?: boolean
+    monthly_enabled?: boolean
+    email?: string
+    metrics?: string[]
+  }) => api.put('/reports/preferences', preferences) as Promise<any>,
 }
 
 export default api

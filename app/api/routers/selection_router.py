@@ -1,41 +1,51 @@
-from typing import Any
-
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_provider
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
+from app.schemas.selection_schema import (
+    ScreeningHistoryData,
+    ScreeningHistoryResponse,
+    ScreeningMetadataResponse,
+    ScreeningQuery,
+    ScreeningRequest,
+    ScreeningTodaySummaryResponse,
+    ScreeningRunData,
+    ScreeningRunResponse,
+    SelectionConditionCreate,
+    SelectionConditionResponse,
+    SelectionConditionsMetaResponse,
+    SelectionHistoryResponse,
+    SelectionRequest,
+    SelectionResponse,
+    ScreeningTemplate,
+    ScreeningTemplateListResponse,
+    ScreeningComparisonRequest,
+    ScreeningComparisonResponse,
+)
+from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
 
 router = APIRouter()
 
 
-class SelectionConditionCreate(BaseModel):
-    name: str
-    category: str
-    description: str | None = None
-    params: dict[str, Any] | None = None
-    is_active: bool = True
-
-
-class SelectionConditionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    user_id: int
-    name: str
-    category: str
-    description: str | None
-    params: dict[str, Any] | None
-    is_active: bool
-
-
-@router.get("/selection/conditions")
-async def get_selection_conditions():
+@router.get("/selection/conditions", response_model=SelectionConditionsMetaResponse)
+async def get_selection_conditions() -> SelectionConditionsMetaResponse:
     return SelectionService.get_conditions()
+
+
+@router.get("/screening/metadata", response_model=ScreeningMetadataResponse)
+async def get_screening_metadata() -> ScreeningMetadataResponse:
+    return ScreeningMetadataResponse(data=SelectionService.get_screening_metadata())
+
+
+@router.get("/selection/templates", response_model=ScreeningTemplateListResponse)
+async def get_selection_templates() -> ScreeningTemplateListResponse:
+    """Return predefined screening condition templates for quick actions."""
+    templates = SelectionService.get_templates()
+    return ScreeningTemplateListResponse(data=templates)
 
 
 @router.get("/selection/my-conditions", response_model=list[SelectionConditionResponse])
@@ -121,23 +131,96 @@ async def delete_condition(
     return {"status": "success", "message": "条件已删除"}
 
 
-@router.post("/selection")
+@router.post("/selection", response_model=SelectionResponse)
 async def run_selection(
-    conditions: dict[str, Any] = Body(...),
+    request: SelectionRequest = Body(...),
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
-    service = SelectionService(db)
-    return await service.run_selection(conditions, date)
+    provider: MarketDataProvider = Depends(get_provider),
+) -> SelectionResponse:
+    """Selection endpoint using provider-based service."""
+    service = SelectionService(db=db, provider=provider)
+    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
+    if request.scope.market and "market" not in conditions:
+        conditions["market"] = request.scope.market
+    items = await service.run_selection(conditions, date, limit=request.scope.limit)
+    return SelectionResponse(data=items)
 
 
-@router.get("/selection/history")
+@router.post("/screening/run", response_model=ScreeningRunResponse)
+async def run_screening(
+    request: ScreeningRequest = Body(...),
+    date: str | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    provider: MarketDataProvider = Depends(get_provider),
+) -> ScreeningRunResponse:
+    """Main screening endpoint with provider-based service."""
+    service = SelectionService(db=db, provider=provider)
+    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
+    if request.scope.market and "market" not in conditions:
+        conditions["market"] = request.scope.market
+    items = await service.run_selection(conditions, date, limit=request.scope.limit)
+    resolved_trade_date = items[0]["trade_date"] if items else await service._resolve_trade_date(date)
+    return ScreeningRunResponse(
+        data=ScreeningRunData(
+            query=ScreeningQuery(
+                filters=request.filters,
+                scope=request.scope,
+                trade_date=resolved_trade_date,
+            ),
+            items=items,
+            total=len(items),
+        )
+    )
+
+
+@router.get("/selection/history", response_model=SelectionHistoryResponse)
 async def get_selection_history(
     date: str | None = None,
     limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-):
+) -> SelectionHistoryResponse:
     service = SelectionService(db)
-    return await service.get_history(date, limit)
+    items = await service.get_history(date, limit)
+    return SelectionHistoryResponse(data=items)
+
+
+@router.get("/screening/history", response_model=ScreeningHistoryResponse)
+async def get_screening_history(
+    date: str | None = None,
+    limit: int = Query(100, ge=1, le=1000),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningHistoryResponse:
+    service = SelectionService(db)
+    items = await service.get_history(date, limit)
+    return ScreeningHistoryResponse(
+        data=ScreeningHistoryData(trade_date=date, limit=limit, items=items, total=len(items))
+    )
+
+
+@router.get("/selection/today-summary", response_model=ScreeningTodaySummaryResponse)
+async def get_today_summary(
+    date: str | None = None,
+    limit: int = Query(5, ge=1, le=20),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningTodaySummaryResponse:
+    service = SelectionService(db)
+    summary = await service.get_today_summary(current_user.id, date=date, limit=limit)
+    return ScreeningTodaySummaryResponse(data=summary)
+
+
+@router.post("/screening/compare", response_model=ScreeningComparisonResponse)
+async def compare_screening_results(
+    request: ScreeningComparisonRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ScreeningComparisonResponse:
+    """Compare multiple screening history result sets."""
+    service = SelectionService(db)
+    results = await service.compare_results(request.history_ids)
+    return ScreeningComparisonResponse(data=results)

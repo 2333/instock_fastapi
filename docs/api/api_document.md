@@ -3,7 +3,7 @@
 ## 概述
 
 - **Base URL**: `http://localhost:8000/api/v1`
-- **认证方式**: 无（可扩展JWT）
+- **认证方式**: 公开接口 + Bearer JWT（登录后访问个人设置、自定义策略与选股条件等接口）
 - **数据格式**: JSON
 - **字符编码**: UTF-8
 
@@ -13,7 +13,7 @@
 
 ### 1.1 获取股票列表
 
-**GET** `/stocks`
+**GET** `/api/v1/stocks`
 
 获取A股股票列表，支持分页和日期筛选。
 
@@ -49,7 +49,7 @@
 
 ### 1.2 获取股票详情
 
-**GET** `/stocks/{code}`
+**GET** `/api/v1/stocks/{code}`
 
 获取指定股票的详细信息，包括基本信息和K线数据。
 
@@ -95,7 +95,7 @@
 
 ### 2.1 获取ETF列表
 
-**GET** `/etf`
+**GET** `/api/v1/etf`
 
 **请求参数**:
 
@@ -107,7 +107,7 @@
 
 ### 2.2 获取ETF详情
 
-**GET** `/etf/{code}`
+**GET** `/api/v1/etf/{code}`
 
 ---
 
@@ -115,7 +115,7 @@
 
 ### 3.1 获取技术指标
 
-**GET** `/indicators`
+**GET** `/api/v1/indicators`
 
 获取指定股票的技术指标数据。
 
@@ -149,7 +149,7 @@
 
 ### 3.2 获取最新指标
 
-**GET** `/indicators/latest`
+**GET** `/api/v1/indicators/latest`
 
 获取指定股票的最新技术指标。
 
@@ -165,7 +165,7 @@
 
 ### 4.1 获取形态识别结果
 
-**GET** `/patterns`
+**GET** `/api/v1/patterns`
 
 获取指定股票的K线形态识别结果。
 
@@ -195,7 +195,7 @@
 
 ### 4.2 获取今日形态
 
-**GET** `/patterns/today`
+**GET** `/api/v1/patterns/today`
 
 获取当日出现K线形态的所有股票。
 
@@ -220,7 +220,7 @@
 
 ### 5.1 获取策略列表
 
-**GET** `/strategies`
+**GET** `/api/v1/strategies`
 
 获取所有可用的选股策略。
 
@@ -258,7 +258,7 @@
 
 ### 5.2 运行策略
 
-**POST** `/strategies/run`
+**POST** `/api/v1/strategies/run`
 
 运行指定的选股策略。
 
@@ -266,7 +266,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
-| strategy_name | string | 是 | 策略名称 |
+| strategy | string | 是 | 策略名称 |
 | date | string | 否 | 执行日期 |
 
 **响应示例**:
@@ -281,7 +281,7 @@
 
 ### 5.3 获取策略结果
 
-**GET** `/strategies/results`
+**GET** `/api/v1/strategies/results`
 
 获取策略选股结果。
 
@@ -289,7 +289,7 @@
 
 | 参数名 | 类型 | 必填 | 说明 |
 |--------|------|------|------|
-| strategy_name | string | 否 | 策略名称(不指定返回全部) |
+| strategy | string | 否 | 策略名称(不指定返回全部) |
 | date | string | 否 | 交易日期 |
 | limit | int | 否 | 返回条数 |
 
@@ -317,7 +317,7 @@
 
 ### 6.1 运行回测
 
-**POST** `/backtest`
+**POST** `/api/v1/backtest`
 
 运行策略回测。
 
@@ -329,7 +329,7 @@
   "start_date": "2025-01-01",
   "end_date": "2025-12-31",
   "initial_capital": 100000,
-  "code": "000001"
+  "stock_code": "000001"
 }
 ```
 
@@ -349,7 +349,7 @@
 
 ### 6.2 获取回测结果
 
-**GET** `/backtest/{backtest_id}`
+**GET** `/api/v1/backtest/{backtest_id}`
 
 获取指定回测的详细结果。
 
@@ -359,7 +359,7 @@
 
 ### 7.1 获取个股资金流向
 
-**GET** `/fund-flow/{code}`
+**GET** `/api/v1/fund-flow/{code}`
 
 获取指定股票的资金流向数据。
 
@@ -387,7 +387,7 @@
 
 ### 7.2 获取行业资金流向
 
-**GET** `/fund-flow/sector/industry`
+**GET** `/api/v1/fund-flow/sector/industry`
 
 **请求参数**:
 
@@ -398,21 +398,48 @@
 
 ### 7.3 获取概念资金流向
 
-**GET** `/fund-flow/sector/concept`
+**GET** `/api/v1/fund-flow/sector/concept`
 
 ---
 
-## 8. 关注列表接口 (Attention)
+## 8. 市场数据接口 (Market)
 
-### 8.1 获取关注列表
+### 8.1 获取市场资金流排行
 
-**GET** `/attention`
+**GET** `/api/v1/market/fund-flow`
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| date | string | 否 | 交易日期 |
+| limit | int | 否 | 返回条数，默认 50 |
+
+### 8.2 获取大宗交易
+
+**GET** `/api/v1/market/block-trades`
+
+### 8.3 获取龙虎榜
+
+**GET** `/api/v1/market/lhb`
+
+### 8.4 获取北向资金
+
+**GET** `/api/v1/market/north-bound`
+
+---
+
+## 9. 关注列表接口 (Attention)
+
+### 9.1 获取关注列表
+
+**GET** `/api/v1/attention`
 
 获取用户关注的股票列表。
 
-### 8.2 添加关注
+### 9.2 添加关注
 
-**POST** `/attention`
+**POST** `/api/v1/attention`
 
 **请求体**:
 
@@ -422,42 +449,163 @@
 }
 ```
 
-### 8.3 取消关注
+### 9.3 取消关注
 
-**DELETE** `/attention/{code}`
+**DELETE** `/api/v1/attention/{code}`
 
 ---
 
-## 9. 综合选股接口 (Selection)
+## 10. 综合选股接口 (Selection)
 
-### 9.1 获取选股条件
+### 10.1 获取筛选元数据
 
-**GET** `/selection/conditions`
+**GET** `/api/v1/screening/metadata`
 
-获取可用的选股条件列表。
+获取客户端构建筛选 UI 所需的元数据，包括可用的筛选字段及其类型。
 
-### 9.2 运行综合选股
+**响应示例**:
 
-**POST** `/selection`
+```json
+{
+  "success": true,
+  "code": "SUCCESS",
+  "message": "OK",
+  "data": {
+    "markets": ["沪市", "深市", "创业板", "科创板"],
+    "indicators": ["macd", "kdj", "boll", "rsi"],
+    "strategies": ["放量上涨", "均线多头", "停机坪"],
+    "filter_fields": [
+      {
+        "key": "priceMin",
+        "label": "最低价格",
+        "value_type": "number",
+        "operators": [">="]
+      },
+      {
+        "key": "rsiMin",
+        "label": "RSI 下限",
+        "value_type": "number",
+        "operators": [">="],
+        "description": "RSI 指标最小值 (0-100)"
+      },
+      {
+        "key": "macdBullish",
+        "label": "MACD 看涨",
+        "value_type": "boolean",
+        "operators": ["="],
+        "description": "是否要求 MACD 金叉/柱状图为正"
+      }
+    ]
+  },
+  "timestamp": "2026-03-30T12:00:00"
+}
+```
 
-根据多个条件进行综合选股。
+### 10.2 获取选股条件
+
+**GET** `/api/v1/selection/conditions`
+
+获取可用的选股条件列表（静态模板）。
+
+**响应示例**:
+
+```json
+{
+  "markets": ["沪市", "深市", "创业板", "科创板"],
+  "indicators": ["macd", "kdj", "boll", "rsi"],
+  "strategies": ["放量上涨", "均线多头", "停机坪"]
+}
+```
+
+### 10.3 运行综合选股
+
+**POST** `/api/v1/selection`
+
+根据多个条件进行综合选股。支持价格、涨跌幅、市场范围、技术指标（RSI、MACD）等筛选。
 
 **请求体**:
 
 ```json
 {
-  "price_min": 5,
-  "price_max": 100,
-  "pe_max": 30,
-  "market_cap_min": 50,
-  "change_min": -5,
-  "change_max": 10
+  "filters": {
+    "price_min": 5,
+    "price_max": 100,
+    "change_min": -5,
+    "change_max": 10,
+    "market": "sz",
+    "rsi_min": 30,
+    "rsi_max": 70,
+    "macd_bullish": true
+  },
+  "scope": {
+    "limit": 100
+  }
 }
 ```
 
-### 9.3 获取选股历史
+**筛选字段说明**:
 
-**GET** `/selection/history`
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| price_min / price_max | number | 价格范围（元） |
+| change_min / change_max | number | 日涨跌幅范围（%） |
+| market | string | 市场：`sh`(沪市)、`sz`(深市) |
+| rsi_min / rsi_max | number | RSI 相对强弱指标范围（0-100） |
+| macd_bullish | boolean | 是否只选 MACD 看涨（金叉倾向） |
+| macd_bearish | boolean | 是否只选 MACD 看跌（死叉倾向） |
+
+**响应格式**：参考 `SelectionRunResponse`，返回列表项包含 `reason_summary`（命中原因摘要）和 `evidence`（结构化证据列表）。
+
+### 10.4 获取选股历史
+
+**GET** `/api/v1/selection/history`
+
+获取历史选股结果。
+
+**请求参数**:
+
+| 参数名 | 类型 | 必填 | 说明 |
+|--------|------|------|------|
+| date | string | 否 | 交易日期 |
+| limit | int | 否 | 返回条数，默认 50 |
+
+### 10.5 管理我的选股条件
+
+- **POST** `/api/v1/selection/my-conditions`
+- **PUT** `/api/v1/selection/my-conditions/{condition_id}`
+- **DELETE** `/api/v1/selection/my-conditions/{condition_id}`
+
+---
+
+## 11. 认证与用户设置接口 (Auth)
+
+### 11.1 用户注册
+
+**POST** `/api/v1/auth/register`
+
+### 11.2 用户登录
+
+**POST** `/api/v1/auth/login`
+
+### 11.3 刷新令牌
+
+**POST** `/api/v1/auth/refresh`
+
+### 11.4 获取当前用户
+
+**GET** `/api/v1/auth/me`
+
+### 11.5 用户设置
+
+- **GET** `/api/v1/auth/settings`
+- **PUT** `/api/v1/auth/settings`
+
+### 11.6 管理我的策略
+
+- **GET** `/api/v1/strategies/my`
+- **POST** `/api/v1/strategies/my`
+- **PUT** `/api/v1/strategies/my/{strategy_id}`
+- **DELETE** `/api/v1/strategies/my/{strategy_id}`
 
 ---
 

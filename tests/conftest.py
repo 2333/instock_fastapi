@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -16,7 +17,7 @@ os.environ.setdefault("CRAWLER_PROXY_ENABLED", "false")
 
 from app.database import get_db
 from app.main import app
-from app.models.stock_model import Base, DailyBar, Indicator, Stock
+from app.models.stock_model import Base, DailyBar, Indicator, Pattern, Stock
 
 
 @compiles(JSONB, "sqlite")
@@ -88,6 +89,25 @@ async def client():
                 trade_date_dt=None,
                 indicator_name="RSI",
                 indicator_value=Decimal("56.78"),
+            )
+        )
+        session.add(
+            Indicator(
+                ts_code="000001.SZ",
+                trade_date="20240102",
+                trade_date_dt=None,
+                indicator_name="MACD",
+                indicator_value=Decimal("0.12"),
+            )
+        )
+        session.add(
+            Pattern(
+                ts_code="000001.SZ",
+                trade_date="20240102",
+                trade_date_dt=date(2024, 1, 2),
+                pattern_name="HAMMER",
+                pattern_type="reversal",
+                confidence=Decimal("0.91"),
             )
         )
         await session.commit()

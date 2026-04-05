@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable
-
+from collections.abc import Iterable
 
 EXCHANGE_SUFFIX_TO_NAME = {
     "SH": "SH",
@@ -46,7 +45,9 @@ def normalize_exchange_name(value: str | None, symbol: str | None = None) -> str
     return "UNKNOWN"
 
 
-def normalize_ts_code(value: str | None, symbol: str | None = None, exchange: str | None = None) -> str:
+def normalize_ts_code(
+    value: str | None, symbol: str | None = None, exchange: str | None = None
+) -> str:
     raw = str(value or "").strip().upper()
     if raw:
         if "." in raw:
@@ -95,7 +96,9 @@ def build_code_variants(code: str | None) -> list[str]:
 
 def normalize_stock_payload(record: dict) -> dict:
     normalized = dict(record)
-    symbol = extract_symbol(normalized.get("symbol") or normalized.get("code") or normalized.get("ts_code"))
+    symbol = extract_symbol(
+        normalized.get("symbol") or normalized.get("code") or normalized.get("ts_code")
+    )
     normalized_ts_code = normalize_ts_code(
         normalized.get("ts_code"),
         symbol=symbol,

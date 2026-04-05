@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.stock_model import Strategy, User
-from app.schemas.strategy_schema import StrategyResponse, StrategyResultResponse
+from app.schemas.strategy_schema import (
+    StrategyResponse,
+    StrategySelectionCreateRequest,
+    StrategyResultResponse,
+    StrategyTemplateResponse,
+)
 from app.services.strategy_service import StrategyService
 
 router = APIRouter()
@@ -44,9 +49,31 @@ class StrategyListResponse(BaseModel):
     is_active: bool
 
 
+def _normalize_strategy_params(
+    params: dict[str, Any] | None, *, default_source: str | None = None
+) -> dict[str, Any] | None:
+    return StrategyService.build_strategy_params(params, default_source=default_source)
+
+
+def _serialize_strategy(strategy: Strategy) -> dict[str, Any]:
+    return {
+        "id": strategy.id,
+        "user_id": strategy.user_id,
+        "name": strategy.name,
+        "description": strategy.description,
+        "params": _normalize_strategy_params(strategy.params),
+        "is_active": strategy.is_active,
+    }
+
+
 @router.get("/strategies", response_model=list[StrategyResponse])
 async def get_strategies():
     return StrategyService.get_strategy_list()
+
+
+@router.get("/strategies/templates", response_model=list[StrategyTemplateResponse])
+async def get_strategy_templates():
+    return StrategyService.get_strategy_templates()
 
 
 @router.get("/strategies/my", response_model=list[StrategyListResponse])
@@ -56,7 +83,7 @@ async def get_my_strategies(
 ):
     stmt = select(Strategy).where(Strategy.user_id == current_user.id)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return [_serialize_strategy(item) for item in result.scalars().all()]
 
 
 @router.post("/strategies/my", response_model=StrategyListResponse)
@@ -73,17 +100,47 @@ async def create_strategy(
     if existing:
         raise HTTPException(status_code=400, detail="策略名称已存在")
 
+    normalized_params = _normalize_strategy_params(strategy.params)
     new_strategy = Strategy(
         user_id=current_user.id,
         name=strategy.name,
         description=strategy.description,
-        params=strategy.params,
+        params=normalized_params,
         is_active=strategy.is_active,
     )
     db.add(new_strategy)
     await db.commit()
     await db.refresh(new_strategy)
-    return new_strategy
+    return _serialize_strategy(new_strategy)
+
+
+@router.post("/strategies/my/from-selection", response_model=StrategyListResponse)
+async def create_strategy_from_selection(
+    payload: StrategySelectionCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Strategy).where(
+        Strategy.user_id == current_user.id, Strategy.name == payload.name
+    )
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="策略名称已存在")
+
+    normalized_params = _normalize_strategy_params(payload.params, default_source="selection")
+
+    new_strategy = Strategy(
+        user_id=current_user.id,
+        name=payload.name,
+        description=payload.description,
+        params=normalized_params,
+        is_active=payload.is_active,
+    )
+    db.add(new_strategy)
+    await db.commit()
+    await db.refresh(new_strategy)
+    return _serialize_strategy(new_strategy)
 
 
 @router.put("/strategies/my/{strategy_id}", response_model=StrategyListResponse)
@@ -104,13 +161,13 @@ async def update_strategy(
     if strategy.description is not None:
         existing.description = strategy.description
     if strategy.params is not None:
-        existing.params = strategy.params
+        existing.params = _normalize_strategy_params(strategy.params)
     if strategy.is_active is not None:
         existing.is_active = strategy.is_active
 
     await db.commit()
     await db.refresh(existing)
-    return existing
+    return _serialize_strategy(existing)
 
 
 @router.delete("/strategies/my/{strategy_id}")

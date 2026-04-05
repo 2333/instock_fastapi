@@ -5,9 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 
-
-CREATE_FETCH_AUDIT_TABLE_SQL = text(
-    """
+CREATE_FETCH_AUDIT_TABLE_SQL = text("""
     CREATE TABLE IF NOT EXISTS data_fetch_audit (
       task_name VARCHAR(64) NOT NULL,
       entity_type VARCHAR(64) NOT NULL,
@@ -16,11 +14,10 @@ CREATE_FETCH_AUDIT_TABLE_SQL = text(
       status VARCHAR(32) NOT NULL,
       source VARCHAR(32) NULL,
       note TEXT NULL,
-      updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
     )
-    """
-)
+    """)
 
 
 async def ensure_fetch_audit_table(session: AsyncSession) -> None:
@@ -40,22 +37,20 @@ async def upsert_fetch_audit(
 ) -> None:
     await ensure_fetch_audit_table(session)
     await session.execute(
-        text(
-            """
+        text("""
             INSERT INTO data_fetch_audit (
               task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
             )
             VALUES (
-              :task_name, :entity_type, :entity_key, :trade_date, :status, :source, :note, NOW()
+              :task_name, :entity_type, :entity_key, :trade_date, :status, :source, :note, CURRENT_TIMESTAMP
             )
             ON CONFLICT (task_name, entity_type, entity_key, trade_date)
             DO UPDATE SET
               status = EXCLUDED.status,
               source = EXCLUDED.source,
               note = EXCLUDED.note,
-              updated_at = NOW()
-            """
-        ),
+              updated_at = CURRENT_TIMESTAMP
+            """),
         {
             "task_name": task_name,
             "entity_type": entity_type,

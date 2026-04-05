@@ -1,13 +1,13 @@
 import logging
-from typing import List, Optional
+from decimal import Decimal
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
-from core.crawling.base import AdjustType
 from core.crawling.baostock_provider import BaoStockProvider
+from core.crawling.base import AdjustType
 from core.crawling.eastmoney import EastMoneyCrawler
 
 settings = get_settings()
@@ -22,7 +22,7 @@ class StockService:
     def _normalize_row_mapping(row: dict) -> dict:
         return normalize_stock_payload(dict(row))
 
-    async def _resolve_trade_date(self, target_date: Optional[str]) -> Optional[str]:
+    async def _resolve_trade_date(self, target_date: str | None) -> str | None:
         if target_date:
             result = await self.db.execute(
                 text("""
@@ -39,7 +39,7 @@ class StockService:
         row = result.fetchone()
         return row[0] if row and row[0] else None
 
-    async def get_stocks(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_stocks(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
         date = await self._resolve_trade_date(date)
 
@@ -94,8 +94,8 @@ class StockService:
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
     async def get_stocks_with_total(
-        self, date: Optional[str], page: int, page_size: int
-    ) -> tuple[List[dict], int]:
+        self, date: str | None, page: int, page_size: int
+    ) -> tuple[list[dict], int]:
         """获取股票列表和总数"""
         date = await self._resolve_trade_date(date)
 
@@ -123,7 +123,7 @@ class StockService:
         return data, total
 
     @staticmethod
-    def _normalize_date(value: Optional[str]) -> Optional[str]:
+    def _normalize_date(value: str | None) -> str | None:
         if not value:
             return None
         v = value.strip()
@@ -132,7 +132,7 @@ class StockService:
         return v.replace("/", "-")
 
     @staticmethod
-    def _parse_adjust(value: Optional[str]) -> AdjustType:
+    def _parse_adjust(value: str | None) -> AdjustType:
         mapping = {
             "bfq": AdjustType.NO_ADJUST,
             "qfq": AdjustType.FORWARD,
@@ -140,16 +140,278 @@ class StockService:
         }
         return mapping.get((value or "bfq").lower(), AdjustType.NO_ADJUST)
 
+    @staticmethod
+    def _to_float(value: object) -> float | None:
+        if value is None:
+            return None
+        if isinstance(value, float):
+            return value
+        if isinstance(value, int):
+            return float(value)
+        if isinstance(value, Decimal):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _normalize_indicator_key(name: str | None) -> str:
+        return str(name or "").strip().lower()
+
+    @staticmethod
+    def _pattern_signal(pattern_type: str | None) -> str:
+        pattern = str(pattern_type or "").strip().lower()
+        if pattern in {"reversal", "breakout", "trend"}:
+            return "bullish"
+        if pattern == "breakdown":
+            return "bearish"
+        return "neutral"
+
+    async def _get_latest_bar_snapshot(self, ts_code: str) -> dict | None:
+        query = text("""
+            SELECT
+                trade_date,
+                open,
+                high,
+                low,
+                close,
+                pre_close,
+                change,
+                pct_chg,
+                vol,
+                amount
+            FROM daily_bars
+            WHERE ts_code = :ts_code
+            ORDER BY trade_date DESC
+            LIMIT 1
+        """)
+        result = await self.db.execute(query, {"ts_code": ts_code})
+        row = result.fetchone()
+        if not row:
+            return None
+
+        latest_bar = dict(row._mapping)
+        return {
+            "trade_date": latest_bar.get("trade_date"),
+            "open": self._to_float(latest_bar.get("open")),
+            "high": self._to_float(latest_bar.get("high")),
+            "low": self._to_float(latest_bar.get("low")),
+            "close": self._to_float(latest_bar.get("close")),
+            "pre_close": self._to_float(latest_bar.get("pre_close")),
+            "change": self._to_float(latest_bar.get("change")),
+            "change_rate": self._to_float(latest_bar.get("pct_chg")),
+            "vol": self._to_float(latest_bar.get("vol")),
+            "amount": self._to_float(latest_bar.get("amount")),
+        }
+
+    async def _get_latest_indicator_snapshot(self, ts_code: str) -> dict | None:
+        latest_trade_date_query = text("""
+            SELECT MAX(trade_date) AS trade_date
+            FROM indicators
+            WHERE ts_code = :ts_code
+        """)
+        latest_trade_date_result = await self.db.execute(
+            latest_trade_date_query, {"ts_code": ts_code}
+        )
+        latest_trade_date_row = latest_trade_date_result.fetchone()
+        trade_date = latest_trade_date_row[0] if latest_trade_date_row else None
+        if not trade_date:
+            return None
+
+        indicator_query = text("""
+            SELECT indicator_name, indicator_value
+            FROM indicators
+            WHERE ts_code = :ts_code AND trade_date = :trade_date
+            ORDER BY indicator_name ASC
+        """)
+        indicator_result = await self.db.execute(
+            indicator_query, {"ts_code": ts_code, "trade_date": trade_date}
+        )
+        rows = indicator_result.fetchall()
+
+        values: dict[str, float | None] = {}
+        highlights: list[str] = []
+        for row in rows:
+            indicator_name = self._normalize_indicator_key(row._mapping.get("indicator_name"))
+            indicator_value = self._to_float(row._mapping.get("indicator_value"))
+            if not indicator_name:
+                continue
+            values[indicator_name] = indicator_value
+            if indicator_value is not None:
+                highlights.append(f"{indicator_name.upper()} {indicator_value:.2f}")
+
+        return {
+            "trade_date": trade_date,
+            "values": values,
+            "highlights": highlights[:5],
+        }
+
+    async def _get_recent_patterns(self, ts_code: str, limit: int = 5) -> dict | None:
+        query = text("""
+            SELECT trade_date, pattern_name, pattern_type, confidence
+            FROM patterns
+            WHERE ts_code = :ts_code
+            ORDER BY trade_date DESC, confidence DESC NULLS LAST, pattern_name ASC
+            LIMIT :limit
+        """)
+        result = await self.db.execute(query, {"ts_code": ts_code, "limit": limit})
+        rows = [dict(row._mapping) for row in result.fetchall()]
+        if not rows:
+            return None
+
+        bullish_count = 0
+        bearish_count = 0
+        neutral_count = 0
+        latest_hits: list[dict] = []
+        for row in rows:
+            signal = self._pattern_signal(row.get("pattern_type"))
+            if signal == "bullish":
+                bullish_count += 1
+            elif signal == "bearish":
+                bearish_count += 1
+            else:
+                neutral_count += 1
+
+            confidence = self._to_float(row.get("confidence"))
+            latest_hits.append(
+                {
+                    "trade_date": row.get("trade_date"),
+                    "pattern_name": row.get("pattern_name"),
+                    "pattern_type": row.get("pattern_type"),
+                    "confidence": confidence,
+                    "signal": signal,
+                    "summary": (
+                        f"{row.get('pattern_name')} on {row.get('trade_date')}"
+                        if confidence is None
+                        else f"{row.get('pattern_name')} on {row.get('trade_date')} "
+                        f"(confidence {confidence:.2f})"
+                    ),
+                }
+            )
+
+        return {
+            "latest_trade_date": rows[0].get("trade_date"),
+            "hit_count": len(rows),
+            "bullish_count": bullish_count,
+            "bearish_count": bearish_count,
+            "neutral_count": neutral_count,
+            "latest_hits": latest_hits,
+        }
+
+    def _build_data_freshness(
+        self,
+        latest_trade_date: str | None,
+        indicator_trade_date: str | None,
+        pattern_trade_date: str | None,
+    ) -> dict:
+        return {
+            "price_trade_date": latest_trade_date,
+            "indicator_trade_date": indicator_trade_date,
+            "pattern_trade_date": pattern_trade_date,
+            "latest_trade_date": latest_trade_date,
+            "price_current": latest_trade_date is not None,
+            "indicator_current": bool(latest_trade_date and indicator_trade_date == latest_trade_date),
+            "pattern_current": bool(latest_trade_date and pattern_trade_date == latest_trade_date),
+        }
+
+    def _build_validation_context(
+        self,
+        latest_bar: dict | None,
+        latest_indicator_snapshot: dict | None,
+        recent_patterns: dict | None,
+    ) -> dict:
+        screening_metrics: list[dict] = []
+        pattern_annotations: list[dict] = []
+
+        if latest_bar:
+            trade_date = latest_bar.get("trade_date")
+            close = latest_bar.get("close")
+            change_rate = latest_bar.get("change_rate")
+            amount = latest_bar.get("amount")
+
+            if close is not None:
+                screening_metrics.append(
+                    {
+                        "metric": "close",
+                        "trade_date": trade_date,
+                        "value": close,
+                        "summary": f"Latest close {close:.2f}",
+                        "source": "daily_bars",
+                        "context": {"field": "close"},
+                    }
+                )
+            if change_rate is not None:
+                screening_metrics.append(
+                    {
+                        "metric": "change_rate",
+                        "trade_date": trade_date,
+                        "value": change_rate,
+                        "summary": f"Daily change {change_rate:.2f}%",
+                        "source": "daily_bars",
+                        "context": {"field": "pct_chg"},
+                    }
+                )
+            if amount is not None:
+                screening_metrics.append(
+                    {
+                        "metric": "amount",
+                        "trade_date": trade_date,
+                        "value": amount,
+                        "summary": f"Turnover {amount:.0f}",
+                        "source": "daily_bars",
+                        "context": {"field": "amount"},
+                    }
+                )
+
+        if latest_indicator_snapshot:
+            trade_date = latest_indicator_snapshot.get("trade_date")
+            for key, value in latest_indicator_snapshot.get("values", {}).items():
+                if value is None:
+                    continue
+                screening_metrics.append(
+                    {
+                        "metric": key,
+                        "trade_date": trade_date,
+                        "value": value,
+                        "summary": f"{key.upper()} {value:.2f}",
+                        "source": "indicators",
+                        "context": {"field": key},
+                    }
+                )
+
+        if recent_patterns:
+            for hit in recent_patterns.get("latest_hits", []):
+                pattern_annotations.append(
+                    {
+                        "metric": hit.get("pattern_name", ""),
+                        "trade_date": hit.get("trade_date"),
+                        "value": hit.get("confidence"),
+                        "summary": hit.get("summary"),
+                        "source": "patterns",
+                        "context": {
+                            "pattern_type": hit.get("pattern_type"),
+                            "signal": hit.get("signal"),
+                        },
+                    }
+                )
+
+        return {
+            "as_of_trade_date": (latest_bar or {}).get("trade_date"),
+            "screening_metrics": screening_metrics,
+            "pattern_annotations": pattern_annotations,
+        }
+
     async def _fetch_adjusted_bars(
         self,
         symbol: str,
-        start_date: Optional[str],
-        end_date: Optional[str],
+        start_date: str | None,
+        end_date: str | None,
         adjust: AdjustType,
-    ) -> List[dict]:
+    ) -> list[dict]:
         baostock_provider = BaoStockProvider()
         eastmoney_crawler = EastMoneyCrawler()
-        bars: List[dict] = []
+        bars: list[dict] = []
 
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
@@ -176,7 +438,7 @@ class StockService:
             )
         await eastmoney_crawler.close()
 
-        normalized: List[dict] = []
+        normalized: list[dict] = []
         for row in bars or []:
             date_raw = str(row.get("date", "")).strip()
             trade_date = date_raw.replace("-", "")
@@ -197,8 +459,8 @@ class StockService:
         return normalized
 
     async def _query_bars_from_db(
-        self, ts_code: str, start_date: Optional[str], end_date: Optional[str]
-    ) -> List[dict]:
+        self, ts_code: str, start_date: str | None, end_date: str | None
+    ) -> list[dict]:
         if not (start_date and end_date):
             return []
         bars_query = text("""
@@ -213,8 +475,8 @@ class StockService:
         return [dict(row._mapping) for row in bars_result.fetchall()]
 
     async def get_stock_detail(
-        self, code: str, start_date: Optional[str], end_date: Optional[str], adjust: str = "bfq"
-    ) -> Optional[dict]:
+        self, code: str, start_date: str | None, end_date: str | None, adjust: str = "bfq"
+    ) -> dict | None:
         candidates = build_code_variants(code)
         symbol = extract_symbol(code)
         stock_query = text("""
@@ -249,6 +511,25 @@ class StockService:
 
         stock = dict(row._mapping)
         internal_ts_code = stock["ts_code"]
+        latest_bar = await self._get_latest_bar_snapshot(internal_ts_code)
+        latest_indicator_snapshot = await self._get_latest_indicator_snapshot(internal_ts_code)
+        recent_patterns = await self._get_recent_patterns(internal_ts_code)
+
+        latest_trade_date = latest_bar["trade_date"] if latest_bar else None
+        stock["latest_trade_date"] = latest_trade_date
+        stock["latest_bar"] = latest_bar
+        stock["latest_indicator_snapshot"] = latest_indicator_snapshot
+        stock["recent_patterns"] = recent_patterns
+        stock["data_freshness"] = self._build_data_freshness(
+            latest_trade_date=latest_trade_date,
+            indicator_trade_date=(latest_indicator_snapshot or {}).get("trade_date"),
+            pattern_trade_date=(recent_patterns or {}).get("latest_trade_date"),
+        )
+        stock["validation_context"] = self._build_validation_context(
+            latest_bar=latest_bar,
+            latest_indicator_snapshot=latest_indicator_snapshot,
+            recent_patterns=recent_patterns,
+        )
 
         requested_adjust = adjust.lower()
         stock["adjust_requested"] = requested_adjust
@@ -283,7 +564,7 @@ class StockService:
 
         return normalize_stock_payload(stock)
 
-    async def get_etf_list(self, date: Optional[str], page: int, page_size: int) -> List[dict]:
+    async def get_etf_list(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
 
         if date:
@@ -336,7 +617,7 @@ class StockService:
         result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
-    async def get_etf_detail(self, code: str) -> Optional[dict]:
+    async def get_etf_detail(self, code: str) -> dict | None:
         candidates = build_code_variants(code)
         symbol = extract_symbol(code)
         query = text("""
