@@ -88,7 +88,10 @@
   - 已执行浏览器登录态验证：`agent-browser open http://localhost:3002 && agent-browser wait --load networkidle && agent-browser snapshot -i`
   - 登录态 Dashboard 页面可见 4 张卡片与对应入口：`查看股票列表`、`管理关注`、`进入筛选页`、`查看回测页`
   - 登录态页面正文已确认 4 张卡片展示真实内容：市场温度计显示涨跌家数/涨停跌停/指数数据；我的关注显示空列表提示；今日扫描发现显示 `2026-04-03` 与 0 命中概要；策略信号/回测更新显示暂无回测记录
-  - 同一登录态下已分别打开 4 个目标页并确认页面标题：`/stocks` → `股票列表 - 智能股票分析平台`，`/attention` → `我的关注 - 智能股票分析平台`，`/selection` → `策略选股 - 智能股票分析平台`，`/backtest` → `策略回测 - 智能股票分析平台`
+  - 联调结果：已在登录态 Dashboard 中验证该卡片入口，点击“查看股票列表”后成功进入“股票列表”，并确认页面元素“股票列表”标题与股票表格可见
+  - 联调结果：已在登录态 Dashboard 中验证该卡片入口，点击“管理关注”后成功进入“我的关注”，并确认页面元素“添加关注”按钮与关注列表空态可见
+  - 联调结果：已在登录态 Dashboard 中验证该卡片入口，点击“进入筛选页”后成功进入“策略选股”，并确认页面元素“开始筛选”按钮与筛选条件面板可见
+  - 联调结果：已在登录态 Dashboard 中验证该卡片入口，点击“查看回测页”后成功进入“策略回测”，并确认页面元素“运行回测”按钮与回测结果区块可见
   - 环境说明：当前执行环境下宿主机侧 `localhost:8001/3002` 无法直连，联调记录以容器内验证为准，不记为应用故障
 - `M0-03 前端构建验收`
   - `cd web && npm run typecheck` 通过
@@ -98,7 +101,7 @@
   - 已执行 `.venv/bin/pytest tests/test_screening_baseline.py tests/test_api.py::TestMarketTaskHealthAPI tests/test_selection_market_services.py tests/test_selection_today_summary.py tests/test_backtest_report_structure.py tests/test_strategy_selection_bridge.py -q`
   - 结果：`24 passed, 1 warning`
 - `M0` 当前结论
-  - 已具备 1 条真实 Dashboard 登录态联调留痕，可确认 4 张卡片展示、目标页可达、`selection/today-summary` 匿名访问口径、前端静态壳与主链测试状态
+  - 已具备 1 条真实 Dashboard 登录态联调留痕，可确认 4 张卡片展示、4 条从 Dashboard 出发的直接点击路径、`selection/today-summary` 匿名访问口径、前端静态壳与主链测试状态
   - 当前 `M0` 剩余主要缺口不再是 Dashboard 联调，而是“10 个交易日稳定”口径与可合并 PR 边界收敛
 
 #### `M1` Phase 1.5 数据层 / Timescale 底座
@@ -264,7 +267,7 @@
   - [x] `GET /api/v1/market/summary` - 返回涨跌家数、涨停跌停、主要指数等聚合数据
   - [x] `GET /api/v1/selection/today-summary` - 返回已保存条件的今日命中概要
 - **待做**:
-  - [ ] 若需要更强证据，可补充截图级留痕；当前已具备登录态文字联调记录
+  - [ ] 若需要更强证据，可补充截图级留痕；当前已具备登录态文字联调记录与逐卡片点击证据
   - [x] 校正 Dashboard 文案与 PRD 验收描述,避免计划文档继续落后于代码
 - **已验证**:
   - [x] `tests/test_market_summary.py` 已覆盖 `GET /api/v1/market/summary`
@@ -275,7 +278,10 @@
   - [x] 2026-04-04 frontend 容器内 `wget http://127.0.0.1/` 返回 200，静态壳可访问
   - [x] 2026-04-04 容器内匿名访问 `GET /api/v1/selection/today-summary` 返回 `401 Unauthorized`，认证缺失已回到预期行为，不再报 500
   - [x] 2026-04-04 浏览器登录态打开 Dashboard，页面正文可见 4 张卡片：市场温度计、我的关注、今日扫描发现、策略信号 / 回测更新
-  - [x] 2026-04-04 浏览器登录态下可打开 4 个目标页：`/stocks`、`/attention`、`/selection`、`/backtest`
+  - [x] 2026-04-05 点击“查看股票列表”后进入 `/stocks`，页面标题“股票列表 - 智能股票分析平台”与股票列表表格可见
+  - [x] 2026-04-05 点击“管理关注”后进入 `/attention`，页面标题“我的关注 - 智能股票分析平台”与“添加关注”按钮可见
+  - [x] 2026-04-05 点击“进入筛选页”后进入 `/selection`，页面标题“策略选股 - 智能股票分析平台”与“开始筛选”按钮可见
+  - [x] 2026-04-05 点击“查看回测页”后进入 `/backtest`，页面标题“策略回测 - 智能股票分析平台”与“运行回测”按钮可见
 - **当前缺口**:
   - [ ] 缺少前端工作台级联调 / E2E 验收入口;当前验证主要停留在 API 和静态代码接线层
   - [ ] `web/package.json` 当前仅提供 `dev / build / typecheck / lint / preview`,未发现 Playwright / Cypress / Vitest 等前端联调测试资产
@@ -285,7 +291,7 @@
   - [x] 本地运行环境已具备最小条件:后端 `.venv` 可用,前端 `node_modules` / `package-lock.json` / `npm` 均已就绪
   - [x] 因此 Dashboard 收尾更适合优先走"手工联调记录"而不是先补测试框架
   - [x] 2026-04-04 已确认 dev 容器中的基础 API 与静态壳链路正常
-  - [x] 2026-04-04 已补齐登录态下 4 张卡片展示与目标页可达的文字联调记录
+  - [x] 2026-04-05 已补齐登录态下 4 张卡片展示与 4 条从 Dashboard 出发的直接点击证据
   - [ ] 当前仍缺少自动化 E2E 与截图级证据，但这不再是 Dashboard 功能链路阻塞
 - **下一步动作**:
   - [ ] 如需增强留痕，可补 Dashboard 截图与逐卡片点击录像
