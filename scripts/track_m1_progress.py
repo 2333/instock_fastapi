@@ -26,22 +26,37 @@ sys.path.insert(0, str(REPO_ROOT))
 
 # 任务定义映射（任务文件 -> 元数据）
 TASK_META = {
+    # WS-0 基础设施 (5)
     "WS0-01": {"name": "Alembic 基线", "owner": "Agent A", "stream": "WS-0"},
     "WS0-02": {"name": "时间列规范", "owner": "Agent A", "stream": "WS-0"},
     "WS0-03": {"name": "Timescale 规范", "owner": "Agent A", "stream": "WS-0"},
     "WS0-04": {"name": "pro_bar 抽象", "owner": "Agent B", "stream": "WS-0"},
     "WS0-05": {"name": "质量框架骨架", "owner": "Agent F", "stream": "WS-0"},
+
+    # WS-1 核心改造 (5 已准备 + 7 待拆解)
     "WS1-01": {"name": "股票同步", "owner": "Agent C", "stream": "WS-1"},
     "WS1-02": {"name": "日线回填", "owner": "Agent C", "stream": "WS-1"},
     "WS1-03": {"name": "指标引擎", "owner": "Agent D", "stream": "WS-1"},
     "WS1-04": {"name": "分钟线", "owner": "Agent C", "stream": "WS-1"},
     "WS1-05": {"name": "基本面数据", "owner": "Agent C", "stream": "WS-1"},
+    # WS1-06~12 待拆解（预留）
+    "WS1-06": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-07": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-08": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-09": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-10": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-11": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+    "WS1-12": {"name": "待拆解", "owner": "-", "stream": "WS-1"},
+
+    # WS-2 新接口扩展 (6)
     "WS2-01": {"name": "资金流向", "owner": "Agent E", "stream": "WS-2"},
     "WS2-02": {"name": "涨跌停列表", "owner": "Agent E", "stream": "WS-2"},
     "WS2-03": {"name": "涨跌停明细", "owner": "Agent E", "stream": "WS-2"},
     "WS2-04": {"name": "公告数据", "owner": "Agent E", "stream": "WS-2"},
     "WS2-05": {"name": "历史快照", "owner": "Agent E", "stream": "WS-2"},
     "WS2-06": {"name": "龙虎榜", "owner": "Agent E", "stream": "WS-2"},
+
+    # WS-3 质量保障 (6)
     "WS3-01": {"name": "完整性检查", "owner": "Agent F", "stream": "WS-3"},
     "WS3-02": {"name": "告警配置", "owner": "Agent F", "stream": "WS-3"},
     "WS3-03": {"name": "监测增强", "owner": "Agent F", "stream": "WS-3"},
@@ -226,6 +241,23 @@ class M1ProgressTracker:
         with open(log_file, 'a') as f:
             f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
 
+    def _normalize_state(self, state: str) -> str:
+        """标准化状态字符串（处理 emoji 前缀和标记格式）"""
+        state = state.strip()
+        # 移除 emoji
+        state_clean = re.sub(r'[⏳✅🔄⚠️❌]', '', state).strip()
+        # 处理反引号包裹的状态
+        state_clean = re.sub(r'`', '', state_clean).strip().lower()
+
+        if 'done' in state_clean or '完成' in state or '✅' in state:
+            return 'completed'
+        elif 'progress' in state_clean or 'in_progress' in state_clean or '进行' in state or '🔄' in state:
+            return 'in_progress'
+        elif 'blocked' in state_clean or '阻塞' in state or '❌' in state:
+            return 'blocked'
+        else:
+            return 'pending'  # todo / 未启动 / ⏳
+
     def generate_summary_report(self) -> dict:
         """生成进度摘要报告"""
         content = self.tracker_path.read_text()
@@ -244,8 +276,15 @@ class M1ProgressTracker:
             if '|' in line and 'WS' in line:
                 parts = [p.strip() for p in line.split('|')]
                 if len(parts) >= 4:
-                    task_id = parts[1]
-                    state = parts[3]
+                    # parts[1] 格式: "WS0-01 Alembic 基线" 或 "WS-0 基础设施"
+                    task_field = parts[1]
+                    # 提取纯任务 ID (WSx-xx 格式)
+                    task_id_match = re.search(r'(WS\d+-\d+)', task_field)
+                    if not task_id_match:
+                        continue  # 跳过标题行（如 "WS-0 基础设施"）
+                    task_id = task_id_match.group(1)
+                    raw_state = parts[3]
+                    state = self._normalize_state(raw_state)
                     stream = TASK_META.get(task_id, {}).get('stream', 'unknown')
 
                     stats['total'] += 1
