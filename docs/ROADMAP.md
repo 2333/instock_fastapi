@@ -2,7 +2,7 @@
 
 > 版本：v2.0 | 更新日期：2026-04-01
 > 基于代码实际进度重新评估，将 Phase 0 拆分为 0a/0b
-> v1.0 归档：[ROADMAP_v1_archive.md](./ROADMAP_v1_archive.md)
+> v1.0 归档：[ROADMAP_v1_archive.md](./archive/ROADMAP_v1_archive.md)
 
 ---
 

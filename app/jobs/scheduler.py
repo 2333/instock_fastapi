@@ -175,15 +175,6 @@ def start_scheduler() -> bool:
         name="数据清理",
         max_instances=1,
     )
-    scheduler.add_job(
-        id="check_alerts",
-        func="app.jobs.tasks.alert_checker:check_all_alerts",
-        trigger="interval",
-        minutes=5,
-        name="预警检查",
-        max_instances=1,
-        coalesce=True,
-    )
     scheduler.start()
     logger.info("定时任务调度器已启动")
     return True

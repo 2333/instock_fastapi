@@ -101,7 +101,28 @@ async def test_list_results_exposes_structured_fields_when_saved_payload_contain
 async def test_get_result_builds_structured_report_for_legacy_payload():
     query_result = Mock()
     row = MagicMock()
-    row.__getitem__.side_effect = lambda idx: [12, 7, "demo", {"summary": {"total_return": 12.3}, "meta": {"strategy": "ma_crossover", "code": "000001", "name": "平安银行"}, "equity_curve": [{"date": "20240102", "equity": 100000, "benchmark": 100000}], "trades": [{"id": 1, "date": "20240104", "type": "SELL", "price": 11.0, "quantity": 1000, "profit": 1000.0, "return_pct": 10.0, "hold_days": 2}]}][idx]
+    row.__getitem__.side_effect = lambda idx: [
+        12,
+        7,
+        "demo",
+        {
+            "summary": {"total_return": 12.3},
+            "meta": {"strategy": "ma_crossover", "code": "000001", "name": "平安银行"},
+            "equity_curve": [{"date": "20240102", "equity": 100000, "benchmark": 100000}],
+            "trades": [
+                {
+                    "id": 1,
+                    "date": "20240104",
+                    "type": "SELL",
+                    "price": 11.0,
+                    "quantity": 1000,
+                    "profit": 1000.0,
+                    "return_pct": 10.0,
+                    "hold_days": 2,
+                }
+            ],
+        },
+    ][idx]
     row._mapping = {
         "id": 12,
         "user_id": 7,

@@ -185,7 +185,14 @@ async def test_indicator_and_market_endpoints(client):
             new=AsyncMock(
                 return_value={
                     "baseline_trade_date": "20240102",
-                    "datasets": [{"dataset": "daily_bars", "latest_trade_date": "20240102", "baseline_trade_date": "20240102", "current": True}],
+                    "datasets": [
+                        {
+                            "dataset": "daily_bars",
+                            "latest_trade_date": "20240102",
+                            "baseline_trade_date": "20240102",
+                            "current": True,
+                        }
+                    ],
                     "alerts": [
                         {
                             "task_name": "fetch_fund_flow",
@@ -428,7 +435,9 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
     assert history_response.json()["success"] is True
     assert history_response.json()["data"][0]["code"] == "000001"
     assert history_response.json()["data"][0]["signal"] == "hold"
-    assert history_response.json()["data"][0]["reason_summary"] == "Historical screening record sel-1"
+    assert (
+        history_response.json()["data"][0]["reason_summary"] == "Historical screening record sel-1"
+    )
     assert screening_history_response.json()["data"]["total"] == 1
     assert screening_history_response.json()["data"]["items"][0]["code"] == "000001"
 

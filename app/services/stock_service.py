@@ -311,7 +311,9 @@ class StockService:
             "pattern_trade_date": pattern_trade_date,
             "latest_trade_date": latest_trade_date,
             "price_current": latest_trade_date is not None,
-            "indicator_current": bool(latest_trade_date and indicator_trade_date == latest_trade_date),
+            "indicator_current": bool(
+                latest_trade_date and indicator_trade_date == latest_trade_date
+            ),
             "pattern_current": bool(latest_trade_date and pattern_trade_date == latest_trade_date),
         }
 

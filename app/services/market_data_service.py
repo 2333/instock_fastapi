@@ -29,13 +29,11 @@ class MarketDataService:
             raise ValueError(f"unsupported trade date table: {table_name}")
         if target_date:
             result = await self.db.execute(
-                text(
-                    f"""
+                text(f"""
                     SELECT MAX(trade_date) as resolved_date
                     FROM {table_name}
                     WHERE trade_date <= :target_date
-                    """
-                ),
+                    """),
                 {"target_date": target_date},
             )
         else:

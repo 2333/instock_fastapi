@@ -14,7 +14,6 @@ from app.api.routers import (
     auth_router,
     backtest_router,
     etf_router,
-    events_router,
     fund_flow_router,
     indicator_router,
     market_router,
@@ -105,7 +104,6 @@ app.include_router(fund_flow_router.router, prefix="/api/v1")
 app.include_router(attention_router.router, prefix="/api/v1")
 app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(market_router.router, prefix="/api/v1")
-app.include_router(events_router.router, prefix="/api/v1")
 
 
 @app.get("/", response_class=HTMLResponse)

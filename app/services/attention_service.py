@@ -28,7 +28,14 @@ class AttentionService:
             result = await self.db.execute(query, {"user_id": user_id})
         return [row._mapping for row in result.fetchall()]
 
-    async def add(self, code: str, user_id: int, group: str = "watch", notes: str | None = None, alert_conditions: dict | None = None) -> dict[str, Any]:
+    async def add(
+        self,
+        code: str,
+        user_id: int,
+        group: str = "watch",
+        notes: str | None = None,
+        alert_conditions: dict | None = None,
+    ) -> dict[str, Any]:
         ts_query = text("SELECT ts_code FROM stocks WHERE symbol = :code")
         result = await self.db.execute(ts_query, {"code": code})
         row = result.fetchone()
@@ -39,7 +46,9 @@ class AttentionService:
         ts_code = row[0]
 
         # Check if exists, then update; else insert
-        check_query = text("SELECT id FROM attention WHERE user_id = :user_id AND ts_code = :ts_code")
+        check_query = text(
+            "SELECT id FROM attention WHERE user_id = :user_id AND ts_code = :ts_code"
+        )
         check_result = await self.db.execute(check_query, {"user_id": user_id, "ts_code": ts_code})
         existing = check_result.fetchone()
 
@@ -50,12 +59,15 @@ class AttentionService:
                 SET group = :group, notes = :notes, alert_conditions = :alert_conditions
                 WHERE id = :id
             """)
-            await self.db.execute(update_query, {
-                "id": existing[0],
-                "group": group,
-                "notes": notes,
-                "alert_conditions": alert_conditions,
-            })
+            await self.db.execute(
+                update_query,
+                {
+                    "id": existing[0],
+                    "group": group,
+                    "notes": notes,
+                    "alert_conditions": alert_conditions,
+                },
+            )
             await self.db.commit()
             return {"status": "success", "code": code}
         else:
@@ -64,13 +76,16 @@ class AttentionService:
                 INSERT INTO attention (ts_code, user_id, group, notes, alert_conditions, created_at)
                 VALUES (:ts_code, :user_id, :group, :notes, :alert_conditions, NOW())
             """)
-            await self.db.execute(insert_query, {
-                "ts_code": ts_code,
-                "user_id": user_id,
-                "group": group,
-                "notes": notes,
-                "alert_conditions": alert_conditions,
-            })
+            await self.db.execute(
+                insert_query,
+                {
+                    "ts_code": ts_code,
+                    "user_id": user_id,
+                    "group": group,
+                    "notes": notes,
+                    "alert_conditions": alert_conditions,
+                },
+            )
             await self.db.commit()
             return {"status": "success", "code": code}
 
@@ -89,7 +104,9 @@ class AttentionService:
         await self.db.commit()
         return {"status": "success", "code": code}
 
-    async def update(self, attention_id: int, user_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+    async def update(
+        self, attention_id: int, user_id: int, updates: dict[str, Any]
+    ) -> dict[str, Any]:
         """Update attention item fields (group, notes, alert_conditions)."""
         fields: list[str] = []
         params: dict[str, Any] = {"id": attention_id, "user_id": user_id}
@@ -107,7 +124,9 @@ class AttentionService:
         if not fields:
             return {"status": "error", "message": "No fields to update"}
 
-        query = text(f"UPDATE attention SET {', '.join(fields)} WHERE id = :id AND user_id = :user_id")
+        query = text(
+            f"UPDATE attention SET {', '.join(fields)} WHERE id = :id AND user_id = :user_id"
+        )
         await self.db.execute(query, params)
         await self.db.commit()
         return {"status": "success", "id": attention_id}

@@ -7,8 +7,8 @@ from sqlalchemy import select, text
 
 from app.jobs import market_calendar
 from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
-from app.jobs.tasks.fetch_market_reference_task import summarize_block_trades, summarize_top_list
 from app.jobs.tasks.fetch_daily_task import _ensure_backfill_state_table, save_stocks
+from app.jobs.tasks.fetch_market_reference_task import summarize_block_trades, summarize_top_list
 from app.models.stock_model import Base, DailyBar, Stock
 from tests.conftest import async_engine_test, async_session_factory_test
 
@@ -268,7 +268,10 @@ async def test_is_trading_day_returns_false_on_weekend_without_calendar_call():
 def test_should_skip_market_task_respects_force_run(monkeypatch):
     monkeypatch.setenv("MARKET_TASK_FORCE_RUN", "true")
 
-    assert market_calendar.should_skip_market_task("资金流向抓取任务", today_is_trading_day=False) is False
+    assert (
+        market_calendar.should_skip_market_task("资金流向抓取任务", today_is_trading_day=False)
+        is False
+    )
 
 
 def test_summarize_top_list_aggregates_by_ts_code():

@@ -30,7 +30,9 @@ class TestStocksAPI:
         assert data["data_freshness"]["indicator_current"] is True
         assert data["latest_indicator_snapshot"]["values"]["rsi"] == 56.78
         assert data["recent_patterns"]["latest_hits"][0]["pattern_name"] == "HAMMER"
-        assert data["validation_context"]["pattern_annotations"][0]["context"]["signal"] == "bullish"
+        assert (
+            data["validation_context"]["pattern_annotations"][0]["context"]["signal"] == "bullish"
+        )
 
 
 class TestDailyBarsAPI:
@@ -47,7 +49,9 @@ class TestDailyBarsAPI:
         assert "bars" in data
         assert len(data["bars"]) == 1
 
-    async def test_get_stock_detail_reports_adjust_fallback_when_requested_data_missing(self, client):
+    async def test_get_stock_detail_reports_adjust_fallback_when_requested_data_missing(
+        self, client
+    ):
         with patch(
             "app.services.stock_service.StockService._fetch_adjusted_bars",
             new=AsyncMock(return_value=[]),
@@ -87,8 +91,7 @@ class TestHealthCheck:
 class TestMarketTaskHealthAPI:
     async def test_get_task_health_exposes_stale_dataset_and_active_alerts(self, client):
         async with async_session_factory_test() as session:
-            await session.execute(
-                text("""
+            await session.execute(text("""
                     CREATE TABLE IF NOT EXISTS data_fetch_audit (
                       task_name VARCHAR(64) NOT NULL,
                       entity_type VARCHAR(64) NOT NULL,
@@ -100,25 +103,20 @@ class TestMarketTaskHealthAPI:
                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                       PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
                     )
-                """)
-            )
+                """))
             await session.execute(text("DELETE FROM data_fetch_audit"))
             await session.execute(text("DELETE FROM fund_flows"))
-            await session.execute(
-                text("""
+            await session.execute(text("""
                     INSERT INTO data_fetch_audit (
                         task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
                     ) VALUES
                         ('fetch_fund_flow', 'stock_fund_flow', 'ALL', '20240101', 'needs_fallback', 'tushare', 'primary source returned empty', '2024-01-02 10:00:00'),
                         ('fetch_market_reference', 'stock_top', 'ALL', '20240102', 'done', 'tushare', 'rows=12', '2024-01-02 11:00:00')
-                """)
-            )
-            await session.execute(
-                text("""
+                """))
+            await session.execute(text("""
                     INSERT INTO fund_flows (ts_code, trade_date, created_at)
                     VALUES ('000001.SZ', '20240101', '2024-01-02 10:00:00')
-                """)
-            )
+                """))
             await session.commit()
 
         response = await client.get("/api/v1/market/task-health")
@@ -138,8 +136,7 @@ class TestMarketTaskHealthAPI:
 
     async def test_task_health_staleness_matches_scheduler_recovery_decision(self, client):
         async with async_session_factory_test() as session:
-            await session.execute(
-                text("""
+            await session.execute(text("""
                     CREATE TABLE IF NOT EXISTS data_fetch_audit (
                       task_name VARCHAR(64) NOT NULL,
                       entity_type VARCHAR(64) NOT NULL,
@@ -151,35 +148,36 @@ class TestMarketTaskHealthAPI:
                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                       PRIMARY KEY (task_name, entity_type, entity_key, trade_date)
                     )
-                """)
-            )
+                """))
             await session.execute(text("DELETE FROM data_fetch_audit"))
             await session.execute(text("DELETE FROM fund_flows"))
-            await session.execute(
-                text("""
+            await session.execute(text("""
                     INSERT INTO data_fetch_audit (
                         task_name, entity_type, entity_key, trade_date, status, source, note, updated_at
                     ) VALUES (
                         'fetch_fund_flow', 'stock_fund_flow', 'ALL', '20240101',
                         'needs_fallback', 'tushare', 'primary source returned empty', '2024-01-02 16:05:00'
                     )
-                """)
-            )
-            await session.execute(
-                text("""
+                """))
+            await session.execute(text("""
                     INSERT INTO fund_flows (ts_code, trade_date, created_at)
                     VALUES ('000001.SZ', '20240101', '2024-01-02 16:05:00')
-                """)
-            )
+                """))
             await session.commit()
 
         response = await client.get("/api/v1/market/task-health")
 
         assert response.status_code == 200
         data = response.json()
-        fund_flow_dataset = next(item for item in data["datasets"] if item["dataset"] == "fund_flows")
+        fund_flow_dataset = next(
+            item for item in data["datasets"] if item["dataset"] == "fund_flows"
+        )
 
-        latest_trade_dates = [item["latest_trade_date"] for item in data["datasets"] if item["dataset"] == "fund_flows"]
+        latest_trade_dates = [
+            item["latest_trade_date"]
+            for item in data["datasets"]
+            if item["dataset"] == "fund_flows"
+        ]
         should_recover = should_recover_market_job(
             now=datetime(2024, 1, 2, 16, 5, tzinfo=ZoneInfo("Asia/Shanghai")),
             scheduled_time=time(hour=16, minute=0),

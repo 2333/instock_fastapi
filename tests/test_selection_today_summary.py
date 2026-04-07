@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.dependencies import get_current_user
-from app.models.stock_model import SelectionCondition
 from app.main import app
+from app.models.stock_model import SelectionCondition
 from tests.conftest import async_session_factory_test
 
 

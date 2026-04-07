@@ -44,7 +44,11 @@ def _dump_nested_payload(value: object) -> dict:
         return value.model_dump(by_alias=True, exclude_none=True)
     if isinstance(value, dict):
         return {
-            key: _dump_nested_payload(item) if isinstance(item, dict) or hasattr(item, "model_dump") else item
+            key: (
+                _dump_nested_payload(item)
+                if isinstance(item, dict) or hasattr(item, "model_dump")
+                else item
+            )
             for key, item in value.items()
             if item is not None
         }
@@ -55,19 +59,26 @@ def _normalize_strategy_source(raw_params: dict[str, Any], backtest_config: dict
     source = str(raw_params.get("source") or "").strip()
     if source:
         return source
-    if raw_params.get("selection_filters") is not None or raw_params.get("selection_scope") is not None:
+    if (
+        raw_params.get("selection_filters") is not None
+        or raw_params.get("selection_scope") is not None
+    ):
         return "selection"
     if backtest_config:
         return "backtest"
     return "manual"
 
 
-def _normalize_strategy_template_name(raw_params: dict[str, Any], backtest_config: dict[str, Any]) -> str:
+def _normalize_strategy_template_name(
+    raw_params: dict[str, Any], backtest_config: dict[str, Any]
+) -> str:
     template_name = str(raw_params.get("template_name") or "").strip()
     if template_name:
         return template_name
 
-    strategy_type = str(backtest_config.get("strategy_type") or raw_params.get("strategy_type") or "").strip()
+    strategy_type = str(
+        backtest_config.get("strategy_type") or raw_params.get("strategy_type") or ""
+    ).strip()
     if strategy_type:
         return strategy_type
 
@@ -83,7 +94,11 @@ def _normalize_strategy_template_name(raw_params: dict[str, Any], backtest_confi
         if nested_template:
             return nested_template
 
-    return "selection_bridge" if _normalize_strategy_source(raw_params, backtest_config) == "selection" else "manual"
+    return (
+        "selection_bridge"
+        if _normalize_strategy_source(raw_params, backtest_config) == "selection"
+        else "manual"
+    )
 
 
 def _normalize_backtest_config(raw_params: dict[str, Any]) -> dict[str, Any]:
@@ -100,7 +115,9 @@ def _normalize_backtest_config(raw_params: dict[str, Any]) -> dict[str, Any]:
     nested_strategy = raw_params.get("strategy")
     if isinstance(nested_strategy, dict):
         nested_strategy_params = nested_strategy.get("params")
-        if isinstance(nested_strategy_params, dict) or hasattr(nested_strategy_params, "model_dump"):
+        if isinstance(nested_strategy_params, dict) or hasattr(
+            nested_strategy_params, "model_dump"
+        ):
             nested_strategy_params = _dump_model_or_dict(nested_strategy_params, by_alias=True)
             for key in CANONICAL_BACKTEST_KEYS:
                 if key not in backtest_config and nested_strategy_params.get(key) is not None:
@@ -120,7 +137,9 @@ def _build_selection_entry_rules(
     }
 
 
-def _build_template_entry_rules(template_name: str, strategy_params: dict[str, Any]) -> dict[str, Any]:
+def _build_template_entry_rules(
+    template_name: str, strategy_params: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "mode": "template_signal",
         "template_name": template_name,
@@ -155,7 +174,9 @@ def _build_exit_rules(
     }
 
 
-def _normalize_strategy_params(raw_params: object | None, *, default_source: str | None = None) -> dict[str, Any] | None:
+def _normalize_strategy_params(
+    raw_params: object | None, *, default_source: str | None = None
+) -> dict[str, Any] | None:
     if not isinstance(raw_params, dict) and not hasattr(raw_params, "model_dump"):
         return raw_params
 
@@ -515,8 +536,7 @@ class StrategyService:
                 _dump_model_or_dict(selection_filters, by_alias=True),
                 _dump_model_or_dict(selection_scope, by_alias=True),
             ),
-            "exit_rules": exit_rules
-            or _build_exit_rules(source="selection", backtest_config={}),
+            "exit_rules": exit_rules or _build_exit_rules(source="selection", backtest_config={}),
             "backtest_config": {},
             "strategy_params": {},
         }
@@ -525,7 +545,9 @@ class StrategyService:
         return params
 
     @staticmethod
-    def build_strategy_params(params: object | None, default_source: str | None = None) -> dict[str, Any] | None:
+    def build_strategy_params(
+        params: object | None, default_source: str | None = None
+    ) -> dict[str, Any] | None:
         return _normalize_strategy_params(params, default_source=default_source)
 
     async def run_strategy(self, strategy_name: str, date: str | None):

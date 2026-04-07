@@ -102,7 +102,9 @@ async def test_get_stock_detail_uses_db_bars_for_bfq():
     db = Mock()
     db.execute = AsyncMock(
         side_effect=[
-            make_result(row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")),
+            make_result(
+                row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")
+            ),
             make_result(
                 row=make_mapping_row(
                     trade_date="20240102",
@@ -159,7 +161,9 @@ async def test_get_stock_detail_falls_back_to_bfq_when_adjusted_bars_missing():
     db = Mock()
     db.execute = AsyncMock(
         side_effect=[
-            make_result(row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")),
+            make_result(
+                row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")
+            ),
             make_result(
                 row=make_mapping_row(
                     trade_date="20240103",

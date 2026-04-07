@@ -44,9 +44,6 @@
             <span class="group-badge" :class="stock.group">{{ groupLabel(stock.group) }}</span>
           </div>
           <div class="card-actions">
-            <button class="btn-icon" @click.stop="openAlertConfig(stock)" title="设置预警">
-              🔔
-            </button>
             <button class="btn-icon" @click.stop="toggleEdit(stock)" title="编辑">
               ✏️
             </button>
@@ -72,27 +69,6 @@
             <label>备注</label>
             <textarea v-model="editForm.notes" class="form-textarea" placeholder="添加备注..." rows="2"></textarea>
           </div>
-          <div class="form-group">
-            <label>提醒条件（可选）</label>
-            <div class="alert-fields">
-              <div class="field-row">
-                <span class="field-label">价格区间</span>
-                <div class="field-inputs">
-                  <input type="number" step="0.01" v-model.number="editForm.alert_price_min" placeholder="最低" class="input-mini">
-                  <span>-</span>
-                  <input type="number" step="0.01" v-model.number="editForm.alert_price_max" placeholder="最高" class="input-mini">
-                </div>
-              </div>
-              <div class="field-row">
-                <span class="field-label">RSI 区间</span>
-                <div class="field-inputs">
-                  <input type="number" v-model.number="editForm.alert_rsi_min" placeholder="最小" min="0" max="100" class="input-mini">
-                  <span>-</span>
-                  <input type="number" v-model.number="editForm.alert_rsi_max" placeholder="最大" min="0" max="100" class="input-mini">
-                </div>
-              </div>
-            </div>
-          </div>
           <div class="edit-actions">
             <button class="btn btn-small btn-secondary" @click="cancelEdit">取消</button>
             <button class="btn btn-small btn-primary" @click="saveEdit(stock.id)">保存</button>
@@ -101,56 +77,6 @@
 
         <div v-else class="card-summary">
           <div v-if="stock.notes" class="notes-preview">{{ stock.notes }}</div>
-          <div v-if="hasAlerts(stock)" class="alerts-badge">
-            🔔 提醒已设置
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 快速预警模态框 -->
-    <div v-if="alertModal.show" class="alert-modal-overlay" @click.self="closeAlertModal">
-      <div class="alert-modal">
-        <div class="alert-modal-header">
-          <h3>快速设置预警</h3>
-          <button class="close-btn" @click="closeAlertModal">×</button>
-        </div>
-        <div class="alert-modal-body">
-          <div class="form-group">
-            <label>预警名称</label>
-            <input v-model="alertForm.name" type="text" />
-          </div>
-          <div class="form-group">
-            <label>股票代码</label>
-            <input v-model="alertForm.code" type="text" disabled />
-          </div>
-          <div class="form-group">
-            <label>条件类型</label>
-            <select v-model="alertForm.condition.type">
-              <option value="price">价格</option>
-              <option value="rsi">RSI</option>
-              <option value="change">涨跌幅</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>比较符</label>
-            <select v-model="alertForm.condition.operator">
-              <option value="gt">大于 (>)</option>
-              <option value="gte">大于等于 (≥)</option>
-              <option value="lt">小于 (&lt;)</option>
-              <option value="lte">小于等于 (≤)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>阈值</label>
-            <input v-model.number="alertForm.condition.value" type="number" step="0.01" />
-          </div>
-        </div>
-        <div class="alert-modal-footer">
-          <button class="btn btn-secondary" @click="closeAlertModal">取消</button>
-          <button class="btn btn-primary" @click="saveQuickAlert" :disabled="!alertForm.name || !alertForm.condition.value">
-            创建
-          </button>
         </div>
       </div>
     </div>
@@ -159,11 +85,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useAnalytics } from '@/composables/useAnalytics'
-import { alertApi } from '@/api'
 import { attentionApi } from '@/api'
-
-const { pageView, attentionAction } = useAnalytics()
 
 interface AttentionItem {
   id: number
@@ -173,7 +95,6 @@ interface AttentionItem {
   created_at: string | null
   group: string
   notes: string | null
-  alert_conditions: Record<string, any> | null
 }
 
 const loading = ref(false)
@@ -183,17 +104,9 @@ const editingId = ref<number | null>(null)
 const editForm = ref<{
   group: string
   notes: string
-  alert_price_min: number | null
-  alert_price_max: number | null
-  alert_rsi_min: number | null
-  alert_rsi_max: number | null
 }>({
   group: 'watch',
   notes: '',
-  alert_price_min: null,
-  alert_price_max: null,
-  alert_rsi_min: null,
-  alert_rsi_max: null,
 })
 
 const groupLabel = (group: string) => {
@@ -205,61 +118,10 @@ const groupLabel = (group: string) => {
   return labels[group] || group
 }
 
-// 预警快速设置
-const alertModal = ref<{ show: boolean; stock: AttentionItem | null }>({ show: false, stock: null })
-const alertForm = ref({
-  name: '',
-  code: '',
-  condition: { type: 'price', operator: 'gt', value: 0 },
-  notify_channels: ['in_app'] as string[],
-})
-
-function openAlertConfig(stock: AttentionItem) {
-  alertModal.value = { show: true, stock }
-  alertForm.value = {
-    name: `${stock.stock_name || stock.code} 价格预警`,
-    code: stock.code,
-    condition: { type: 'price', operator: 'gt', value: 0 },
-    notify_channels: ['in_app'],
-  }
-}
-
-function closeAlertModal() {
-  alertModal.value = { show: false, stock: null }
-}
-
-// @ts-ignore: used in template
-const saveQuickAlert = async () => {
-  if (!alertModal.value.stock) return
-  try {
-    await alertApi.create(alertForm.value)
-    closeAlertModal()
-    alert('预警创建成功')
-  } catch (e) {
-    console.error('Failed to create alert:', e)
-    alert('创建失败')
-  }
-}
-
-const hasAlerts = (stock: AttentionItem) => {
-  const ac = stock.alert_conditions
-  if (!ac) return false
-  return !!(
-    ac.price_min != null ||
-    ac.price_max != null ||
-    ac.rsi_min != null ||
-    ac.rsi_max != null
-  )
-}
-
 const fetchAttention = async () => {
   loading.value = true
   try {
-    const data = await attentionApi.getList()
-    attentionList.value = (data || []).map((item: any) => ({
-      ...item,
-      alert_conditions: item.alert_conditions || null,
-    }))
+    attentionList.value = await attentionApi.getList()
   } catch (e) {
     console.error('Failed to fetch attention list:', e)
   } finally {
@@ -275,7 +137,6 @@ const addStock = async () => {
     await attentionApi.add(code, 'watch')
     searchQuery.value = ''
     await fetchAttention()
-    attentionAction('add', code, 'attention_page')
   } catch (e) {
     console.error('Failed to add attention:', e)
   }
@@ -288,7 +149,6 @@ const removeStock = async (id: number) => {
     if (stock) {
       await attentionApi.remove(stock.code)
       await fetchAttention()
-      attentionAction('remove', stock.code, 'attention_page')
     }
   } catch (e) {
     console.error('Failed to remove attention:', e)
@@ -303,10 +163,6 @@ const toggleEdit = (stock: AttentionItem) => {
     editForm.value = {
       group: stock.group || 'watch',
       notes: stock.notes || '',
-      alert_price_min: stock.alert_conditions?.price_min ?? null,
-      alert_price_max: stock.alert_conditions?.price_max ?? null,
-      alert_rsi_min: stock.alert_conditions?.rsi_min ?? null,
-      alert_rsi_max: stock.alert_conditions?.rsi_max ?? null,
     }
   }
 }
@@ -320,12 +176,6 @@ const saveEdit = async (id: number) => {
     const updates: any = {}
     if (editForm.value.group) updates.group = editForm.value.group
     if (editForm.value.notes !== undefined) updates.notes = editForm.value.notes || null
-    const alertCond: any = {}
-    if (editForm.value.alert_price_min != null) alertCond.price_min = editForm.value.alert_price_min
-    if (editForm.value.alert_price_max != null) alertCond.price_max = editForm.value.alert_price_max
-    if (editForm.value.alert_rsi_min != null) alertCond.rsi_min = editForm.value.alert_rsi_min
-    if (editForm.value.alert_rsi_max != null) alertCond.rsi_max = editForm.value.alert_rsi_max
-    if (Object.keys(alertCond).length > 0) updates.alert_conditions = alertCond
 
     await attentionApi.update(id, updates)
     editingId.value = null
@@ -337,7 +187,6 @@ const saveEdit = async (id: number) => {
 }
 
 onMounted(() => {
-  pageView('/attention')
   fetchAttention()
 })
 </script>

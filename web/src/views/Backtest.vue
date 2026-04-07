@@ -287,33 +287,7 @@
 
         <div class="config-section">
           <h4>入场策略</h4>
-
-          <!-- 策略来源标签页 -->
-          <div class="strategy-tabs">
-            <button
-              class="tab-btn"
-              :class="{ active: strategySourceTab === 'my' }"
-              @click="strategySourceTab = 'my'"
-            >
-              我的模板
-            </button>
-            <button
-              class="tab-btn"
-              :class="{ active: strategySourceTab === 'public' }"
-              @click="strategySourceTab = 'public'"
-            >
-              公共策略库
-            </button>
-            <button
-              class="tab-btn"
-              :class="{ active: strategySourceTab === 'optimization' }"
-              @click="strategySourceTab = 'optimization'"
-            >
-              参数优化
-            </button>
-          </div>
-
-          <div v-if="strategySourceTab === 'my'" class="strategy-select">
+          <div class="strategy-select">
             <select v-model="config.strategyType" class="select-full">
               <option
                 v-for="template in strategyTemplates"
@@ -323,66 +297,6 @@
                 {{ template.displayName }}
               </option>
             </select>
-          </div>
-
-          <div v-else-if="strategySourceTab === 'public'" class="public-strategies">
-            <div v-if="loadingPublicStrategies" class="loading-state">加载中...</div>
-            <div v-else-if="publicStrategies.length === 0" class="empty-state">暂无公共策略</div>
-            <div v-else class="public-strategies-grid">
-              <StrategyCard
-                v-for="strategy in publicStrategies"
-                :key="strategy.id"
-                :strategy="strategy"
-                @favorite-toggle="onPublicFavoriteToggle"
-                @rate="onPublicRate"
-                @close="openStrategyDetails = null"
-              />
-            </div>
-          </div>
-
-          <div v-else class="optimization-tab">
-            <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
-            <div v-else-if="optimizationJobs.length === 0" class="empty-state">
-              <p>暂无优化任务</p>
-              <button class="btn btn-primary btn-small" @click="goToOptimizationPage">
-                创建优化任务
-              </button>
-            </div>
-            <div v-else class="optimization-jobs">
-              <div
-                v-for="job in optimizationJobs"
-                :key="job.id"
-                class="optimization-job-card"
-                :class="job.status"
-              >
-                <div class="job-header">
-                  <div class="job-title">{{ job.strategy }}</div>
-                  <div class="job-status" :class="job.status">{{ statusLabels[job.status] }}</div>
-                </div>
-                <div class="job-meta">
-                  <span>方法：{{ methodLabels[job.method] }}</span>
-                  <span>目标：{{ metricLabels[job.metric] }}</span>
-                  <span>{{ job.completed_trials }}/{{ job.n_trials }}</span>
-                </div>
-                <div class="progress-bar">
-                  <div
-                    class="progress-fill"
-                    :style="{ width: `${(job.completed_trials / job.n_trials) * 100}%` }"
-                  ></div>
-                </div>
-                <div v-if="job.best_params" class="best-params-mini">
-                  <span class="best-label">最优得分：</span>
-                  <span class="best-value">{{ job.best_metric?.toFixed(4) }}</span>
-                  <button
-                    class="btn btn-secondary btn-small"
-                    @click.stop="applyBestParams(job)"
-                    :disabled="job.status !== 'completed'"
-                  >
-                    应用到回测
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
 
           <p v-if="selectedStrategyTemplate?.description" class="strategy-description">
@@ -663,10 +577,8 @@ import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { useAnalytics } from '@/composables/useAnalytics'
-import { backtestApi, strategyApi, strategySocialApi, optimizationApi } from '@/api'
+import { backtestApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
-import StrategyCard from '@/components/StrategyCard.vue'
 
 echarts.use([
   LineChart,
@@ -800,21 +712,7 @@ const config = reactive({
   strategyType: 'ma_crossover',
 })
 
-// 策略来源标签页：my（我的模板） / public（公共策略库） / optimization（参数优化）
-const strategySourceTab = ref<'my' | 'public' | 'optimization'>('my')
-
-// 公共策略数据
-const publicStrategies = ref<any[]>([])
-const loadingPublicStrategies = ref(false)
-const openStrategyDetails = ref<number | null>(null)
-
-// 参数优化相关
-const optimizationJobs = ref<any[]>([])
-const loadingOptimizationJobs = ref(false)
-
 const strategyParams = reactive<Record<string, string | number>>({})
-
-const { pageView, backtestRun } = useAnalytics()
 
 const selectedStrategyTemplate = computed(() =>
   strategyTemplates.value.find((template) => template.name === config.strategyType) || null
@@ -1697,76 +1595,6 @@ const loadStrategyTemplates = async () => {
   }
 }
 
-const loadPublicStrategies = async () => {
-  loadingPublicStrategies.value = true
-  try {
-    const res = await strategySocialApi.listPublic({
-      sort_by: 'backtest_count',
-      limit: 20,
-    })
-    publicStrategies.value = (res.data?.items || []).map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description,
-      rating: s.rating || 0,
-      rating_count: s.rating_count || 0,
-      favorite_count: s.favorite_count || 0,
-      comment_count: s.comment_count || 0,
-      backtest_count: s.backtest_count || 0,
-      is_public: s.is_public,
-      is_official: s.is_official,
-      tags: s.tags,
-      risk_level: s.risk_level,
-      suitable_market: s.suitable_market,
-    }))
-  } catch (error) {
-    console.error('Failed to load public strategies:', error)
-  } finally {
-    loadingPublicStrategies.value = false
-  }
-}
-
-const loadOptimizationJobs = async () => {
-  loadingOptimizationJobs.value = true
-  try {
-    const res = await optimizationApi.listJobs({ limit: 10, status: 'completed' })
-    optimizationJobs.value = (res.data?.items || []).sort((a: any, b: any) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    )
-  } catch (error) {
-    console.error('Failed to load optimization jobs:', error)
-  } finally {
-    loadingOptimizationJobs.value = false
-  }
-}
-
-function onPublicFavoriteToggle(strategyId: number, favorited: boolean) {
-  // 更新本地公共策略状态
-  const strategy = publicStrategies.value.find(s => s.id === strategyId)
-  if (strategy) {
-    strategy.favorite_count += favorited ? 1 : -1
-  }
-}
-
-function onPublicRate(strategyId: number, rating: number) {
-  // 更新本地评分
-  const strategy = publicStrategies.value.find(s => s.id === strategyId)
-  if (strategy) {
-    strategy.rating = rating
-  }
-}
-
-function goToOptimizationPage() {
-  router.push('/optimization')
-}
-
-function applyBestParams(job: any) {
-  if (!job.best_params) return
-  // 将最优参数应用到当前配置
-  Object.assign(config, job.best_params)
-  showNotification?.('success', '最优参数已应用到回测配置')
-}
-
 const saveStrategy = async () => {
   if (!selectedStrategyTemplate.value) return
 
@@ -1900,15 +1728,6 @@ const runBacktest = async () => {
       initial_capital: config.initialCapital,
       stock_code: config.stockCode,
     } as any)
-
-    backtestRun({
-      strategy: config.strategyType,
-      params: { ...strategyParams },
-      stock_code: config.stockCode,
-      start_date: range.start,
-      end_date: range.end,
-      initial_capital: config.initialCapital,
-    }, false)
 
     if (result?.status !== 'completed') {
       const message = result?.error === 'unsupported_strategy'
@@ -2111,28 +1930,7 @@ const initCompareEquityChart = async () => {
   compareChartInstance.value.setOption(option)
 }
 
-// 标签常量
-const statusLabels: Record<string, string> = {
-  pending: '等待中',
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-}
-
-const methodLabels: Record<string, string> = {
-  random: '随机搜索',
-  bayesian: '贝叶斯优化',
-}
-
-const metricLabels: Record<string, string> = {
-  sharpe: '夏普比率',
-  total_return: '总收益',
-  max_drawdown: '最大回撤',
-}
-
 onMounted(() => {
-  pageView('/backtest')
   hydrateConfigWidth()
   configCollapsed.value = window.localStorage.getItem(PANEL_COLLAPSED_KEY) === '1'
   recentBacktests.value = JSON.parse(window.localStorage.getItem(RECENT_BACKTESTS_KEY) || '[]')
@@ -2141,8 +1939,6 @@ onMounted(() => {
     await loadStrategyTemplates()
     await loadSavedStrategies()
     await loadBacktestHistory()
-    await loadPublicStrategies()  // 加载公共策略
-    await loadOptimizationJobs()  // 加载优化任务
     if (currentBacktestId.value) {
       await loadBacktestResult(currentBacktestId.value)
     }

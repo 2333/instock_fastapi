@@ -2,7 +2,7 @@
 
 > 版本：v2.0 | 更新日期：2026-04-01
 > 基于 v1.0 重构，结合代码实际进度修订
-> v1.0 归档：[PRD_v1_archive.md](./PRD_v1_archive.md)
+> v1.0 归档：[PRD_v1_archive.md](./archive/PRD_v1_archive.md)
 
 ---
 

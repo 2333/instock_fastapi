@@ -461,7 +461,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAnalytics } from '@/composables/useAnalytics'
 import { attentionApi, selectionApi, strategyApi } from '@/api'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
@@ -495,7 +494,6 @@ interface FilterMetadataItem {
 }
 
 const router = useRouter()
-const { pageView, filterRun } = useAnalytics()
 const loading = ref(false)
 const hasResults = ref(false)
 const results = ref<StockResult[]>([])
@@ -806,10 +804,6 @@ const runSelection = async () => {
     }
     hasResults.value = results.value.length > 0
 
-    // 追踪筛选执行事件
-    const durationMs = response?.config?.metrics?.duration_ms || 0
-    filterRun(buildCanonicalFilters(), results.value.length, durationMs)
-
     showNotification?.('success', `筛选完成，共 ${results.value.length} 只`)
   } catch (e) {
     console.error('Failed to run selection:', e)
@@ -1102,7 +1096,6 @@ const resetCriteria = () => {
 }
 
 onMounted(async () => {
-  pageView('/selection')
   await Promise.all([
     fetchMyConditions(),
     fetchScreeningMetadata(),

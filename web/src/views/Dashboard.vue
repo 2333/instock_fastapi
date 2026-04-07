@@ -172,85 +172,6 @@
         </div>
       </section>
 
-      <!-- 热门策略卡片 -->
-      <section class="workbench-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <span class="card-kicker">热门策略</span>
-            <h2 class="card-title">本周最多人使用的策略</h2>
-          </div>
-          <router-link to="/strategies" class="card-link">浏览策略市场</router-link>
-        </div>
-
-        <div v-if="loadingStrategies" class="loading-state">加载中...</div>
-        <div v-else-if="topStrategies.length === 0" class="empty-state">
-          <p>暂无策略数据</p>
-        </div>
-        <div v-else class="strategy-list">
-          <div
-            v-for="(strategy, idx) in topStrategies"
-            :key="strategy.id"
-            class="strategy-item"
-            @click="goToStrategy(strategy)"
-          >
-            <div class="strategy-rank">{{ idx + 1 }}</div>
-            <div class="strategy-info">
-              <div class="strategy-name">{{ strategy.name }}</div>
-              <div class="strategy-stats">
-                <span class="rating">★ {{ strategy.rating?.toFixed(1) }}</span>
-                <span class="backtests">📊 {{ strategy.backtest_count }}次回测</span>
-              </div>
-            </div>
-            <button class="btn btn-secondary btn-small" @click.stop="copyStrategy(strategy)">
-              复制
-            </button>
-          </div>
-        </div>
-
-        <p class="card-description">
-          基于本周用户回测数据统计，展示最受欢迎的策略模板。点击查看详情或一键复制到个人模板。
-          <span class="data-source">数据来源：用户行为追踪</span>
-        </p>
-      </section>
-
-      <!-- 最新报告卡片 -->
-      <section class="workbench-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <span class="card-kicker">最新报告</span>
-            <h2 class="card-title">最近生成的数据洞察报告</h2>
-          </div>
-          <router-link to="/reports" class="card-link">查看全部</router-link>
-        </div>
-
-        <div v-if="loadingReports" class="loading-state">加载中...</div>
-        <div v-else-if="recentReports.length === 0" class="empty-state">
-          <p>暂无报告，前往报告页面创建</p>
-          <router-link to="/reports" class="btn btn-primary btn-small">创建报告</router-link>
-        </div>
-        <div v-else class="reports-list">
-          <div
-            v-for="report in recentReports"
-            :key="report.id"
-            class="report-item"
-            @click="viewReport(report.id)"
-          >
-            <div class="report-type" :class="report.type">
-              {{ typeLabels[report.type] }}
-            </div>
-            <div class="report-info">
-              <div class="report-title">{{ report.title }}</div>
-              <div class="report-date">{{ formatDate(report.generated_at) }}</div>
-            </div>
-            <div v-if="report.summary" class="report-metric">
-              <span :class="report.summary.total_return >= 0 ? 'positive' : 'negative'">
-                {{ formatPercent(report.summary.total_return) }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section class="workbench-card">
         <div class="card-header">
           <div>
@@ -367,54 +288,6 @@
         </div>
       </section>
 
-      <!-- 优化任务卡片 -->
-      <section class="workbench-card">
-        <div class="card-header">
-          <div class="card-title-group">
-            <span class="card-kicker">参数优化</span>
-            <h2 class="card-title">最近优化任务</h2>
-          </div>
-          <router-link to="/optimization" class="card-link">查看全部</router-link>
-        </div>
-
-        <div v-if="loadingOptimizationJobs" class="loading-state">加载中...</div>
-        <div v-else-if="optimizationJobs.length === 0" class="empty-state">
-          <p>暂无优化任务，前往参数优化页面创建</p>
-          <router-link to="/optimization" class="btn btn-primary btn-small">创建任务</router-link>
-        </div>
-        <div v-else class="optimization-jobs">
-          <div
-            v-for="job in optimizationJobs"
-            :key="job.id"
-            class="optimization-job-card"
-            :class="job.status"
-          >
-            <div class="job-header">
-              <div class="job-title">{{ job.strategy }}</div>
-              <div class="job-status" :class="job.status">{{ statusLabels[job.status] }}</div>
-            </div>
-            <div class="job-meta">
-              <span>方法：{{ methodLabels[job.method] }}</span>
-              <span>目标：{{ metricLabels[job.metric] }}</span>
-              <span>{{ job.completed_trials }}/{{ job.n_trials }}</span>
-            </div>
-            <div class="progress-bar">
-              <div
-                class="progress-fill"
-                :style="{ width: `${(job.completed_trials / job.n_trials) * 100}%` }"
-              ></div>
-            </div>
-            <div v-if="job.best_metric !== null" class="best-meta">
-              最优得分：{{ job.best_metric?.toFixed(4) }}
-            </div>
-          </div>
-        </div>
-
-        <p class="card-description">
-          自动搜索策略最优参数组合。点击查看详情或创建新优化任务。
-          <span class="data-source">数据来源：参数优化引擎</span>
-        </p>
-      </section>
     </div>
   </div>
 </template>
@@ -422,11 +295,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAnalytics } from '@/composables/useAnalytics'
-import { attentionApi, backtestApi, marketApi, optimizationApi, reportApi, selectionApi, strategySocialApi } from '@/api'
+import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
 
 const router = useRouter()
-const { pageView } = useAnalytics()
 
 interface AttentionEntry {
   code: string
@@ -521,12 +392,6 @@ const todaySummary = ref<TodaySummaryState>({
   triggeredCodes: [],
 })
 const backtestItems = ref<BacktestEntry[]>([])
-const recentReports = ref<any[]>([])
-const loadingReports = ref(false)
-const optimizationJobs = ref<any[]>([])
-const loadingOptimizationJobs = ref(false)
-const topStrategies = ref<any[]>([])
-const loadingStrategies = ref(false)
 
 const unwrapPayload = (value: unknown) => {
   if (value && typeof value === 'object' && 'data' in value) {
@@ -900,10 +765,8 @@ function refreshWorkbench() {
     attentionApi.getList(),
     selectionApi.getTodaySummary({ limit: 12 }),
     backtestApi.getBacktestHistory(5),
-    reportApi.list({ limit: 3 }),
-    optimizationApi.listJobs({ limit: 5, status: 'completed' }),
   ])
-    .then(([marketResult, attentionResult, todayResult, backtestResult, reportsResult, optResult]) => {
+    .then(([marketResult, attentionResult, todayResult, backtestResult]) => {
       if (marketResult.status === 'fulfilled') {
         marketSummary.value = normalizeMarketSummary(marketResult.value)
       } else {
@@ -954,18 +817,6 @@ function refreshWorkbench() {
         loadWarnings.value.push('策略信号 / 回测更新')
       }
 
-      if (reportsResult.status === 'fulfilled') {
-        recentReports.value = (reportsResult.value?.data?.items || []).slice(0, 3)
-      } else {
-        recentReports.value = []
-      }
-
-      if (optResult.status === 'fulfilled') {
-        optimizationJobs.value = (optResult.value?.data?.items || []).slice(0, 5)
-      } else {
-        optimizationJobs.value = []
-      }
-
       lastSyncedAt.value = new Date().toISOString()
     })
     .finally(() => {
@@ -982,71 +833,8 @@ const addAllToScreening = () => {
   })
 }
 
-async function loadTopStrategies() {
-  loadingStrategies.value = true
-  try {
-    const res = await strategySocialApi.listPublic({
-      sort_by: 'backtest_count',
-      limit: 5,
-    })
-    topStrategies.value = (res.data?.items || []).slice(0, 5)
-  } catch (e) {
-    console.error('Failed to load top strategies:', e)
-  } finally {
-    loadingStrategies.value = false
-  }
-}
-
-function goToStrategy(strategy: any) {
-  // 可扩展：跳转到策略详情页（待建）
-  // 暂时复制到回测
-  router.push({
-    path: '/backtest',
-    query: { strategy: strategy.name },
-  })
-}
-
-function copyStrategy(strategy: any) {
-  router.push({
-    path: '/backtest',
-    query: { strategy: strategy.name },
-  })
-}
-
-// 报告相关
-function viewReport(reportId: string) {
-  router.push(`/reports/${reportId}`)
-}
-
-const typeLabels: Record<string, string> = {
-  daily: '日报',
-  weekly: '周报',
-  monthly: '月报',
-}
-
-const statusLabels: Record<string, string> = {
-  pending: '等待中',
-  running: '运行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-}
-
-const methodLabels: Record<string, string> = {
-  random: '随机搜索',
-  bayesian: '贝叶斯优化',
-}
-
-const metricLabels: Record<string, string> = {
-  sharpe: '夏普比率',
-  total_return: '总收益',
-  max_drawdown: '最大回撤',
-}
-
 onMounted(() => {
-  pageView('/dashboard')
   refreshWorkbench()
-  loadTopStrategies()
 })
 </script>
 

@@ -6,27 +6,26 @@ from app.core.dependencies import get_current_user, get_provider
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
 from app.schemas.selection_schema import (
+    ScreeningComparisonRequest,
+    ScreeningComparisonResponse,
     ScreeningHistoryData,
     ScreeningHistoryResponse,
     ScreeningMetadataResponse,
     ScreeningQuery,
     ScreeningRequest,
-    ScreeningTodaySummaryResponse,
     ScreeningRunData,
     ScreeningRunResponse,
+    ScreeningTemplateListResponse,
+    ScreeningTodaySummaryResponse,
     SelectionConditionCreate,
     SelectionConditionResponse,
     SelectionConditionsMetaResponse,
     SelectionHistoryResponse,
     SelectionRequest,
     SelectionResponse,
-    ScreeningTemplate,
-    ScreeningTemplateListResponse,
-    ScreeningComparisonRequest,
-    ScreeningComparisonResponse,
 )
-from core.providers.market_data_provider import MarketDataProvider
 from app.services.selection_service import SelectionService
+from core.providers.market_data_provider import MarketDataProvider
 
 router = APIRouter()
 
@@ -162,7 +161,9 @@ async def run_screening(
     if request.scope.market and "market" not in conditions:
         conditions["market"] = request.scope.market
     items = await service.run_selection(conditions, date, limit=request.scope.limit)
-    resolved_trade_date = items[0]["trade_date"] if items else await service._resolve_trade_date(date)
+    resolved_trade_date = (
+        items[0]["trade_date"] if items else await service._resolve_trade_date(date)
+    )
     return ScreeningRunResponse(
         data=ScreeningRunData(
             query=ScreeningQuery(
