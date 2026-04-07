@@ -64,42 +64,6 @@ const routes = [
     meta: { title: '我的关注' }
   },
   {
-    path: '/alerts',
-    name: 'Alerts',
-    component: () => import('@/views/Alerts.vue'),
-    meta: { title: '预警管理' }
-  },
-  {
-    path: '/strategies',
-    name: 'StrategyMarket',
-    component: () => import('@/views/StrategyMarket.vue'),
-    meta: { title: '策略市场' }
-  },
-  {
-    path: '/optimization',
-    name: 'Optimization',
-    component: () => import('@/views/Optimization.vue'),
-    meta: { title: '参数优化' }
-  },
-  {
-    path: '/reports',
-    name: 'Reports',
-    component: () => import('@/views/Reports.vue'),
-    meta: { title: '数据洞察报告' }
-  },
-  {
-    path: '/reports/:id',
-    name: 'ReportDetail',
-    component: () => import('@/views/ReportDetail.vue'),
-    meta: { title: '报告详情' }
-  },
-  {
-    path: '/report-preferences',
-    name: 'ReportPreferences',
-    component: () => import('@/views/ReportPreferences.vue'),
-    meta: { title: '报告偏好设置' }
-  },
-  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),

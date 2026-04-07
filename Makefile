@@ -332,7 +332,7 @@ frontend-staging-local:
 # ============ 数据库 ============
 
 init-db:
-	$(UV_RUN) python scripts/init_timescaledb.py
+	$(UV_RUN) python -c "import asyncio; from app.database import init_db; asyncio.run(init_db())"
 
 # ============ 测试 ============
 
