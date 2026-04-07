@@ -156,11 +156,11 @@ async def test_attention_service_add_and_remove_commit_when_stock_exists():
     # Service queries: add -> select ts_code, select id check, insert; remove -> select ts_code, delete
     db.execute = AsyncMock(
         side_effect=[
-            lookup_result,    # add: SELECT ts_code
-            make_result(),    # add: SELECT id (check) -> empty
-            make_result(),    # add: INSERT result
+            lookup_result,  # add: SELECT ts_code
+            make_result(),  # add: SELECT id (check) -> empty
+            make_result(),  # add: INSERT result
             delete_lookup_result,  # remove: SELECT ts_code
-            make_result(),    # remove: DELETE result
+            make_result(),  # remove: DELETE result
         ]
     )
     db.commit = AsyncMock()

@@ -3,7 +3,6 @@ from zoneinfo import ZoneInfo
 
 from app.jobs.scheduler import should_recover_market_job
 
-
 MARKET_TZ = ZoneInfo("Asia/Shanghai")
 
 

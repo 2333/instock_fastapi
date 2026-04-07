@@ -288,16 +288,14 @@ class SelectionService:
                 params[key] = pattern_name
             pattern_clause = f" AND pattern_name IN ({', '.join(pattern_placeholders)})"
 
-        query = text(
-            f"""
+        query = text(f"""
             SELECT ts_code, pattern_name, pattern_type, confidence
             FROM patterns
             WHERE trade_date = :trade_date
               AND ts_code IN ({', '.join(ts_placeholders)})
               {pattern_clause}
             ORDER BY confidence DESC NULLS LAST, pattern_name ASC
-            """
-        )
+            """)
         result = await self.db.execute(query, params)
         pattern_hits: dict[str, list[dict[str, Any]]] = {}
         for row in result.mappings().all():
@@ -349,9 +347,11 @@ class SelectionService:
         return {
             "key": key,
             "label": label,
-            "value": round(float(actual_value), 4)
-            if isinstance(actual_value, (int, float))
-            else actual_value,
+            "value": (
+                round(float(actual_value), 4)
+                if isinstance(actual_value, (int, float))
+                else actual_value
+            ),
             "operator": operator,
             "condition": SelectionService._format_condition_value(key, condition),
             "matched": True,
@@ -466,7 +466,11 @@ class SelectionService:
                         "label": "Pattern",
                         "value": ", ".join(matched_names[:3]),
                         "operator": "=",
-                        "condition": ", ".join(selected_patterns[:3]) if selected_patterns else ", ".join(matched_names[:3]),
+                        "condition": (
+                            ", ".join(selected_patterns[:3])
+                            if selected_patterns
+                            else ", ".join(matched_names[:3])
+                        ),
                         "matched": True,
                         "condition_id": "pattern",
                         "condition_name": "形态筛选",
@@ -596,6 +600,7 @@ class SelectionService:
                     return results
             except Exception as exc:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Provider-based selection failed, falling back to SQL: %s", exc
                 )
@@ -652,8 +657,7 @@ class SelectionService:
                 key = f"pattern_name_{index}"
                 pattern_placeholders.append(f":{key}")
                 params[key] = pattern_name
-            where_sql.append(
-                f"""
+            where_sql.append(f"""
                 EXISTS (
                     SELECT 1
                     FROM patterns p
@@ -661,8 +665,7 @@ class SelectionService:
                       AND p.trade_date = :trade_date
                       AND p.pattern_name IN ({', '.join(pattern_placeholders)})
                 )
-                """
-            )
+                """)
 
         # Build base query with optional indicator joins
         select_fields = """
@@ -682,9 +685,7 @@ class SelectionService:
             WHERE {where_clause}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT :limit
-        """.format(
-            where_clause=" AND ".join(where_sql)
-        )
+        """.format(where_clause=" AND ".join(where_sql))
 
         # If indicator filters are active, we need to join indicators table
         if rsi_min is not None or rsi_max is not None or macd_bullish or macd_bearish:
@@ -702,9 +703,7 @@ class SelectionService:
             GROUP BY s.ts_code, s.symbol, s.name, db.trade_date, db.close, db.pct_chg, db.vol, db.amount
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT :limit
-            """.format(
-                where_clause=" AND ".join(where_sql)
-            )
+            """.format(where_clause=" AND ".join(where_sql))
         else:
             from_clause = """
             FROM stocks s
@@ -712,9 +711,7 @@ class SelectionService:
             WHERE {where_clause}
             ORDER BY db.pct_chg DESC NULLS LAST
             LIMIT :limit
-            """.format(
-                where_clause=" AND ".join(where_sql)
-            )
+            """.format(where_clause=" AND ".join(where_sql))
 
         sql = text(f"SELECT{select_fields}{from_clause}")
         params["limit"] = limit
@@ -766,7 +763,9 @@ class SelectionService:
                 signal = "buy"
             elif pct <= -2:
                 signal = "sell"
-            reason = self._build_reason(conditions, dict(row), pattern_hits_map.get(str(row["ts_code"])))
+            reason = self._build_reason(
+                conditions, dict(row), pattern_hits_map.get(str(row["ts_code"]))
+            )
             results.append(
                 {
                     "ts_code": row["ts_code"],
@@ -810,8 +809,10 @@ class SelectionService:
 
         from app.models.stock_model import SelectionCondition
 
-        stmt = select(SelectionCondition).where(SelectionCondition.user_id == user_id).order_by(
-            SelectionCondition.id.asc()
+        stmt = (
+            select(SelectionCondition)
+            .where(SelectionCondition.user_id == user_id)
+            .order_by(SelectionCondition.id.asc())
         )
         result = await self.db.execute(stmt)
         all_conditions = result.scalars().all()
@@ -937,17 +938,19 @@ class SelectionService:
             if sel_id not in top_by_selection:
                 top_by_selection[sel_id] = []
             if len(top_by_selection[sel_id]) < 5:
-                top_by_selection[sel_id].append({
-                    "selection_id": sel_id,
-                    "ts_code": row["ts_code"],
-                    "code": row["code"],
-                    "stock_name": row["stock_name"],
-                    "trade_date": row["trade_date"],
-                    "date": row["trade_date"],
-                    "score": float(row["score"] or 0),
-                    "signal": "hold",
-                    "reason_summary": None,
-                })
+                top_by_selection[sel_id].append(
+                    {
+                        "selection_id": sel_id,
+                        "ts_code": row["ts_code"],
+                        "code": row["code"],
+                        "stock_name": row["stock_name"],
+                        "trade_date": row["trade_date"],
+                        "date": row["trade_date"],
+                        "score": float(row["score"] or 0),
+                        "signal": "hold",
+                        "reason_summary": None,
+                    }
+                )
 
         # Build response items
         comparison_items: list[dict[str, Any]] = []
@@ -955,13 +958,15 @@ class SelectionService:
             agg = aggregates.get(sel_id)
             if not agg:
                 continue
-            comparison_items.append({
-                "history_id": sel_id,
-                "trade_date": agg["trade_date"],
-                "total": int(agg["total"]),
-                "avg_score": round(float(agg["avg_score"] or 0), 4),
-                "top_stocks": top_by_selection.get(sel_id, []),
-            })
+            comparison_items.append(
+                {
+                    "history_id": sel_id,
+                    "trade_date": agg["trade_date"],
+                    "total": int(agg["total"]),
+                    "avg_score": round(float(agg["avg_score"] or 0), 4),
+                    "top_stocks": top_by_selection.get(sel_id, []),
+                }
+            )
 
         return comparison_items
 
@@ -977,6 +982,7 @@ class SelectionService:
 
         import logging
         from datetime import date as date_cls
+
         import pandas as pd
 
         logger = logging.getLogger(__name__)
@@ -1093,33 +1099,49 @@ class SelectionService:
             # Build evidence
             evidence = []
             if conditions.get("priceMin") is not None:
-                evidence.append({
-                    "key": "close", "label": "Close",
-                    "value": close, "operator": ">=",
-                    "condition": float(conditions["priceMin"]),
-                    "matched": close >= float(conditions["priceMin"]),
-                })
+                evidence.append(
+                    {
+                        "key": "close",
+                        "label": "Close",
+                        "value": close,
+                        "operator": ">=",
+                        "condition": float(conditions["priceMin"]),
+                        "matched": close >= float(conditions["priceMin"]),
+                    }
+                )
             if conditions.get("priceMax") is not None:
-                evidence.append({
-                    "key": "close", "label": "Close",
-                    "value": close, "operator": "<=",
-                    "condition": float(conditions["priceMax"]),
-                    "matched": close <= float(conditions["priceMax"]),
-                })
+                evidence.append(
+                    {
+                        "key": "close",
+                        "label": "Close",
+                        "value": close,
+                        "operator": "<=",
+                        "condition": float(conditions["priceMax"]),
+                        "matched": close <= float(conditions["priceMax"]),
+                    }
+                )
             if conditions.get("changeMin") is not None:
-                evidence.append({
-                    "key": "change_rate", "label": "Daily change",
-                    "value": round(pct, 4), "operator": ">=",
-                    "condition": float(conditions["changeMin"]),
-                    "matched": pct >= float(conditions["changeMin"]),
-                })
+                evidence.append(
+                    {
+                        "key": "change_rate",
+                        "label": "Daily change",
+                        "value": round(pct, 4),
+                        "operator": ">=",
+                        "condition": float(conditions["changeMin"]),
+                        "matched": pct >= float(conditions["changeMin"]),
+                    }
+                )
             if conditions.get("changeMax") is not None:
-                evidence.append({
-                    "key": "change_rate", "label": "Daily change",
-                    "value": round(pct, 4), "operator": "<=",
-                    "condition": float(conditions["changeMax"]),
-                    "matched": pct <= float(conditions["changeMax"]),
-                })
+                evidence.append(
+                    {
+                        "key": "change_rate",
+                        "label": "Daily change",
+                        "value": round(pct, 4),
+                        "operator": "<=",
+                        "condition": float(conditions["changeMax"]),
+                        "matched": pct <= float(conditions["changeMax"]),
+                    }
+                )
 
             if evidence:
                 summary = "; ".join(
@@ -1131,21 +1153,23 @@ class SelectionService:
             score = round(pct * 5 + min(amount / 1e8, 20), 4)
             signal = "buy" if pct >= 2 else ("sell" if pct <= -2 else "hold")
 
-            results.append({
-                "ts_code": ts_code,
-                "code": code,
-                "stock_name": stock_name,
-                "score": score,
-                "signal": signal,
-                "trade_date": date_str,
-                "date": date_str,
-                "close": close,
-                "change_rate": pct,
-                "amount": amount,
-                "reason_summary": summary,
-                "evidence": evidence,
-                "reason": {"summary": summary, "evidence": evidence},
-            })
+            results.append(
+                {
+                    "ts_code": ts_code,
+                    "code": code,
+                    "stock_name": stock_name,
+                    "score": score,
+                    "signal": signal,
+                    "trade_date": date_str,
+                    "date": date_str,
+                    "close": close,
+                    "change_rate": pct,
+                    "amount": amount,
+                    "reason_summary": summary,
+                    "evidence": evidence,
+                    "reason": {"summary": summary, "evidence": evidence},
+                }
+            )
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results

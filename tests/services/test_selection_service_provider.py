@@ -1,8 +1,8 @@
-import pandas as pd
-import pytest
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import pandas as pd
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.selection_service import SelectionService
@@ -131,7 +131,9 @@ class TestSelectionServiceProvider:
             end_date=date(2024, 3, 28),
         )
 
-    async def test_run_selection_falls_back_to_sql_when_provider_fails(self, mock_db, mock_provider):
+    async def test_run_selection_falls_back_to_sql_when_provider_fails(
+        self, mock_db, mock_provider
+    ):
         mock_provider.get_stock_list.side_effect = RuntimeError("provider unavailable")
         mock_db.execute = AsyncMock(
             return_value=make_result(

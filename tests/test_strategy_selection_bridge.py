@@ -126,7 +126,9 @@ async def test_strategy_create_route_normalizes_selection_payload(client, curren
 
 
 @pytest.mark.asyncio
-async def test_strategy_from_selection_endpoint_saves_structured_params(client, current_user_override):
+async def test_strategy_from_selection_endpoint_saves_structured_params(
+    client, current_user_override
+):
     response = await client.post(
         "/api/v1/strategies/my/from-selection",
         json={

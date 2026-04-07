@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 MarketDataProvider 接口测试（简化版）
 
 重点测试 provider 的核心逻辑，使用简单 mock。
 """
 
-import pytest
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.providers.market_data_provider import MarketDataProviderError
 from core.providers.postgres_provider import PostgreSQLProvider
 
 
 class MockResult:
     """模拟 SQLAlchemy Result"""
+
     def __init__(self, rows):
         self._rows = rows
 
@@ -52,9 +51,7 @@ class TestPostgreSQLProvider:
     async def test_get_daily_bars_empty(self, provider, mock_db):
         mock_db.execute.return_value = MockResult([])
         result = await provider.get_daily_bars(
-            codes=["000001"],
-            start_date=date(2024, 1, 1),
-            end_date=date(2024, 1, 10)
+            codes=["000001"], start_date=date(2024, 1, 1), end_date=date(2024, 1, 10)
         )
         assert isinstance(result, pd.DataFrame)
         assert result.empty
@@ -72,14 +69,9 @@ class TestPostgreSQLProvider:
             vol=1000000,
             amount=10200000,
         )
-        mock_db.execute.side_effect = [
-            MockResult([mock_stock]),
-            MockResult([mock_bar])
-        ]
+        mock_db.execute.side_effect = [MockResult([mock_stock]), MockResult([mock_bar])]
         result = await provider.get_daily_bars(
-            codes=["000001"],
-            start_date=date(2024, 1, 1),
-            end_date=date(2024, 1, 10)
+            codes=["000001"], start_date=date(2024, 1, 1), end_date=date(2024, 1, 10)
         )
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 1
@@ -123,33 +115,25 @@ class TestPostgreSQLProvider:
 
     async def test_get_technicals_empty(self, provider, mock_db):
         mock_stock = MagicMock(ts_code="000001.SZ", symbol="000001")
-        mock_db.execute.side_effect = [
-            MockResult([mock_stock]),
-            MockResult([])
-        ]
+        mock_db.execute.side_effect = [MockResult([mock_stock]), MockResult([])]
         result = await provider.get_technicals(
             code="000001",
             indicators=["rsi"],
             start_date=date(2024, 1, 1),
-            end_date=date(2024, 1, 10)
+            end_date=date(2024, 1, 10),
         )
         assert isinstance(result, dict)
         assert len(result) == 0
 
     async def test_get_patterns_empty(self, provider):
         result = await provider.get_patterns(
-            code="000001",
-            start_date=date(2024, 1, 1),
-            end_date=date(2024, 1, 10)
+            code="000001", start_date=date(2024, 1, 1), end_date=date(2024, 1, 10)
         )
         assert isinstance(result, list)
         assert len(result) == 0
 
     async def test_get_fund_flow_empty(self, provider, mock_db):
         mock_db.execute.return_value = MockResult([])
-        result = await provider.get_fund_flow(
-            codes=["000001"],
-            trade_date=date(2024, 1, 2)
-        )
+        result = await provider.get_fund_flow(codes=["000001"], trade_date=date(2024, 1, 2))
         assert isinstance(result, pd.DataFrame)
         assert result.empty

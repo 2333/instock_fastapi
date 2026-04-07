@@ -10,8 +10,8 @@ from app.database import get_db
 from app.models.stock_model import Strategy, User
 from app.schemas.strategy_schema import (
     StrategyResponse,
-    StrategySelectionCreateRequest,
     StrategyResultResponse,
+    StrategySelectionCreateRequest,
     StrategyTemplateResponse,
 )
 from app.services.strategy_service import StrategyService

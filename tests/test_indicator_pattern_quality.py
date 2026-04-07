@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from app.jobs.tasks.indicator_task import _build_moving_average_indicators
 from app.jobs.tasks import pattern_task
+from app.jobs.tasks.indicator_task import _build_moving_average_indicators
 
 
 def _make_bar(index: int) -> SimpleNamespace:
