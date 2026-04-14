@@ -74,3 +74,19 @@ async def test_timescale_health_checks_collect_postgres_signals():
         item["check"] == "plan.daily_bars_window" and "ChunkAppend on daily_bars" in item["value"]
         for item in results
     )
+
+
+@pytest.mark.asyncio
+async def test_timescale_health_checks_skip_catalog_queries_when_extension_missing():
+    session = _FakeSession("postgresql", {"FROM pg_extension": False})
+
+    results = await run_timescale_health_checks(session)
+
+    assert results[0]["check"] == "extension.timescaledb"
+    assert results[0]["status"] == "fail"
+    assert all(
+        item["status"] == "skipped" for item in results[1:]
+    )
+    assert not any("timescaledb_information.hypertables" in sql for sql in session.executed_sql)
+    assert not any("timescaledb_information.chunks" in sql for sql in session.executed_sql)
+    assert not any("timescaledb_information.jobs" in sql for sql in session.executed_sql)

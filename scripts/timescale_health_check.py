@@ -197,6 +197,46 @@ async def run_timescale_health_checks(session: Any) -> list[dict[str, Any]]:
         )
     )
 
+    if not extension_enabled:
+        for table in CORE_TABLES:
+            results.extend(
+                [
+                    CheckResult(
+                        check="hypertable.registered",
+                        table=table,
+                        status="skipped",
+                        details="timescaledb_extension_missing",
+                    ),
+                    CheckResult(
+                        check="hypertable.chunk_count",
+                        table=table,
+                        status="skipped",
+                        details="timescaledb_extension_missing",
+                    ),
+                    CheckResult(
+                        check="hypertable.compression_enabled",
+                        table=table,
+                        status="skipped",
+                        details="timescaledb_extension_missing",
+                    ),
+                    CheckResult(
+                        check="hypertable.compression_policy",
+                        table=table,
+                        status="skipped",
+                        details="timescaledb_extension_missing",
+                    ),
+                ]
+            )
+        for plan_name, _, _ in PLAN_CHECKS:
+            results.append(
+                CheckResult(
+                    check=f"plan.{plan_name}",
+                    status="skipped",
+                    details="timescaledb_extension_missing",
+                )
+            )
+        return [result.as_dict() for result in results]
+
     for table in CORE_TABLES:
         hypertable_registered = bool(
             await _scalar(

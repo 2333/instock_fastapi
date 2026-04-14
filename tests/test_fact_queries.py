@@ -122,3 +122,14 @@ async def test_fact_api_exposes_required_fact_endpoints(client):
     assert stock_st.json()[0]["reason"] == "示例原因"
     assert technical_factors.status_code == 200
     assert technical_factors.json()[0]["factors"]["rsi_14"] == 56.78
+
+
+@pytest.mark.asyncio
+async def test_fact_api_returns_empty_list_for_invalid_calendar_date(client):
+    response = await client.get(
+        "/api/v1/facts/daily-basic",
+        params={"code": "000001", "date": "2024-02-30"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []

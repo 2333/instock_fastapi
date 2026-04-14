@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import date, datetime
 
-from sqlalchemy import and_, case, desc, or_, select
+from sqlalchemy import and_, case, desc, false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import DailyBasic, StockST, TechnicalFactor
@@ -21,7 +21,10 @@ class FactRepository:
         normalized = value.strip().replace("-", "")
         if len(normalized) != 8 or not normalized.isdigit():
             return None
-        return datetime.strptime(normalized, "%Y%m%d").date()
+        try:
+            return datetime.strptime(normalized, "%Y%m%d").date()
+        except ValueError:
+            return None
 
     @staticmethod
     def _normalize_trade_date(value: str | None) -> str | None:
@@ -59,23 +62,23 @@ class FactRepository:
         if date_value:
             trade_date_dt = self._parse_trade_date(date_value)
             trade_date_text = self._normalize_trade_date(date_value)
-            if trade_date_dt and trade_date_text:
-                query = query.where(
-                    or_(
-                        model.trade_date_dt == trade_date_dt,
-                        and_(
-                            model.trade_date_dt.is_(None),
-                            model.trade_date == trade_date_text,
-                        ),
-                    )
+            if trade_date_dt is None or trade_date_text is None:
+                return query.where(false())
+            query = query.where(
+                or_(
+                    model.trade_date_dt == trade_date_dt,
+                    and_(
+                        model.trade_date_dt.is_(None),
+                        model.trade_date == trade_date_text,
+                    ),
                 )
+            )
 
-        start_date_dt = self._parse_trade_date(start_date)
-        end_date_dt = self._parse_trade_date(end_date)
-        start_date_text = self._normalize_trade_date(start_date)
-        end_date_text = self._normalize_trade_date(end_date)
-
-        if start_date_dt and start_date_text:
+        if start_date:
+            start_date_dt = self._parse_trade_date(start_date)
+            start_date_text = self._normalize_trade_date(start_date)
+            if start_date_dt is None or start_date_text is None:
+                return query.where(false())
             query = query.where(
                 or_(
                     model.trade_date_dt >= start_date_dt,
@@ -85,7 +88,12 @@ class FactRepository:
                     ),
                 )
             )
-        if end_date_dt and end_date_text:
+
+        if end_date:
+            end_date_dt = self._parse_trade_date(end_date)
+            end_date_text = self._normalize_trade_date(end_date)
+            if end_date_dt is None or end_date_text is None:
+                return query.where(false())
             query = query.where(
                 or_(
                     model.trade_date_dt <= end_date_dt,
