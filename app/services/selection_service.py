@@ -3,6 +3,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.date_utils import trade_date_dt_param
 from core.providers.market_data_provider import MarketDataProvider
 
 
@@ -272,7 +273,10 @@ class SelectionService:
         if not self.db or not ts_codes:
             return {}
 
-        params: dict[str, Any] = {"trade_date": trade_date}
+        params: dict[str, Any] = {
+            "trade_date": trade_date,
+            "trade_date_dt": trade_date_dt_param(trade_date),
+        }
         ts_placeholders: list[str] = []
         for index, ts_code in enumerate(ts_codes):
             key = f"ts_code_{index}"
@@ -291,7 +295,7 @@ class SelectionService:
         query = text(f"""
             SELECT ts_code, pattern_name, pattern_type, confidence
             FROM patterns
-            WHERE trade_date = :trade_date
+            WHERE (trade_date_dt = :trade_date_dt OR (trade_date_dt IS NULL AND trade_date = :trade_date))
               AND ts_code IN ({', '.join(ts_placeholders)})
               {pattern_clause}
             ORDER BY confidence DESC NULLS LAST, pattern_name ASC
@@ -309,17 +313,27 @@ class SelectionService:
         if not self.db:
             return None
         if date:
+            target_date_dt = trade_date_dt_param(date)
             result = await self.db.execute(
                 text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
-                    WHERE trade_date <= :target_date
+                    WHERE trade_date_dt <= :target_date_dt
+                       OR (trade_date_dt IS NULL AND trade_date <= :target_date)
                     """),
-                {"target_date": date},
+                {"target_date": date, "target_date_dt": target_date_dt},
             )
         else:
             result = await self.db.execute(
-                text("SELECT MAX(trade_date) AS resolved_date FROM daily_bars")
+                text("""
+                    SELECT trade_date AS resolved_date
+                    FROM daily_bars
+                    ORDER BY
+                        CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                        trade_date_dt DESC,
+                        trade_date DESC
+                    LIMIT 1
+                    """)
             )
         row = result.fetchone()
         return row[0] if row and row[0] else None
@@ -631,9 +645,12 @@ class SelectionService:
         where_sql = [
             "s.list_status = 'L'",
             "s.is_etf = false",
-            "db.trade_date = :trade_date",
+            "(db.trade_date_dt = :trade_date_dt OR (db.trade_date_dt IS NULL AND db.trade_date = :trade_date))",
         ]
-        params: dict[str, Any] = {"trade_date": trade_date}
+        params: dict[str, Any] = {
+            "trade_date": trade_date,
+            "trade_date_dt": trade_date_dt_param(trade_date),
+        }
 
         if price_min is not None:
             where_sql.append("db.close >= :price_min")
@@ -662,7 +679,7 @@ class SelectionService:
                     SELECT 1
                     FROM patterns p
                     WHERE p.ts_code = s.ts_code
-                      AND p.trade_date = :trade_date
+                      AND (p.trade_date_dt = :trade_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date = :trade_date))
                       AND p.pattern_name IN ({', '.join(pattern_placeholders)})
                 )
                 """)
@@ -698,7 +715,11 @@ class SelectionService:
             from_clause = """
             FROM stocks s
             JOIN daily_bars db ON s.ts_code = db.ts_code
-            LEFT JOIN indicators i ON s.ts_code = i.ts_code AND i.trade_date = db.trade_date
+            LEFT JOIN indicators i ON s.ts_code = i.ts_code
+              AND (
+                i.trade_date_dt = db.trade_date_dt
+                OR (i.trade_date_dt IS NULL AND db.trade_date_dt IS NULL AND i.trade_date = db.trade_date)
+              )
             WHERE {where_clause}
             GROUP BY s.ts_code, s.symbol, s.name, db.trade_date, db.close, db.pct_chg, db.vol, db.amount
             ORDER BY db.pct_chg DESC NULLS LAST

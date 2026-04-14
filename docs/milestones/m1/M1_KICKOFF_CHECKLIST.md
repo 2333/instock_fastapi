@@ -1,12 +1,14 @@
 # M1 启动就绪清单（待 Tushare Token 修复后触发）
 
-> 状态: 阻塞中（等待用户更新 `.env` 中的 `TUSHARE_TOKEN`）
+> 历史说明: 本文档保留为 2026-04-05 的旧启动清单快照。当前重启口径以 `docs/milestones/m1/M1_RESTART_PLAN.md` 为准；本文中引用的 `scripts/check_m1_readiness.py` 已不再保证存在。本文中的 “Tushare token 阻塞 M1 启动” 只代表当日旧口径，不再代表当前阶段 M1 的收口条件。
+>
+> 状态: 历史快照（旧口径曾要求等待用户更新 `.env` 中的 `TUSHARE_TOKEN`）
 > 最后检查: 2026-04-05 08:58（token 仍无效）
 > 触发条件: `scripts/check_m1_readiness.py` 返回所有检查 ✅
 
 ---
 
-## 当前阻塞
+## 历史阻塞记录
 
 | 检查项 | 状态 | 详情 |
 |--------|------|------|
@@ -15,7 +17,7 @@
 | Alembic | ✅ | 1.18.4 可用 |
 | Tushare Token | ❌ | API 40101 "token 不对" |
 
-**修复任务**（用户手动）:
+**当时的修复任务**（用户手动）:
 1. 登录 https://tushare.pro
 2. 重置 API Token
 3. 更新项目 `.env` 文件：`TUSHARE_TOKEN=你的新token`
@@ -25,7 +27,7 @@
 
 ---
 
-## 就绪触发流程（自动）
+## 历史就绪触发流程（自动）
 
 一旦环境检查通过，按顺序自动执行：
 
@@ -52,7 +54,7 @@
 
 ---
 
-## 快速启动命令（就绪后）
+## 历史快速启动命令（旧口径）
 
 ```bash
 # 1. 确认在 main 分支且最新
@@ -73,7 +75,7 @@ alembic upgrade head
 
 ---
 
-## 验收标准（M1 完成）
+## 历史验收标准（旧版 M1 完成口径）
 
 - [ ] WS-0 全部 5 项任务 done
 - [ ] WS-1 核心改造 7 项完成
@@ -84,7 +86,7 @@ alembic upgrade head
 
 ---
 
-**下次 heartbeat 检查**:
+**历史 heartbeat 检查建议**:
 - 重新运行 `scripts/check_m1_readiness.py`
 - 如 Tushare 变为 ✅，立即汇报并触发 M1 启动序列
 - 如仍 ❌，继续等待用户操作，不重复已提供的修复指南

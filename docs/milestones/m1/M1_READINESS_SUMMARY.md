@@ -1,6 +1,8 @@
 # M1 启动就绪总览（Phase 1.5 数据层底座）
 
-> 状态: 准备就绪，等待 Tushare Token 修复
+> 历史说明: 本文档保留为 2026-04-05 的旧 readiness 总览快照。当前重启口径以 `docs/milestones/m1/M1_RESTART_PLAN.md` 为准；本文中引用的 `scripts/check_m1_readiness.py` 已不再保证存在。本文中的 “等待 Tushare Token 修复” 是旧版本启动条件，不再代表当前阶段 M1 的唯一 go/no-go 判断。
+>
+> 状态: 历史快照（旧口径曾要求等待 Tushare Token 修复）
 > 最后更新: 2026-04-05 03:59
 > 触发条件: `scripts/check_m1_readiness.py` 返回所有 ✅
 
@@ -10,15 +12,15 @@
 
 M1 (Phase 1.5 数据层改造) 全部准备工作已完成，包含:
 - ✅ 四条工作流拆解 (WS-0/1/2/3)，64 项具体任务
-- ✅ 环境就绪检查脚本（TimescaleDB/Database/Alembic 已就绪，仅 Tushare token 阻塞）
+- ✅ 环境就绪检查脚本（旧检查结论：TimescaleDB/Database/Alembic 已就绪，当时仅 Tushare token 被视为阻塞）
 - ✅ 稳定性监测机制（每日 heartbeat 自动运行）
 - ✅ 进度跟踪模板与启动清单
 
-**唯一阻塞**: Tushare token 失效（需用户手动更新 `.env`）
+**历史阻塞记录**: 2026-04-05 时点的旧口径将 Tushare token 失效视为唯一阻塞；当前阶段已改为 token-independent 收口，不再沿用该判断。
 
 ---
 
-## 环境检查状态
+## 历史环境检查状态
 
 ```bash
 $ python scripts/check_m1_readiness.py
@@ -29,9 +31,9 @@ $ python scripts/check_m1_readiness.py
 | TimescaleDB 扩展 | ✅ 可用 | `SELECT * FROM pg_extension WHERE extname='timescaledb'` 确认 |
 | 数据库连接 | ✅ 正常 | config tests 通过 |
 | Alembic 工具 | ✅ 1.18.4 | `alembic --version` 可用 |
-| Tushare Token | ❌ **阻塞** | API 返回 40101 "token 不对" |
+| Tushare Token | ❌ 历史阻塞记录 | API 返回 40101 "token 不对" |
 
-**修复命令**（用户操作）:
+**当时的修复命令**（用户操作）:
 ```bash
 # 1. 登录 https://tushare.pro 重置 Token
 # 2. 更新 .env 文件
@@ -100,7 +102,7 @@ WS-3: 质量保障 (与 WS-1/2 并行, 2d)
 
 ---
 
-## 触发流程（就绪后自动执行）
+## 历史触发流程（旧口径）
 
 ### 阶段 1: M0 合并确认
 - [ ] PR #8 已合入 `main`
@@ -121,11 +123,11 @@ WS-3: 质量保障 (与 WS-1/2 并行, 2d)
 
 ---
 
-## M1 完成验收标准
+## 历史 M1 完成验收标准（旧口径）
 
 - [ ] WS-0 全部 5 项任务 done
 - [ ] WS-1 核心改造 7 项完成
-- [ ] WS-2 新接口 6 张表全部接入（根据 Tushare 积分范围可降级）
+- [ ] WS-2 新接口 6 张表全部接入（旧口径；当前阶段已缩窄为 token-independent 范围）
 - [ ] WS-3 质量体系运行并通过至少 1 次回填演练
 - [ ] 新增数据可通过 API 访问
 - [ ] 测试覆盖新增模块（新增测试 ≥ 对应任务数 50%）
@@ -133,7 +135,7 @@ WS-3: 质量保障 (与 WS-1/2 并行, 2d)
 
 ---
 
-## 风险与降级策略
+## 历史风险与降级策略
 
 | 风险 | 影响 | 降级方案 |
 |------|------|---------|

@@ -14,6 +14,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .base import AdjustType
@@ -66,12 +67,35 @@ class TushareProvider:
         if period != "daily":
             logger.warning("Tushare 当前仅接入日线，收到 period=%s，跳过", period)
             return []
+        return await self.fetch_pro_bar(
+            ts_code=self._to_tushare_code(code),
+            asset="E",
+            freq="D",
+            adj=adjust,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    async def fetch_pro_bar(
+        self,
+        ts_code: str | None = None,
+        *,
+        asset: str = "E",
+        freq: str = "D",
+        adj: AdjustType | str | None = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        trade_date: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(
-            self._fetch_kline_sync,
-            code,
+            self._fetch_pro_bar_sync,
+            ts_code,
+            asset,
+            freq,
+            adj,
             start_date,
             end_date,
-            adjust,
+            trade_date,
         )
 
     async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
@@ -88,6 +112,15 @@ class TushareProvider:
 
     async def fetch_block_trade(self, trade_date: str) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_block_trade_sync, trade_date)
+
+    async def fetch_daily_basic(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_daily_basic_sync, trade_date)
+
+    async def fetch_stock_st(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_stock_st_sync, trade_date)
+
+    async def fetch_technical_factors(self, trade_date: str) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_technical_factors_sync, trade_date)
 
     async def fetch_daily_by_date(
         self,
@@ -122,25 +155,24 @@ class TushareProvider:
         pro = self._get_pro()
         if not pro:
             return {}
-        td = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
-
-        try:
-            df = self._call_pro("daily", trade_date=td)
-        except Exception as exc:
-            logger.warning("Tushare daily 批量抓取失败 date=%s: %s", td, exc)
-            return {}
-
-        if df is None or df.empty:
+        rows = self._fetch_pro_bar_sync(
+            None,
+            "E",
+            "D",
+            None,
+            None,
+            None,
+            trade_date,
+        )
+        if not rows:
             return {}
 
         result: Dict[str, List[Dict[str, Any]]] = {}
-        for _, row in df.iterrows():
-            ts_code = str(row.get("ts_code") or "")
+        for bar in rows:
+            ts_code = str(bar.get("ts_code") or "")
             if not ts_code:
                 continue
-            bar = self._row_to_bar(row)
-            if bar:
-                result.setdefault(ts_code, []).append(bar)
+            result.setdefault(ts_code, []).append(bar)
         return result
 
     def _fetch_daily_batch_sync(
@@ -181,6 +213,10 @@ class TushareProvider:
         trade_date = str(row.get("trade_date") or "")
         if len(trade_date) != 8:
             return None
+        try:
+            trade_date_dt = datetime.strptime(trade_date, "%Y%m%d").date()
+        except ValueError:
+            trade_date_dt = None
         close = self._to_float(row.get("close")) or 0.0
         pre_close = self._to_float(row.get("pre_close"))
         change = self._to_float(row.get("change"))
@@ -192,6 +228,9 @@ class TushareProvider:
         if pct is None and pre_close not in (None, 0):
             pct = (change / pre_close) * 100
         return {
+            "ts_code": str(row.get("ts_code") or ""),
+            "trade_date": trade_date,
+            "trade_date_dt": trade_date_dt,
             "date": f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}",
             "open": self._to_float(row.get("open")) or 0.0,
             "high": self._to_float(row.get("high")) or 0.0,
@@ -203,6 +242,114 @@ class TushareProvider:
             "volume": self._to_float(row.get("vol")) or 0.0,
             "amount": self._to_float(row.get("amount")) or 0.0,
         }
+
+    def _trade_date_fields(self, row: Any, fallback_trade_date: str) -> Optional[Dict[str, Any]]:
+        ts_code = self._pick_str(row, "ts_code")
+        trade_date = self._pick_str(row, "trade_date")
+        if not trade_date:
+            return None
+        trade_date = self._to_ymd(trade_date, default=fallback_trade_date)
+        if not ts_code or len(trade_date) != 8 or not trade_date.isdigit():
+            return None
+        try:
+            trade_date_dt = datetime.strptime(trade_date, "%Y%m%d").date()
+        except ValueError:
+            return None
+        return {
+            "ts_code": ts_code,
+            "trade_date": trade_date,
+            "trade_date_dt": trade_date_dt,
+        }
+
+    @staticmethod
+    def _scalar_or_none(value: Any) -> Any:
+        if value in (None, "", "nan"):
+            return None
+        try:
+            if value != value:
+                return None
+        except Exception:
+            pass
+        if hasattr(value, "item"):
+            try:
+                return value.item()
+            except Exception:
+                return value
+        return value
+
+    def _pick_optional_float(self, row: Any, *keys: str) -> Optional[float]:
+        for key in keys:
+            val = row.get(key) if hasattr(row, "get") else None
+            val = self._scalar_or_none(val)
+            if val is None:
+                continue
+            try:
+                return float(val)
+            except Exception:
+                continue
+        return None
+
+    def _fetch_pro_bar_sync(
+        self,
+        ts_code: str | None,
+        asset: str,
+        freq: str,
+        adj: AdjustType | str | None,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        trade_date: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        asset = (asset or "E").upper()
+        freq = (freq or "D").upper()
+        if asset != "E":
+            logger.warning("Tushare pro_bar 当前仅接入 asset=E，收到 asset=%s，跳过", asset)
+            return []
+        if freq != "D":
+            logger.warning("Tushare pro_bar 当前仅接入日线，收到 freq=%s，跳过", freq)
+            return []
+
+        pro = self._get_pro()
+        if not pro:
+            return []
+
+        start = self._to_ymd(start_date, default="19900101")
+        end = self._to_ymd(end_date, default="20991231")
+        td = self._to_ymd(trade_date, default=time.strftime("%Y%m%d")) if trade_date else None
+
+        try:
+            if ts_code:
+                import tushare as ts  # type: ignore
+
+                adj_value = adj.value if isinstance(adj, AdjustType) else adj
+                kwargs: Dict[str, Any] = {
+                    "ts_code": ts_code,
+                    "asset": asset,
+                    "freq": freq,
+                    "start_date": start,
+                    "end_date": end,
+                }
+                if adj_value:
+                    kwargs["adj"] = adj_value
+                df = self._run_with_limits(lambda: ts.pro_bar(**kwargs))
+            elif td:
+                df = self._call_pro("daily", trade_date=td)
+            else:
+                logger.warning("Tushare pro_bar 缺少 ts_code 或 trade_date，跳过")
+                return []
+        except Exception as exc:
+            logger.warning("Tushare pro_bar 抓取失败 ts_code=%s trade_date=%s: %s", ts_code, td, exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+        df = df.sort_values("trade_date")
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            bar = self._row_to_bar(row)
+            if bar:
+                rows.append(bar)
+        return rows
 
     async def is_trade_date(self, trade_date: str) -> bool:
         return await asyncio.to_thread(self._is_trade_date_sync, trade_date)
@@ -319,49 +466,18 @@ class TushareProvider:
         end_date: Optional[str],
         adjust: AdjustType,
     ) -> List[Dict[str, Any]]:
-        pro = self._get_pro()
-        if not pro:
-            return []
-
         ts_code = self._to_tushare_code(code)
         if not ts_code:
             return []
-        start = self._to_ymd(start_date, default="19900101")
-        end = self._to_ymd(end_date, default="20991231")
-
-        try:
-            if adjust == AdjustType.NO_ADJUST:
-                df = self._call_pro(
-                    "daily",
-                    ts_code=ts_code,
-                    start_date=start,
-                    end_date=end,
-                )
-            else:
-                import tushare as ts  # type: ignore
-
-                df = self._run_with_limits(
-                    lambda: ts.pro_bar(
-                        ts_code=ts_code,
-                        adj=adjust.value,
-                        start_date=start,
-                        end_date=end,
-                    )
-                )
-        except Exception as exc:
-            logger.warning("Tushare daily/pro_bar 抓取失败 %s: %s", ts_code, exc)
-            return []
-
-        if df is None or df.empty:
-            return []
-        df = df.sort_values("trade_date")
-
-        rows: List[Dict[str, Any]] = []
-        for _, row in df.iterrows():
-            bar = self._row_to_bar(row)
-            if bar:
-                rows.append(bar)
-        return rows
+        return self._fetch_pro_bar_sync(
+            ts_code,
+            "E",
+            "D",
+            adjust,
+            start_date,
+            end_date,
+            None,
+        )
 
     def _fetch_fund_flow_rank_sync(self, trade_date: str) -> List[Dict[str, Any]]:
         pro = self._get_pro()
@@ -403,6 +519,108 @@ class TushareProvider:
                 }
             )
         return [r for r in rows if r["code"]]
+
+    def _fetch_daily_basic_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro(
+                "daily_basic",
+                trade_date=trade_date,
+                fields=(
+                    "ts_code,trade_date,turnover_rate,turnover_rate_f,volume_ratio,"
+                    "pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,"
+                    "free_share,total_mv,circ_mv"
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Tushare daily_basic 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        numeric_fields = (
+            "turnover_rate",
+            "turnover_rate_f",
+            "volume_ratio",
+            "pe",
+            "pe_ttm",
+            "pb",
+            "ps",
+            "ps_ttm",
+            "dv_ratio",
+            "dv_ttm",
+            "total_share",
+            "float_share",
+            "free_share",
+            "total_mv",
+            "circ_mv",
+        )
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            item = self._trade_date_fields(row, trade_date)
+            if not item:
+                continue
+            item.update({field: self._pick_optional_float(row, field) for field in numeric_fields})
+            rows.append(item)
+        return rows
+
+    def _fetch_stock_st_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro("stock_st", trade_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare stock_st 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            item = self._trade_date_fields(row, trade_date)
+            if not item:
+                continue
+            item.update(
+                {
+                    "name": self._pick_str(row, "name", "stock_name"),
+                    "st_type": self._pick_str(row, "st_type", "type"),
+                    "reason": self._pick_str(row, "reason", "change_reason"),
+                    "begin_date": self._pick_str(row, "begin_date", "entry_date"),
+                    "end_date": self._pick_str(row, "end_date", "remove_date"),
+                }
+            )
+            rows.append(item)
+        return rows
+
+    def _fetch_technical_factors_sync(self, trade_date: str) -> List[Dict[str, Any]]:
+        trade_date = self._to_ymd(trade_date, default=time.strftime("%Y%m%d"))
+        try:
+            df = self._call_pro("stk_factor_pro", trade_date=trade_date)
+        except Exception as exc:
+            logger.warning("Tushare stk_factor_pro 抓取失败: %s", exc)
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        identity_fields = {"ts_code", "trade_date"}
+        rows: List[Dict[str, Any]] = []
+        for _, row in df.iterrows():
+            item = self._trade_date_fields(row, trade_date)
+            if not item:
+                continue
+            factors: Dict[str, Any] = {}
+            for key in getattr(row, "index", []):
+                key_text = str(key)
+                if key_text in identity_fields:
+                    continue
+                value = self._scalar_or_none(row.get(key))
+                if value is not None:
+                    factors[key_text] = value
+            item["factors"] = factors
+            rows.append(item)
+        return rows
 
     def _fetch_sector_fund_flow_sync(self, sector_type: str, trade_date: str) -> List[Dict[str, Any]]:
         pro = self._get_pro()

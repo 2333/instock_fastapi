@@ -93,8 +93,9 @@ class Stock(Base):
 class DailyBar(Base):
     __tablename__ = "daily_bars"
     __table_args__ = (
-        UniqueConstraint("ts_code", "trade_date", name="uq_daily_bars_ts_code_trade_date"),
+        UniqueConstraint("ts_code", "trade_date_dt", name="uq_daily_bars_ts_code_trade_date_dt"),
         Index("ix_daily_bars_trade_date", "trade_date"),
+        Index("ix_daily_bars_trade_date_dt", "trade_date_dt"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -119,9 +120,10 @@ class DailyBar(Base):
 class FundFlow(Base):
     __tablename__ = "fund_flows"
     __table_args__ = (
-        UniqueConstraint("ts_code", "trade_date", name="uq_fund_flows_ts_code_trade_date"),
+        UniqueConstraint("ts_code", "trade_date_dt", name="uq_fund_flows_ts_code_trade_date_dt"),
         Index("ix_fund_flows_ts_code", "ts_code"),
         Index("ix_fund_flows_trade_date", "trade_date"),
+        Index("ix_fund_flows_trade_date_dt", "trade_date_dt"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -157,12 +159,13 @@ class Indicator(Base):
     __table_args__ = (
         UniqueConstraint(
             "ts_code",
-            "trade_date",
+            "trade_date_dt",
             "indicator_name",
-            name="uq_indicators_ts_code_date_name",
+            name="uq_indicators_ts_code_trade_date_dt_name",
         ),
         Index("ix_indicators_ts_code", "ts_code"),
         Index("ix_indicators_trade_date", "trade_date"),
+        Index("ix_indicators_trade_date_dt", "trade_date_dt"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -185,15 +188,89 @@ class Pattern(Base):
         ),
         Index("ix_patterns_ts_code", "ts_code"),
         Index("ix_patterns_trade_date", "trade_date"),
+        Index("ix_patterns_trade_date_dt", "trade_date_dt"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
     trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
-    trade_date_dt: Mapped[datetime] = mapped_column(Date, nullable=False)
+    trade_date_dt: Mapped[date] = mapped_column(Date, nullable=False)
     pattern_name: Mapped[str] = mapped_column(String(100), nullable=False)
     pattern_type: Mapped[str] = mapped_column(String(20), nullable=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DailyBasic(Base):
+    __tablename__ = "daily_basic"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date_dt", name="uq_daily_basic_ts_code_trade_date_dt"),
+        Index("ix_daily_basic_ts_code", "ts_code"),
+        Index("ix_daily_basic_trade_date", "trade_date"),
+        Index("ix_daily_basic_trade_date_dt", "trade_date_dt"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[date] = mapped_column(Date, nullable=False)
+    turnover_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    turnover_rate_f: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    volume_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    pe: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    pe_ttm: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    pb: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    ps: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    ps_ttm: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dv_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dv_ttm: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    total_share: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    float_share: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    free_share: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    total_mv: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    circ_mv: Mapped[Decimal | None] = mapped_column(Numeric(30, 6), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StockST(Base):
+    __tablename__ = "stock_st"
+    __table_args__ = (
+        UniqueConstraint("ts_code", "trade_date_dt", name="uq_stock_st_ts_code_trade_date_dt"),
+        Index("ix_stock_st_ts_code", "ts_code"),
+        Index("ix_stock_st_trade_date", "trade_date"),
+        Index("ix_stock_st_trade_date_dt", "trade_date_dt"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[date] = mapped_column(Date, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    st_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    begin_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    end_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TechnicalFactor(Base):
+    __tablename__ = "technical_factors"
+    __table_args__ = (
+        UniqueConstraint(
+            "ts_code",
+            "trade_date_dt",
+            name="uq_technical_factors_ts_code_trade_date_dt",
+        ),
+        Index("ix_technical_factors_ts_code", "ts_code"),
+        Index("ix_technical_factors_trade_date", "trade_date"),
+        Index("ix_technical_factors_trade_date_dt", "trade_date_dt"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date_dt: Mapped[date] = mapped_column(Date, nullable=False)
+    factors: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

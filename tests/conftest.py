@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.compiler import compiles
@@ -17,7 +18,16 @@ os.environ.setdefault("CRAWLER_PROXY_ENABLED", "false")
 
 from app.database import get_db
 from app.main import app
-from app.models.stock_model import Base, DailyBar, Indicator, Pattern, Stock
+from app.models.stock_model import (
+    Base,
+    DailyBasic,
+    DailyBar,
+    Indicator,
+    Pattern,
+    Stock,
+    StockST,
+    TechnicalFactor,
+)
 
 
 @compiles(JSONB, "sqlite")
@@ -53,6 +63,17 @@ async def client():
         await conn.run_sync(Base.metadata.create_all)
 
     async with async_session_factory_test() as session:
+        for table in (
+            "technical_factors",
+            "stock_st",
+            "daily_basic",
+            "patterns",
+            "indicators",
+            "daily_bars",
+            "stocks",
+        ):
+            await session.execute(text(f"DELETE FROM {table}"))
+
         session.add(
             Stock(
                 ts_code="000001.SZ",
@@ -108,6 +129,48 @@ async def client():
                 pattern_name="HAMMER",
                 pattern_type="reversal",
                 confidence=Decimal("0.91"),
+            )
+        )
+        session.add(
+            DailyBasic(
+                ts_code="000001.SZ",
+                trade_date="20240102",
+                trade_date_dt=date(2024, 1, 2),
+                turnover_rate=Decimal("1.23"),
+                turnover_rate_f=Decimal("0.98"),
+                volume_ratio=Decimal("1.11"),
+                pe=Decimal("12.34"),
+                pe_ttm=Decimal("11.22"),
+                pb=Decimal("1.56"),
+                ps=Decimal("2.34"),
+                ps_ttm=Decimal("2.20"),
+                dv_ratio=Decimal("0.85"),
+                dv_ttm=Decimal("0.72"),
+                total_share=Decimal("1000000"),
+                float_share=Decimal("800000"),
+                free_share=Decimal("600000"),
+                total_mv=Decimal("123456789"),
+                circ_mv=Decimal("98765432"),
+            )
+        )
+        session.add(
+            StockST(
+                ts_code="000001.SZ",
+                trade_date="20240102",
+                trade_date_dt=date(2024, 1, 2),
+                name="平安银行",
+                st_type="ST",
+                reason="示例原因",
+                begin_date="20240101",
+                end_date=None,
+            )
+        )
+        session.add(
+            TechnicalFactor(
+                ts_code="000001.SZ",
+                trade_date="20240102",
+                trade_date_dt=date(2024, 1, 2),
+                factors={"rsi_14": 56.78, "macd": 0.12},
             )
         )
         await session.commit()

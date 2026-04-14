@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import inspect, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -20,7 +22,14 @@ from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
 _supports_daily_bar_upsert = True
+DAILY_BAR_UPSERT_CONSTRAINT = "uq_daily_bars_ts_code_trade_date_dt"
 BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
+DAILY_BARS_BACKFILL_SOURCE_POLICIES = (
+    "prefer_tushare",
+    "tushare",
+    "baostock",
+    "eastmoney",
+)
 TS_CODE_CHILD_TABLES = (
     "daily_bars",
     "fund_flows",
@@ -37,6 +46,18 @@ TS_CODE_CHILD_TABLES = (
     "north_bound_funds",
     "backfill_daily_state",
 )
+
+
+def _normalize_ymd(value: str) -> str:
+    normalized = value.strip().replace("-", "")
+    if len(normalized) != 8 or not normalized.isdigit():
+        raise ValueError(f"invalid trade date: {value!r}")
+    return normalized
+
+
+def _to_iso_ymd(value: str) -> str:
+    normalized = _normalize_ymd(value)
+    return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:]}"
 
 
 def _build_proxy_pool() -> ProxyPool | None:
@@ -277,7 +298,7 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: list[dict])
     if _supports_daily_bar_upsert:
         daily_bar_insert = insert(DailyBar)
         stmt = daily_bar_insert.values(values).on_conflict_do_update(
-            constraint="uq_daily_bars_ts_code_trade_date",
+            constraint=DAILY_BAR_UPSERT_CONSTRAINT,
             set_={
                 "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
                 "open": daily_bar_insert.excluded.open,
@@ -297,7 +318,7 @@ async def save_daily_bars(session: AsyncSession, ts_code: str, bars: list[dict])
             return len(values)
         except SQLAlchemyError as exc:
             await session.rollback()
-            # 兼容历史库结构（可能缺失 uq_daily_bars_ts_code_trade_date）
+            # 兼容历史库结构（可能缺失 M1 trade_date_dt 唯一约束）
             _supports_daily_bar_upsert = False
             logger.warning("daily_bars upsert 不可用，后续改为兼容写入: %s", exc)
 
@@ -383,7 +404,7 @@ async def save_daily_bars_batch(
         if _supports_daily_bar_upsert:
             daily_bar_insert = insert(DailyBar)
             stmt = daily_bar_insert.values(chunk).on_conflict_do_update(
-                constraint="uq_daily_bars_ts_code_trade_date",
+                constraint=DAILY_BAR_UPSERT_CONSTRAINT,
                 set_={
                     "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
                     "open": daily_bar_insert.excluded.open,
@@ -559,12 +580,14 @@ async def _fetch_bars_with_fallback(
     # 1) 优先 Tushare（不走代理）
     for attempt in range(max_retries):
         try:
-            bars = await tushare_provider.fetch_kline(
-                code=symbol,
+            ts_code = normalize_ts_code(None, symbol=symbol, exchange=exchange)
+            bars = await tushare_provider.fetch_pro_bar(
+                ts_code=ts_code,
+                asset="E",
+                freq="D",
+                adj=adjust,
                 start_date=start_date,
                 end_date=end_date,
-                adjust=adjust,
-                period="daily",
             )
             if bars:
                 source = "tushare"
@@ -782,11 +805,40 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
 
 
 async def _get_backfill_targets(
-    session: AsyncSession, start: str, end: str, batch_size: int
+    session: AsyncSession,
+    start: str,
+    end: str,
+    batch_size: int,
+    *,
+    ensure_state_table: bool = True,
 ) -> list[dict]:
-    await _ensure_backfill_state_table(session)
+    state_filter = ""
+    if ensure_state_table:
+        await _ensure_backfill_state_table(session)
+        state_filter = """
+          AND NOT EXISTS (
+                SELECT 1
+                FROM backfill_daily_state st
+                WHERE st.ts_code = s.ts_code
+                  AND st.status IN ('done', 'needs_fallback', 'nodata')
+          )
+        """
+    else:
+        connection = await session.connection()
+        existing_tables = set(
+            await connection.run_sync(lambda sync_conn: inspect(sync_conn).get_table_names())
+        )
+        if "backfill_daily_state" in existing_tables:
+            state_filter = """
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM backfill_daily_state st
+                    WHERE st.ts_code = s.ts_code
+                      AND st.status IN ('done', 'needs_fallback', 'nodata')
+              )
+            """
 
-    query = text("""
+    query = text(f"""
         SELECT s.*
         FROM stocks s
         WHERE s.list_status = 'L'
@@ -802,18 +854,243 @@ async def _get_backfill_targets(
                 WHERE db.ts_code = s.ts_code
                   AND db.trade_date BETWEEN :start AND :end
           )
-          AND NOT EXISTS (
-                SELECT 1
-                FROM backfill_daily_state st
-                WHERE st.ts_code = s.ts_code
-                  AND st.status IN ('done', 'needs_fallback', 'nodata')
-          )
+          {state_filter}
         ORDER BY s.ts_code
         LIMIT :limit
         """)
     result = await session.execute(query, {"start": start, "end": end, "limit": batch_size})
     rows = result.mappings().all()
     return [dict(row) for row in rows]
+
+
+async def _save_daily_bars_small_batch(
+    session: AsyncSession,
+    ts_code: str,
+    bars: list[dict],
+) -> int:
+    count = 0
+    for bar in bars:
+        bar_date = bar.get("date")
+        if not bar_date:
+            continue
+        date_str = bar_date.replace("-", "")
+        try:
+            trade_date_dt = datetime.strptime(bar_date, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        close = bar.get("close", 0) or 0
+        change = bar.get("change", 0) or 0
+        pre_close = bar.get("pre_close")
+        if pre_close in (None, ""):
+            pre_close = close - change
+
+        values = {
+            "ts_code": ts_code,
+            "trade_date": date_str,
+            "trade_date_dt": trade_date_dt,
+            "open": bar.get("open", 0) or 0,
+            "high": bar.get("high", 0) or 0,
+            "low": bar.get("low", 0) or 0,
+            "close": close,
+            "pre_close": pre_close or 0,
+            "change": change,
+            "pct_chg": bar.get("change_pct", 0) or 0,
+            "vol": bar.get("volume", 0) or 0,
+            "amount": bar.get("amount", 0) or 0,
+        }
+
+        existing = await session.scalar(
+            select(DailyBar).where(
+                DailyBar.ts_code == ts_code,
+                DailyBar.trade_date_dt == trade_date_dt,
+            )
+        )
+        if existing:
+            for key, value in values.items():
+                if key != "ts_code":
+                    setattr(existing, key, value)
+        else:
+            session.add(DailyBar(**values))
+        count += 1
+    return count
+
+
+def _resolve_backfill_source_order(
+    source_policy: str,
+    *,
+    exchange: str | None = None,
+    is_etf: bool = False,
+) -> tuple[str, ...]:
+    if source_policy == "prefer_tushare":
+        if _should_use_eastmoney_direct(exchange=exchange, is_etf=is_etf):
+            return ("eastmoney",)
+        return ("tushare", "baostock", "eastmoney")
+    return (source_policy,)
+
+
+async def run_daily_bars_backfill_window(
+    *,
+    start_date: str,
+    end_date: str,
+    code_limit: int = 20,
+    source: str = "prefer_tushare",
+    execute: bool = False,
+    sleep_seconds: float = 0.0,
+    provider: TushareProvider | None = None,
+    baostock_provider: BaoStockProvider | None = None,
+    eastmoney_crawler: EastMoneyCrawler | None = None,
+    session_factory: Callable[[], Any] = async_session_factory,
+) -> dict[str, Any]:
+    """Run one bounded daily_bars backfill pass with an explicit source policy."""
+    start = _normalize_ymd(start_date)
+    end = _normalize_ymd(end_date)
+    source_policy = source.strip().lower()
+    if start > end:
+        raise ValueError("start_date must be <= end_date")
+    if code_limit < 1:
+        raise ValueError("code_limit must be >= 1")
+    if sleep_seconds < 0:
+        raise ValueError("sleep_seconds must be >= 0")
+    if source_policy not in DAILY_BARS_BACKFILL_SOURCE_POLICIES:
+        allowed = ", ".join(DAILY_BARS_BACKFILL_SOURCE_POLICIES)
+        raise ValueError(f"source must be one of: {allowed}")
+
+    active_tushare = provider
+    active_baostock = baostock_provider
+    active_eastmoney = eastmoney_crawler
+    created_eastmoney = False
+
+    try:
+        async with session_factory() as session:
+            targets = await _get_backfill_targets(
+                session,
+                start,
+                end,
+                code_limit,
+                ensure_state_table=execute,
+            )
+            result: dict[str, Any] = {
+                "dry_run": not execute,
+                "start_date": start,
+                "end_date": end,
+                "code_limit": code_limit,
+                "source": source_policy,
+                "target_count": len(targets),
+                "saved_rows": 0,
+                "targets": [target["ts_code"] for target in targets],
+                "items": [],
+            }
+
+            if not execute:
+                return result
+
+            for target in targets:
+                ts_code = target["ts_code"]
+                symbol = target.get("symbol") or extract_symbol(ts_code)
+                source_order = _resolve_backfill_source_order(
+                    source_policy,
+                    exchange=target.get("exchange"),
+                    is_etf=bool(target.get("is_etf")),
+                )
+                bars: list[dict] = []
+                used_source: str | None = None
+                attempts: list[dict[str, Any]] = []
+
+                for candidate in source_order:
+                    try:
+                        if candidate == "tushare":
+                            if active_tushare is None:
+                                active_tushare = TushareProvider()
+                            candidate_bars = await active_tushare.fetch_pro_bar(
+                                ts_code=ts_code,
+                                asset="E",
+                                freq="D",
+                                adj=AdjustType.NO_ADJUST,
+                                start_date=_to_iso_ymd(start),
+                                end_date=_to_iso_ymd(end),
+                            )
+                        elif candidate == "baostock":
+                            if active_baostock is None:
+                                active_baostock = BaoStockProvider(proxy_pool=_build_proxy_pool())
+                            candidate_bars = await active_baostock.fetch_kline(
+                                code=symbol,
+                                start_date=_to_iso_ymd(start),
+                                end_date=_to_iso_ymd(end),
+                                adjust=AdjustType.NO_ADJUST,
+                                period="daily",
+                            )
+                        else:
+                            if active_eastmoney is None:
+                                active_eastmoney = EastMoneyCrawler(proxy_pool=_build_proxy_pool())
+                                created_eastmoney = True
+                            candidate_bars = await active_eastmoney.fetch(
+                                data_type="kline",
+                                code=symbol,
+                                start_date=_to_iso_ymd(start),
+                                end_date=_to_iso_ymd(end),
+                                adjust=AdjustType.NO_ADJUST,
+                                period="daily",
+                            )
+                        attempts.append({"source": candidate, "rows": len(candidate_bars)})
+                        if candidate_bars:
+                            bars = candidate_bars
+                            used_source = candidate
+                            break
+                    except Exception as exc:
+                        attempts.append({"source": candidate, "error": str(exc)})
+
+                used_source = used_source or (source_order[-1] if source_order else source_policy)
+                saved = await _save_daily_bars_small_batch(session, ts_code, bars)
+                status = "done" if saved else "nodata"
+                attempt_note = ",".join(
+                    f"{item['source']}:{item.get('rows', 'error')}" for item in attempts
+                )
+                await upsert_fetch_audit(
+                    session,
+                    task_name="daily_bars_backfill_window",
+                    entity_type="daily_bar",
+                    entity_key=ts_code,
+                    trade_date=end,
+                    status=status,
+                    source=used_source,
+                    note=f"rows={saved},source_policy={source_policy},attempts={attempt_note}",
+                )
+                await session.execute(
+                    text("""
+                        INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
+                        VALUES (:ts_code, :status, :note, CURRENT_TIMESTAMP)
+                        ON CONFLICT (ts_code)
+                        DO UPDATE SET status=:status, note=:note, updated_at=CURRENT_TIMESTAMP
+                        """),
+                    {
+                        "ts_code": ts_code,
+                        "status": status,
+                        "note": (
+                            f"rows={saved},source={used_source},"
+                            f"source_policy={source_policy},attempts={attempt_note}"
+                        ),
+                    },
+                )
+                await session.commit()
+                result["saved_rows"] += saved
+                result["items"].append(
+                    {
+                        "ts_code": ts_code,
+                        "status": status,
+                        "source": used_source,
+                        "source_policy": source_policy,
+                        "saved_rows": saved,
+                        "attempts": attempts,
+                    }
+                )
+                if sleep_seconds:
+                    await asyncio.sleep(sleep_seconds)
+
+            return result
+    finally:
+        if created_eastmoney and active_eastmoney is not None:
+            await active_eastmoney.close()
 
 
 async def _get_backfill_progress(session: AsyncSession, start: str, end: str) -> tuple[int, int]:

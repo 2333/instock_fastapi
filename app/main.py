@@ -14,6 +14,7 @@ from app.api.routers import (
     auth_router,
     backtest_router,
     etf_router,
+    fact_router,
     fund_flow_router,
     indicator_router,
     market_router,
@@ -95,6 +96,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 app.include_router(stock_router.router, prefix="/api/v1")
 app.include_router(etf_router.router, prefix="/api/v1")
+app.include_router(fact_router.router, prefix="/api/v1")
 app.include_router(indicator_router.router, prefix="/api/v1")
 app.include_router(strategy_router.router, prefix="/api/v1")
 app.include_router(pattern_router.router, prefix="/api/v1")
