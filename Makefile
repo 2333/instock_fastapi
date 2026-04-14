@@ -6,7 +6,7 @@
         dev-up dev-down dev-rebuild dev-status dev-logs dev-smoke \
         dev-local frontend-dev-local \
         staging-up staging-down staging-rebuild staging-status staging-logs staging-smoke \
-        staging-local frontend-staging-local
+        staging-local frontend-staging-local backup-prod-db restore-staging-db
 
 UV ?= uv
 UV_CACHE_DIR ?= .uv-cache
@@ -62,15 +62,17 @@ help:
 	@echo "  make dev-local      - 本地启动后端 (:8001, 连测试容器 DB)"
 	@echo "  make frontend-dev-local - 本地启动前端 (:3002)"
 	@echo ""
-	@echo "预发布环境 (复用生产 DB, 测试新代码):"
+	@echo "预发布环境 (独立 DB, 测试新代码):"
 	@echo "  make staging-up       - 构建并启动预发布容器 (:$(STAGING_APP_PORT) 后端, :$(STAGING_FRONTEND_PORT) 前端)"
 	@echo "  make staging-down     - 停止预发布容器"
 	@echo "  make staging-rebuild  - 重建预发布容器"
 	@echo "  make staging-status   - 查看预发布容器状态"
 	@echo "  make staging-logs     - 查看预发布容器日志"
 	@echo "  make staging-smoke    - 预发布容器健康检查"
-	@echo "  make staging-local    - 本地启动后端 (:$(STAGING_APP_PORT), 连生产 DB)"
+	@echo "  make staging-local    - 本地启动后端 (:$(STAGING_APP_PORT), 连预发布 DB)"
 	@echo "  make frontend-staging-local - 本地启动前端 (:$(STAGING_FRONTEND_PORT))"
+	@echo "  make backup-prod-db   - 备份主栈 PostgreSQL 到 backups/postgres"
+	@echo "  make restore-staging-db BACKUP=path/to/file.dump - 用快照恢复预发布 DB"
 	@echo ""
 	@echo "代码质量:"
 	@echo "  make lint           - 运行基础静态检查"
@@ -190,6 +192,7 @@ docker-clean:
 DEV_COMPOSE = docker compose -f docker-compose.dev.yml
 STAGING_APP_PORT ?= 8002
 STAGING_FRONTEND_PORT ?= 3003
+STAGING_POSTGRES_PORT ?= 5434
 
 dev-up:
 	@echo "Building and starting dev environment..."
@@ -203,7 +206,6 @@ dev-up:
 			echo "Docs:     http://localhost:8001/docs"; \
 			echo "Frontend: http://localhost:3002"; \
 			echo "DB:       localhost:5433 (instock/instock_pass)"; \
-			echo "Redis:    localhost:6381"; \
 			break; \
 		fi; \
 		echo "  waiting... ($$i/10)"; \
@@ -234,7 +236,6 @@ dev-status:
 	@echo "Health:   http://localhost:8001/health"
 	@echo "Frontend: http://localhost:3002/"
 	@echo "DB:       localhost:5433 (instock/instock_pass)"
-	@echo "Redis:    localhost:6381"
 
 dev-logs:
 	$(DEV_COMPOSE) logs -f app
@@ -245,11 +246,10 @@ dev-smoke:
 	@curl -s -o /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:3002/ && echo "Frontend: ✅" || echo "Frontend: ❌"
 
 # ============ 本地开发 (非 Docker, 连测试容器 DB) ============
-# 前提: make dev-up 已启动（提供 PG + Redis）
+# 前提: make dev-up 已启动（提供 PG）
 
 DEV_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:5433/instock \
           SYNC_DATABASE_URL=postgresql+psycopg2://instock:instock_pass@localhost:5433/instock \
-          REDIS_HOST=localhost REDIS_PORT=6381 \
           SECRET_KEY=dev-secret-key-change-in-production-12345678901234567890 \
           LOG_LEVEL=DEBUG DEBUG=true
 
@@ -260,12 +260,12 @@ dev-local:
 frontend-dev-local:
 	cd web && VITE_API_URL=http://localhost:8001 npm run dev -- --port 3002
 
-# ============ 预发布环境 (复用生产 DB, 测试新代码) ============
+# ============ 预发布环境 (独立 DB, 测试新代码) ============
 
-STAGING_COMPOSE = docker compose -p instock_staging -f docker-compose.staging.yml
+STAGING_COMPOSE = STAGING_POSTGRES_PORT=$(STAGING_POSTGRES_PORT) docker compose -p instock_staging -f docker-compose.staging.yml
 
 staging-up:
-	@echo "Building and starting staging environment (using production DB)..."
+	@echo "Building and starting staging environment (using isolated DB)..."
 	$(STAGING_COMPOSE) up --build -d
 	@echo ""
 	@echo "Waiting for services..."
@@ -275,7 +275,7 @@ staging-up:
 			echo "Backend:  http://localhost:$(STAGING_APP_PORT) ✅"; \
 			echo "Docs:     http://localhost:$(STAGING_APP_PORT)/docs"; \
 			echo "Frontend: http://localhost:$(STAGING_FRONTEND_PORT)"; \
-			echo "DB:       production (localhost:5432)"; \
+			echo "DB:       localhost:$(STAGING_POSTGRES_PORT) (staging)"; \
 			break; \
 		fi; \
 		echo "  waiting... ($$i/10)"; \
@@ -305,7 +305,7 @@ staging-status:
 	@echo "Docs:     http://localhost:$(STAGING_APP_PORT)/docs"
 	@echo "Health:   http://localhost:$(STAGING_APP_PORT)/health"
 	@echo "Frontend: http://localhost:$(STAGING_FRONTEND_PORT)/"
-	@echo "DB:       production (localhost:5432)"
+	@echo "DB:       localhost:$(STAGING_POSTGRES_PORT) (staging)"
 
 staging-logs:
 	$(STAGING_COMPOSE) logs -f app
@@ -315,19 +315,27 @@ staging-smoke:
 	@curl -s http://localhost:$(STAGING_APP_PORT)/health | python3 -m json.tool && echo "Backend: ✅" || echo "Backend: ❌"
 	@curl -s -o /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:$(STAGING_FRONTEND_PORT)/ && echo "Frontend: ✅" || echo "Frontend: ❌"
 
-# 本地热重载 + 生产 DB
-STAGING_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:5432/instock \
-              SYNC_DATABASE_URL=postgresql+psycopg2://instock:instock_pass@localhost:5432/instock \
-              REDIS_HOST=localhost REDIS_PORT=6380 \
-              SECRET_KEY=dev-secret-key-change-in-production-12345678901234567890 \
-              LOG_LEVEL=DEBUG DEBUG=true
+# 本地热重载 + 预发布 DB
+STAGING_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:$(STAGING_POSTGRES_PORT)/instock \
+              SYNC_DATABASE_URL=postgresql+psycopg2://instock:instock_pass@localhost:$(STAGING_POSTGRES_PORT)/instock \
+              SECRET_KEY=staging-secret-key-change-before-shared-use-123456 \
+              LOG_LEVEL=INFO DEBUG=false SCHEDULER_ENABLED=false
 
 staging-local:
-	@echo "Starting backend on :$(STAGING_APP_PORT) (connecting to production DB)..."
+	@echo "Starting backend on :$(STAGING_APP_PORT) (connecting to staging DB)..."
 	$(STAGING_ENV) $(UV_RUN) uvicorn app.main:app --reload --host 0.0.0.0 --port $(STAGING_APP_PORT)
 
 frontend-staging-local:
 	cd web && VITE_API_URL=http://localhost:$(STAGING_APP_PORT) npm run dev -- --port $(STAGING_FRONTEND_PORT)
+
+backup-prod-db:
+	chmod +x scripts/backup_prod_db.sh
+	./scripts/backup_prod_db.sh
+
+restore-staging-db:
+	@test -n "$(BACKUP)" || (echo "Usage: make restore-staging-db BACKUP=backups/postgres/instock_YYYYmmdd_HHMMSS.dump" && exit 1)
+	chmod +x scripts/restore_staging_db.sh
+	STAGING_POSTGRES_PORT=$(STAGING_POSTGRES_PORT) ./scripts/restore_staging_db.sh "$(BACKUP)"
 
 # ============ 数据库 ============
 

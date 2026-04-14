@@ -19,22 +19,6 @@ services:
     networks:
       - instock_network
 
-  redis:
-    image: redis:7-alpine
-    container_name: instock_redis
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - instock_network
-
   app:
     image: ${IMAGE_NAMESPACE:-instock}/instock-app:${APP_VERSION:-dev}
     build:
@@ -48,8 +32,6 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@postgres:5432/${POSTGRES_DB:-instock}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@postgres:5432/${POSTGRES_DB:-instock}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - APP_PORT=8000
       - UVICORN_WORKERS=${UVICORN_WORKERS:-1}
       - PYTHONPATH=/app
@@ -62,8 +44,6 @@ services:
       - "8000:8000"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     volumes:
       - ./app:/app/app
@@ -111,5 +91,4 @@ networks:
 
 volumes:
   postgres_data:
-  redis_data:
   app_logs:
