@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StockSpotResponse(BaseModel):
@@ -147,3 +147,28 @@ class AttentionResponse(BaseModel):
     group: str = Field(default="watch", description="Watchlist group")
     notes: str | None = None
     alert_conditions: dict[str, Any] | None = Field(default_factory=dict, description="Alert thresholds")
+
+
+class DailyBarResponse(BaseModel):
+    id: int
+    ts_code: str
+    trade_date: str
+    trade_date_dt: datetime | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    close: float | None = None
+    pre_close: float | None = None
+    change: float | None = None
+    pct_chg: float | None = None
+    vol: float | None = None
+    amount: float | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DailyBarListResponse(BaseModel):
+    data: list[DailyBarResponse] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 100
