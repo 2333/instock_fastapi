@@ -38,12 +38,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting InStock API {build_info.release} ({build_info.git_sha})...")
     await init_db()
     logger.info("Database initialized")
-    scheduler_started = start_scheduler()
-    if scheduler_started:
-        logger.info("Scheduler started")
-        app.state.market_recovery_task = asyncio.create_task(recover_missed_market_jobs())
+    scheduler_started = False
+    if settings.SCHEDULER_ENABLED:
+        scheduler_started = start_scheduler()
+        if scheduler_started:
+            logger.info("Scheduler started")
+            app.state.market_recovery_task = asyncio.create_task(recover_missed_market_jobs())
+        else:
+            logger.info("Scheduler skipped in this worker")
     else:
-        logger.info("Scheduler skipped in this worker")
+        logger.info("Scheduler disabled by configuration")
     yield
     await close_db()
     stop_scheduler()

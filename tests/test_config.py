@@ -49,6 +49,11 @@ def test_settings_parse_debug_aliases():
     assert Settings(SECRET_KEY="x" * 32, DEBUG="development").DEBUG is True
 
 
+def test_settings_parse_scheduler_enabled():
+    assert Settings(SECRET_KEY="x" * 32).SCHEDULER_ENABLED is True
+    assert Settings(SECRET_KEY="x" * 32, SCHEDULER_ENABLED="false").SCHEDULER_ENABLED is False
+
+
 def test_get_settings_rejects_default_secret(monkeypatch):
     get_settings.cache_clear()
     monkeypatch.setenv("SECRET_KEY", "your-secret-key-change-in-production")
