@@ -3,6 +3,8 @@ import math
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.date_utils import trade_date_dt_param
+
 
 class PatternService:
     def __init__(self, db: AsyncSession):
@@ -10,9 +12,13 @@ class PatternService:
 
     async def get_latest_trade_date(self) -> str | None:
         query = text("""
-            SELECT MAX(trade_date) as latest_date
+            SELECT trade_date as latest_date
             FROM daily_bars
-            WHERE trade_date <= TO_CHAR(CURRENT_DATE, 'YYYYMMDD')
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                trade_date_dt DESC,
+                trade_date DESC
+            LIMIT 1
             """)
         result = await self.db.execute(query)
         row = result.fetchone()
@@ -25,18 +31,24 @@ class PatternService:
         params: dict = {"code": code, "limit": limit}
 
         if start_date:
-            conditions.append("p.trade_date >= :start_date")
+            conditions.append("(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))")
             params["start_date"] = start_date
+            params["start_date_dt"] = trade_date_dt_param(start_date)
         if end_date:
-            conditions.append("p.trade_date <= :end_date")
+            conditions.append("(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))")
             params["end_date"] = end_date
+            params["end_date_dt"] = trade_date_dt_param(end_date)
 
         query = text(f"""
             SELECT p.*, s.name as stock_name, s.symbol as code
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
             WHERE {" AND ".join(conditions)}
-            ORDER BY p.trade_date DESC, p.confidence DESC
+            ORDER BY
+                CASE WHEN p.trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                p.trade_date_dt DESC,
+                p.trade_date DESC,
+                p.confidence DESC
             LIMIT :limit
         """)
         result = await self.db.execute(query, params)
@@ -47,7 +59,11 @@ class PatternService:
             SELECT p.*, s.name as stock_name, s.symbol as code
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
-            ORDER BY p.trade_date DESC, p.confidence DESC
+            ORDER BY
+                CASE WHEN p.trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                p.trade_date_dt DESC,
+                p.trade_date DESC,
+                p.confidence DESC
             LIMIT :limit
             """)
         result = await self.db.execute(query, {"limit": limit})
@@ -73,11 +89,13 @@ class PatternService:
         params: dict = {"limit": limit, "min_confidence": min_confidence}
 
         if start_date:
-            conditions.append("p.trade_date >= :start_date")
+            conditions.append("(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))")
             params["start_date"] = start_date
+            params["start_date_dt"] = trade_date_dt_param(start_date)
         if end_date:
-            conditions.append("p.trade_date <= :end_date")
+            conditions.append("(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))")
             params["end_date"] = end_date
+            params["end_date_dt"] = trade_date_dt_param(end_date)
         conditions.append("COALESCE(p.confidence, 0) >= :min_confidence")
 
         if pattern_names:
@@ -93,7 +111,11 @@ class PatternService:
             FROM patterns p
             LEFT JOIN stocks s ON p.ts_code = s.ts_code
             WHERE {" AND ".join(conditions)}
-            ORDER BY p.trade_date DESC, p.confidence DESC
+            ORDER BY
+                CASE WHEN p.trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                p.trade_date_dt DESC,
+                p.trade_date DESC,
+                p.confidence DESC
             LIMIT :limit
             """)
         result = await self.db.execute(query, params)
@@ -149,12 +171,22 @@ class PatternService:
         bars_query = text("""
             SELECT trade_date, close
             FROM daily_bars
-            WHERE ts_code = :ts_code AND trade_date <= :trade_date
-            ORDER BY trade_date DESC
+            WHERE ts_code = :ts_code
+              AND (trade_date_dt <= :trade_date_dt OR (trade_date_dt IS NULL AND trade_date <= :trade_date))
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END ASC,
+                trade_date_dt DESC,
+                trade_date DESC
             LIMIT :limit
             """)
         bars_result = await self.db.execute(
-            bars_query, {"ts_code": ts_code, "trade_date": trade_date, "limit": max_period + 30}
+            bars_query,
+            {
+                "ts_code": ts_code,
+                "trade_date": trade_date,
+                "trade_date_dt": trade_date_dt_param(trade_date),
+                "limit": max_period + 30,
+            },
         )
         bars = [dict(row._mapping) for row in bars_result.fetchall()]
         bars.reverse()

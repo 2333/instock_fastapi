@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     REDIS_HOST: str | None = None
     REDIS_PORT: int = 6379
+    REDIS_URL: str | None = None
 
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: str = "*"
 
     CRAWLER_PROXY_ENABLED: bool = False
+    SCHEDULER_ENABLED: bool = True
     TUSHARE_TOKEN: str | None = None
     TUSHARE_HTTP_URL: str | None = None
 
@@ -89,6 +91,13 @@ class Settings(BaseSettings):
         if not raw or raw == "*":
             return ["*"]
         return [item.strip() for item in raw.split(",") if item.strip()]
+
+    def get_redis_url(self) -> str:
+        if self.REDIS_URL:
+            return self.REDIS_URL
+        if self.REDIS_HOST:
+            return f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        raise ValueError("Redis is not configured. Set REDIS_URL or REDIS_HOST to enable it.")
 
 
 @lru_cache

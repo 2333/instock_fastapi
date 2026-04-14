@@ -7,7 +7,11 @@ from sqlalchemy import select, text
 
 from app.jobs import market_calendar
 from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
-from app.jobs.tasks.fetch_daily_task import _ensure_backfill_state_table, save_stocks
+from app.jobs.tasks.fetch_daily_task import (
+    _ensure_backfill_state_table,
+    run_daily_bars_backfill_window,
+    save_stocks,
+)
 from app.jobs.tasks.fetch_market_reference_task import summarize_block_trades, summarize_top_list
 from app.models.stock_model import Base, DailyBar, Stock
 from tests.conftest import async_engine_test, async_session_factory_test
@@ -97,6 +101,46 @@ async def test_fetch_daily_bars_routes_bj_directly_to_eastmoney(monkeypatch):
     eastmoney.fetch.assert_awaited_once()
     tushare.fetch_kline.assert_not_awaited()
     baostock.fetch_kline.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_daily_bars_uses_tushare_pro_bar_before_fallback(monkeypatch):
+    monkeypatch.setenv("INLINE_FALLBACK_ENABLED", "true")
+    tushare = AsyncMock()
+    tushare.fetch_pro_bar = AsyncMock(return_value=[{"date": "2026-03-13", "close": 1}])
+    tushare.fetch_kline = AsyncMock()
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock()
+
+    bars, source, status, note = await fetch_daily_task._fetch_bars_with_fallback(
+        tushare_provider=tushare,
+        baostock_provider=baostock,
+        em_crawler=eastmoney,
+        symbol="000001",
+        start_date="2026-03-10",
+        end_date="2026-03-13",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        exchange="SZ",
+        is_etf=False,
+    )
+
+    assert bars == [{"date": "2026-03-13", "close": 1}]
+    assert source == "tushare"
+    assert status == "done"
+    assert note == ""
+    tushare.fetch_pro_bar.assert_awaited_once_with(
+        ts_code="000001.SZ",
+        asset="E",
+        freq="D",
+        adj=fetch_daily_task.AdjustType.NO_ADJUST,
+        start_date="2026-03-10",
+        end_date="2026-03-13",
+    )
+    tushare.fetch_kline.assert_not_awaited()
+    baostock.fetch_kline.assert_not_awaited()
+    eastmoney.fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -254,6 +298,221 @@ async def test_resolve_candidate_trade_dates_only_prepends_today_when_requested(
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_dry_run_is_bounded(monkeypatch):
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add_all(
+            [
+                Stock(
+                    ts_code="000001.SZ",
+                    symbol="000001",
+                    name="平安银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="000002.SZ",
+                    symbol="000002",
+                    name="万科A",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async def fail_if_called(session):
+        raise AssertionError("dry-run must not create or commit backfill state")
+
+    monkeypatch.setattr(fetch_daily_task, "_ensure_backfill_state_table", fail_if_called)
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-02",
+        end_date="2024-01-05",
+        code_limit=1,
+        source="eastmoney",
+        execute=False,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["dry_run"] is True
+    assert result["source"] == "eastmoney"
+    assert result["target_count"] == 1
+    assert set(result["targets"]) <= {"000001.SZ", "000002.SZ"}
+    assert result["saved_rows"] == 0
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_uses_explicit_baostock_source():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock(
+        return_value=[
+            {
+                "date": "2024-01-02",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "pre_close": 10,
+                "change": 0.5,
+                "change_pct": 5,
+                "volume": 1000,
+                "amount": 10000,
+            }
+        ]
+    )
+    tushare = AsyncMock()
+    tushare.fetch_pro_bar = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock()
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-02",
+        end_date="2024-01-05",
+        code_limit=1,
+        source="baostock",
+        execute=True,
+        provider=tushare,
+        baostock_provider=baostock,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    async with async_session_factory_test() as session:
+        rows = (await session.execute(select(DailyBar))).scalars().all()
+
+    assert result["source"] == "baostock"
+    assert result["saved_rows"] == 1
+    assert result["items"] == [
+        {
+            "ts_code": "000001.SZ",
+            "status": "done",
+            "source": "baostock",
+            "source_policy": "baostock",
+            "saved_rows": 1,
+            "attempts": [{"source": "baostock", "rows": 1}],
+        }
+    ]
+    baostock.fetch_kline.assert_awaited_once_with(
+        code="000001",
+        start_date="2024-01-02",
+        end_date="2024-01-05",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        period="daily",
+    )
+    tushare.fetch_pro_bar.assert_not_awaited()
+    eastmoney.fetch.assert_not_awaited()
+    assert len(rows) == 1
+    assert rows[0].ts_code == "000001.SZ"
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_prefers_tushare_but_uses_baostock_when_needed():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    tushare = AsyncMock()
+    tushare.fetch_pro_bar = AsyncMock(return_value=[])
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock(
+        return_value=[
+            {
+                "date": "2024-01-02",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "pre_close": 10,
+                "change": 0.5,
+                "change_pct": 5,
+                "volume": 1000,
+                "amount": 10000,
+            }
+        ]
+    )
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock()
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-02",
+        end_date="2024-01-05",
+        code_limit=1,
+        source="prefer_tushare",
+        execute=True,
+        provider=tushare,
+        baostock_provider=baostock,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["source"] == "prefer_tushare"
+    assert result["saved_rows"] == 1
+    assert result["items"] == [
+        {
+            "ts_code": "000001.SZ",
+            "status": "done",
+            "source": "baostock",
+            "source_policy": "prefer_tushare",
+            "saved_rows": 1,
+            "attempts": [
+                {"source": "tushare", "rows": 0},
+                {"source": "baostock", "rows": 1},
+            ],
+        }
+    ]
+    tushare.fetch_pro_bar.assert_awaited_once()
+    baostock.fetch_kline.assert_awaited_once()
+    eastmoney.fetch.assert_not_awaited()
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
 @pytest.mark.asyncio
 async def test_is_trading_day_returns_false_on_weekend_without_calendar_call():

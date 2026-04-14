@@ -2,6 +2,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.date_utils import trade_date_dt_param
+
 
 class MarketDataService:
     def __init__(self, db: AsyncSession):
@@ -19,6 +21,7 @@ class MarketDataService:
     async def _resolve_trade_date(
         self, target_date: str | None, table_name: str = "daily_bars"
     ) -> str | None:
+        core_fact_tables = {"daily_bars", "fund_flows"}
         if table_name not in {
             "daily_bars",
             "fund_flows",
@@ -28,17 +31,32 @@ class MarketDataService:
         }:
             raise ValueError(f"unsupported trade date table: {table_name}")
         if target_date:
+            target_date_dt = trade_date_dt_param(target_date)
+            date_predicate = (
+                "(trade_date_dt <= :target_date_dt OR (trade_date_dt IS NULL AND trade_date <= :target_date))"
+                if table_name in core_fact_tables
+                else "trade_date <= :target_date"
+            )
             result = await self.db.execute(
                 text(f"""
                     SELECT MAX(trade_date) as resolved_date
                     FROM {table_name}
-                    WHERE trade_date <= :target_date
+                    WHERE {date_predicate}
                     """),
-                {"target_date": target_date},
+                {"target_date": target_date, "target_date_dt": target_date_dt},
             )
         else:
+            order_column = "trade_date_dt" if table_name in core_fact_tables else "trade_date"
             result = await self.db.execute(
-                text(f"SELECT MAX(trade_date) as resolved_date FROM {table_name}")
+                text(f"""
+                    SELECT trade_date as resolved_date
+                    FROM {table_name}
+                    ORDER BY
+                        CASE WHEN {order_column} IS NULL THEN 1 ELSE 0 END,
+                        {order_column} DESC,
+                        trade_date DESC
+                    LIMIT 1
+                    """)
             )
         row = result.fetchone()
         return row[0] if row and row[0] else None
@@ -48,6 +66,7 @@ class MarketDataService:
         date = await self._resolve_trade_date(date, "fund_flows")
         if not date:
             return []
+        date_dt = trade_date_dt_param(date)
 
         query = text("""
             SELECT
@@ -62,12 +81,17 @@ class MarketDataService:
                 f.trade_date
             FROM fund_flows f
             INNER JOIN stocks s ON split_part(f.ts_code, '.', 1) = s.symbol
-            INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = f.trade_date
-            WHERE f.trade_date = :date
+            INNER JOIN daily_bars db ON s.ts_code = db.ts_code
+              AND (
+                db.trade_date_dt = f.trade_date_dt
+                OR (db.trade_date_dt IS NULL AND f.trade_date_dt IS NULL AND db.trade_date = f.trade_date)
+              )
+            WHERE f.trade_date_dt = :date_dt
+               OR (f.trade_date_dt IS NULL AND f.trade_date = :date)
             ORDER BY f.net_amount_main DESC NULLS LAST
             LIMIT :limit
             """)
-        result = await self.db.execute(query, {"date": date, "limit": limit})
+        result = await self.db.execute(query, {"date": date, "date_dt": date_dt, "limit": limit})
         return [row._mapping for row in result.fetchall()]
 
     async def get_block_trades(self, date: str | None, limit: int = 50) -> list[dict]:
@@ -99,6 +123,7 @@ class MarketDataService:
         date = await self._resolve_trade_date(date, "stock_tops")
         if not date:
             return []
+        date_dt = trade_date_dt_param(date)
 
         query = text("""
             SELECT
@@ -113,12 +138,14 @@ class MarketDataService:
                 t.trade_date
             FROM stock_tops t
             LEFT JOIN stocks s ON split_part(t.ts_code, '.', 1) = s.symbol
-            LEFT JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = t.trade_date
+            LEFT JOIN daily_bars db
+                ON s.ts_code = db.ts_code
+                AND (db.trade_date_dt = :date_dt OR (db.trade_date_dt IS NULL AND db.trade_date = :date))
             WHERE t.trade_date = :date
             ORDER BY t.net_amount DESC NULLS LAST
             LIMIT :limit
             """)
-        result = await self.db.execute(query, {"date": date, "limit": limit})
+        result = await self.db.execute(query, {"date": date, "date_dt": date_dt, "limit": limit})
         return [row._mapping for row in result.fetchall()]
 
     async def get_north_bound_funds(self, date: str | None, limit: int = 50) -> list[dict]:
@@ -264,12 +291,17 @@ class MarketDataService:
                 db.trade_date
             FROM daily_bars db
             INNER JOIN stocks s ON s.ts_code = db.ts_code
-            WHERE db.trade_date = :trade_date
+            WHERE (
+                db.trade_date_dt = :trade_date_dt
+                OR (db.trade_date_dt IS NULL AND db.trade_date = :trade_date)
+              )
               AND COALESCE(s.list_status, 'L') = 'L'
               AND COALESCE(s.is_etf, false) = false
             ORDER BY s.symbol ASC
         """)
-        result = await self.db.execute(query, {"trade_date": trade_date})
+        result = await self.db.execute(
+            query, {"trade_date": trade_date, "trade_date_dt": trade_date_dt_param(trade_date)}
+        )
         rows = [dict(row._mapping) for row in result.fetchall()]
 
         if not rows:

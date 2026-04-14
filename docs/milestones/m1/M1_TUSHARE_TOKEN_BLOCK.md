@@ -1,7 +1,9 @@
 # M1 启动阻塞：Tushare Token 失效诊断与修复指南
 
+> 历史说明: 本文档保留为 2026-04-05 的 token 诊断快照。当前重启口径以 `docs/milestones/m1/M1_RESTART_PLAN.md` 为准；本文中引用的 `scripts/check_m1_readiness.py` 已不再保证存在。当前阶段 M1 已接受 token-independent 收口路径，因此本文只定义 Tushare 相关 follow-up 风险，不再单独阻塞 `daily_bars` / `technical_factors(local)` 主线。
+>
 > 日期: 2026-04-05
-> 状态: ❌ 阻塞中
+> 状态: 历史诊断快照（当前只阻塞 Tushare 相关 gated follow-up）
 > 检查脚本: `scripts/check_m1_readiness.py`
 
 ---
@@ -93,9 +95,9 @@ python scripts/check_m1_readiness.py
 
 ---
 
-## M1 启动前提（再次确认）
+## 历史 M1 启动前提（再次确认）
 
-M1 启动必须同时满足:
+按 2026-04-05 的旧口径，M1 启动曾被描述为必须同时满足:
 
 | 条件 | 状态 | 说明 |
 |------|------|------|
@@ -103,12 +105,12 @@ M1 启动必须同时满足:
 | ✅ TimescaleDB 扩展可用 | 已确认 | `SELECT * FROM pg_extension WHERE extname='timescaledb'` |
 | ✅ 数据库连接正常 | 已确认 | config tests 通过 |
 | ✅ Alembic 已安装 | 1.18.4 | `alembic --version` |
-| ❌ Tushare token 有效 | **阻塞** | 需手动更新 `.env` |
+| ❌ Tushare token 有效 | 历史阻塞项 | 需手动更新 `.env` |
 | ✅ M1 任务拆解完成 | 已就绪 | `M1_TASK_BREAKDOWN.md` + `M1_PROGRESS_TRACKER.md` |
 
 ---
 
-## 临时应对（如无法立即获取新 Token）
+## 历史临时应对（如无法立即获取新 Token）
 
 如果暂时无法获取新 token，可采取的临时措施:
 

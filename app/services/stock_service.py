@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.services.date_utils import trade_date_dt_param
 from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.base import AdjustType
@@ -24,17 +25,27 @@ class StockService:
 
     async def _resolve_trade_date(self, target_date: str | None) -> str | None:
         if target_date:
+            target_date_dt = trade_date_dt_param(target_date)
             result = await self.db.execute(
                 text("""
                     SELECT MAX(trade_date) AS resolved_date
                     FROM daily_bars
-                    WHERE trade_date <= :target_date
+                    WHERE trade_date_dt <= :target_date_dt
+                       OR (trade_date_dt IS NULL AND trade_date <= :target_date)
                 """),
-                {"target_date": target_date},
+                {"target_date": target_date, "target_date_dt": target_date_dt},
             )
         else:
             result = await self.db.execute(
-                text("SELECT MAX(trade_date) AS resolved_date FROM daily_bars")
+                text("""
+                    SELECT trade_date AS resolved_date
+                    FROM daily_bars
+                    ORDER BY
+                        CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                        trade_date_dt DESC,
+                        trade_date DESC
+                    LIMIT 1
+                """)
             )
         row = result.fetchone()
         return row[0] if row and row[0] else None
@@ -42,6 +53,7 @@ class StockService:
     async def get_stocks(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
         date = await self._resolve_trade_date(date)
+        date_dt = trade_date_dt_param(date)
 
         if date:
             query = text("""
@@ -62,7 +74,9 @@ class StockService:
                     db.vol,
                     db.amount
                 FROM stocks s
-                INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = :date
+                INNER JOIN daily_bars db
+                    ON s.ts_code = db.ts_code
+                    AND (db.trade_date_dt = :date_dt OR (db.trade_date_dt IS NULL AND db.trade_date = :date))
                 WHERE s.is_etf = false AND s.list_status = 'L'
                 ORDER BY db.pct_chg DESC
                 LIMIT :limit OFFSET :offset
@@ -90,7 +104,9 @@ class StockService:
                 LIMIT :limit OFFSET :offset
             """)
 
-        result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
+        result = await self.db.execute(
+            query, {"date": date, "date_dt": date_dt, "limit": page_size, "offset": offset}
+        )
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
     async def get_stocks_with_total(
@@ -98,13 +114,16 @@ class StockService:
     ) -> tuple[list[dict], int]:
         """获取股票列表和总数"""
         date = await self._resolve_trade_date(date)
+        date_dt = trade_date_dt_param(date)
 
         # 获取总数
         if date:
             count_query = text("""
                 SELECT COUNT(*) as total
                 FROM stocks s
-                INNER JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = :date
+                INNER JOIN daily_bars db
+                    ON s.ts_code = db.ts_code
+                    AND (db.trade_date_dt = :date_dt OR (db.trade_date_dt IS NULL AND db.trade_date = :date))
                 WHERE s.is_etf = false AND s.list_status = 'L'
             """)
         else:
@@ -114,7 +133,7 @@ class StockService:
                 WHERE s.is_etf = false AND s.list_status = 'L'
             """)
 
-        count_result = await self.db.execute(count_query, {"date": date})
+        count_result = await self.db.execute(count_query, {"date": date, "date_dt": date_dt})
         count_row = count_result.fetchone()
         total = count_row[0] if count_row else 0
 
@@ -183,7 +202,10 @@ class StockService:
                 amount
             FROM daily_bars
             WHERE ts_code = :ts_code
-            ORDER BY trade_date DESC
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                trade_date_dt DESC,
+                trade_date DESC
             LIMIT 1
         """)
         result = await self.db.execute(query, {"ts_code": ts_code})
@@ -207,9 +229,14 @@ class StockService:
 
     async def _get_latest_indicator_snapshot(self, ts_code: str) -> dict | None:
         latest_trade_date_query = text("""
-            SELECT MAX(trade_date) AS trade_date
+            SELECT trade_date
             FROM indicators
             WHERE ts_code = :ts_code
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                trade_date_dt DESC,
+                trade_date DESC
+            LIMIT 1
         """)
         latest_trade_date_result = await self.db.execute(
             latest_trade_date_query, {"ts_code": ts_code}
@@ -222,11 +249,17 @@ class StockService:
         indicator_query = text("""
             SELECT indicator_name, indicator_value
             FROM indicators
-            WHERE ts_code = :ts_code AND trade_date = :trade_date
+            WHERE ts_code = :ts_code
+              AND (trade_date_dt = :trade_date_dt OR (trade_date_dt IS NULL AND trade_date = :trade_date))
             ORDER BY indicator_name ASC
         """)
         indicator_result = await self.db.execute(
-            indicator_query, {"ts_code": ts_code, "trade_date": trade_date}
+            indicator_query,
+            {
+                "ts_code": ts_code,
+                "trade_date": trade_date,
+                "trade_date_dt": trade_date_dt_param(trade_date),
+            },
         )
         rows = indicator_result.fetchall()
 
@@ -252,7 +285,12 @@ class StockService:
             SELECT trade_date, pattern_name, pattern_type, confidence
             FROM patterns
             WHERE ts_code = :ts_code
-            ORDER BY trade_date DESC, confidence DESC NULLS LAST, pattern_name ASC
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                trade_date_dt DESC,
+                trade_date DESC,
+                confidence DESC NULLS LAST,
+                pattern_name ASC
             LIMIT :limit
         """)
         result = await self.db.execute(query, {"ts_code": ts_code, "limit": limit})
@@ -467,12 +505,25 @@ class StockService:
             return []
         bars_query = text("""
             SELECT * FROM daily_bars
-            WHERE ts_code = :ts_code AND trade_date BETWEEN :start_date AND :end_date
-            ORDER BY trade_date ASC
+            WHERE ts_code = :ts_code
+              AND (
+                trade_date_dt BETWEEN :start_date_dt AND :end_date_dt
+                OR (trade_date_dt IS NULL AND trade_date BETWEEN :start_date AND :end_date)
+              )
+            ORDER BY
+              CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END ASC,
+              trade_date_dt ASC,
+              trade_date ASC
         """)
         bars_result = await self.db.execute(
             bars_query,
-            {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+            {
+                "ts_code": ts_code,
+                "start_date": start_date,
+                "end_date": end_date,
+                "start_date_dt": trade_date_dt_param(start_date),
+                "end_date_dt": trade_date_dt_param(end_date),
+            },
         )
         return [dict(row._mapping) for row in bars_result.fetchall()]
 
@@ -568,6 +619,7 @@ class StockService:
 
     async def get_etf_list(self, date: str | None, page: int, page_size: int) -> list[dict]:
         offset = (page - 1) * page_size
+        date_dt = trade_date_dt_param(date)
 
         if date:
             query = text("""
@@ -587,7 +639,9 @@ class StockService:
                     db.vol,
                     db.amount
                 FROM stocks s
-                LEFT JOIN daily_bars db ON s.ts_code = db.ts_code AND db.trade_date = :date
+                LEFT JOIN daily_bars db
+                    ON s.ts_code = db.ts_code
+                    AND (db.trade_date_dt = :date_dt OR (db.trade_date_dt IS NULL AND db.trade_date = :date))
                 WHERE s.is_etf = true AND s.list_status = 'L'
                 ORDER BY db.pct_chg DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
@@ -612,11 +666,17 @@ class StockService:
                 FROM stocks s
                 LEFT JOIN daily_bars db ON s.ts_code = db.ts_code
                 WHERE s.is_etf = true AND s.list_status = 'L'
-                ORDER BY db.trade_date DESC, db.pct_chg DESC
+                ORDER BY
+                    CASE WHEN db.trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                    db.trade_date_dt DESC,
+                    db.trade_date DESC,
+                    db.pct_chg DESC
                 LIMIT :limit OFFSET :offset
             """)
 
-        result = await self.db.execute(query, {"date": date, "limit": page_size, "offset": offset})
+        result = await self.db.execute(
+            query, {"date": date, "date_dt": date_dt, "limit": page_size, "offset": offset}
+        )
         return [self._normalize_row_mapping(row._mapping) for row in result.fetchall()]
 
     async def get_etf_detail(self, code: str) -> dict | None:

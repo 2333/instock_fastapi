@@ -1,0 +1,5 @@
+Alembic migrations for the M1 data-layer restart.
+
+Use app settings for database configuration; do not hard-code credentials in
+alembic.ini. TimescaleDB DDL should be written explicitly in migration files
+instead of relying only on autogenerate.

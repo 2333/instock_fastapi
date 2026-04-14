@@ -32,7 +32,7 @@ class RedisClient:
         """建立连接"""
         if self.client is None:
             self.pool = ConnectionPool.from_url(
-                self.settings.REDIS_URL,
+                self.settings.get_redis_url(),
                 max_connections=20,
                 decode_responses=True,
             )

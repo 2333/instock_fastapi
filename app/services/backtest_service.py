@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock_model import BacktestResult
+from app.services.date_utils import trade_date_dt_param
 
 
 SUPPORTED_BACKTEST_STRATEGIES = {"buy_hold", "ma_crossover", "rsi_oversold"}
@@ -56,8 +57,14 @@ class BacktestService:
             SELECT trade_date, open, high, low, close, vol
             FROM daily_bars
             WHERE ts_code = :ts_code
-            AND trade_date BETWEEN :start_date AND :end_date
-            ORDER BY trade_date ASC
+            AND (
+                trade_date_dt BETWEEN :start_date_dt AND :end_date_dt
+                OR (trade_date_dt IS NULL AND trade_date BETWEEN :start_date AND :end_date)
+            )
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END ASC,
+                trade_date_dt ASC,
+                trade_date ASC
             """)
         bars = (
             (
@@ -67,6 +74,8 @@ class BacktestService:
                         "ts_code": stock_row["ts_code"],
                         "start_date": start_date,
                         "end_date": end_date,
+                        "start_date_dt": trade_date_dt_param(start_date),
+                        "end_date_dt": trade_date_dt_param(end_date),
                     },
                 )
             )
@@ -784,8 +793,14 @@ class BacktestService:
             SELECT trade_date, open, high, low, close, vol
             FROM daily_bars
             WHERE ts_code = :ts_code
-            AND trade_date BETWEEN :start_date AND :end_date
-            ORDER BY trade_date ASC
+            AND (
+                trade_date_dt BETWEEN :start_date_dt AND :end_date_dt
+                OR (trade_date_dt IS NULL AND trade_date BETWEEN :start_date AND :end_date)
+            )
+            ORDER BY
+                CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END ASC,
+                trade_date_dt ASC,
+                trade_date ASC
             """)
         bars = (
             (
@@ -795,6 +810,8 @@ class BacktestService:
                         "ts_code": stock_row["ts_code"],
                         "start_date": start_date,
                         "end_date": end_date,
+                        "start_date_dt": trade_date_dt_param(start_date),
+                        "end_date_dt": trade_date_dt_param(end_date),
                     },
                 )
             )
