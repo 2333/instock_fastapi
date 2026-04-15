@@ -47,8 +47,6 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-dev
 
-COPY --chmod=755 ./scripts/start.sh /usr/local/bin/start.sh
-
 COPY . .
 
 RUN mkdir -p /app/logs

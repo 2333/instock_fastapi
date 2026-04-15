@@ -1,6 +1,6 @@
-# 测试/开发环境 Docker Compose
-# 与生产环境隔离：不同端口、不同容器名、不同数据卷
-# 用法: docker compose -f docker-compose.dev.yml up -d
+# 开发环境 Docker Compose
+# 长期开启，供前后端联调与日常任务调试使用
+# 用法: docker compose -p instock_dev -f docker-compose.dev.yml up -d
 
 services:
   postgres:
