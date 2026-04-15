@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.models.stock_model import DailyBasic, StockST, TechnicalFactor
 
-
 MIGRATION_PATH = Path("alembic/versions/2026_04_08_0002-m1_required_fact_tables.py")
 
 
@@ -18,12 +17,14 @@ def _index_names(model) -> set[str]:
 
 
 def test_required_fact_models_use_trade_date_dt_uniqueness():
-    assert _unique_constraint_columns(
-        DailyBasic, "uq_daily_basic_ts_code_trade_date_dt"
-    ) == ("ts_code", "trade_date_dt")
-    assert _unique_constraint_columns(
-        StockST, "uq_stock_st_ts_code_trade_date_dt"
-    ) == ("ts_code", "trade_date_dt")
+    assert _unique_constraint_columns(DailyBasic, "uq_daily_basic_ts_code_trade_date_dt") == (
+        "ts_code",
+        "trade_date_dt",
+    )
+    assert _unique_constraint_columns(StockST, "uq_stock_st_ts_code_trade_date_dt") == (
+        "ts_code",
+        "trade_date_dt",
+    )
     assert _unique_constraint_columns(
         TechnicalFactor, "uq_technical_factors_ts_code_trade_date_dt"
     ) == ("ts_code", "trade_date_dt")

@@ -58,7 +58,10 @@ async def test_timescale_health_checks_collect_postgres_signals():
         "FROM timescaledb_information.hypertables": True,
         "FROM timescaledb_information.chunks": 3,
         "FROM timescaledb_information.jobs": True,
-        "EXPLAIN": [("ChunkAppend on daily_bars",), ("Index Scan using ix_daily_bars_trade_date_dt",)],
+        "EXPLAIN": [
+            ("ChunkAppend on daily_bars",),
+            ("Index Scan using ix_daily_bars_trade_date_dt",),
+        ],
     }
     session = _FakeSession("postgresql", mapping)
 
@@ -68,7 +71,10 @@ async def test_timescale_health_checks_collect_postgres_signals():
     assert results[0]["status"] == "ok"
     assert any(item["check"] == "hypertable.registered" for item in results)
     assert any(item["check"] == "hypertable.chunk_count" and item["value"] == 3 for item in results)
-    assert any(item["check"] == "hypertable.compression_policy" and item["status"] == "ok" for item in results)
+    assert any(
+        item["check"] == "hypertable.compression_policy" and item["status"] == "ok"
+        for item in results
+    )
     assert any(item["check"] == "plan.daily_bars_window" for item in results)
     assert any(
         item["check"] == "plan.daily_bars_window" and "ChunkAppend on daily_bars" in item["value"]
@@ -84,9 +90,7 @@ async def test_timescale_health_checks_skip_catalog_queries_when_extension_missi
 
     assert results[0]["check"] == "extension.timescaledb"
     assert results[0]["status"] == "fail"
-    assert all(
-        item["status"] == "skipped" for item in results[1:]
-    )
+    assert all(item["status"] == "skipped" for item in results[1:])
     assert not any("timescaledb_information.hypertables" in sql for sql in session.executed_sql)
     assert not any("timescaledb_information.chunks" in sql for sql in session.executed_sql)
     assert not any("timescaledb_information.jobs" in sql for sql in session.executed_sql)

@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.jobs.m1_quality_runner import has_quality_failures, run_m1_quality_checks, summarize_quality_results
+from app.jobs.m1_quality_runner import (
+    has_quality_failures,
+    run_m1_quality_checks,
+    summarize_quality_results,
+)
 
 
 class _FakeRow(dict):
@@ -87,7 +91,9 @@ async def test_quality_runner_builds_summary_with_failures():
     summary = summarize_quality_results(results)
 
     assert len(results) == 29
-    assert any(item["check"] == "null_trade_date_dt" and item["status"] == "fail" for item in results)
+    assert any(
+        item["check"] == "null_trade_date_dt" and item["status"] == "fail" for item in results
+    )
     assert summary["total_checks"] == 29
     assert summary["status_counts"]["fail"] == 1
     assert has_quality_failures(results) is True

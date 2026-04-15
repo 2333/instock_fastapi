@@ -6,7 +6,9 @@ import pytest
 from core.crawling.tushare_provider import TushareConfig, TushareProvider
 
 
-def _provider(monkeypatch, frame_by_endpoint: dict[str, pd.DataFrame | Exception]) -> TushareProvider:
+def _provider(
+    monkeypatch, frame_by_endpoint: dict[str, pd.DataFrame | Exception]
+) -> TushareProvider:
     provider = TushareProvider(TushareConfig(token="token", min_delay=0.0))
     monkeypatch.setattr(provider, "_get_pro", lambda: object())
 
@@ -167,4 +169,3 @@ async def test_required_fact_fetchers_return_empty_for_empty_or_exception(monkey
     assert await provider.fetch_daily_basic("20260403") == []
     assert await provider.fetch_stock_st("20260403") == []
     assert await provider.fetch_technical_factors("20260403") == []
-

@@ -20,8 +20,8 @@ from app.database import get_db
 from app.main import app
 from app.models.stock_model import (
     Base,
-    DailyBasic,
     DailyBar,
+    DailyBasic,
     Indicator,
     Pattern,
     Stock,

@@ -514,6 +514,7 @@ async def test_daily_bars_backfill_window_prefers_tushare_but_uses_baostock_when
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
+
 @pytest.mark.asyncio
 async def test_is_trading_day_returns_false_on_weekend_without_calendar_call():
     crawler = AsyncMock()
