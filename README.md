@@ -27,13 +27,16 @@ npm install
 npm run dev
 ```
 
-### Docker 部署
+### 环境模型
 
 ```bash
-make docker-up
-make docker-status
-make docker-smoke
+make dev-up
+make prod-status
 ```
+
+- `dev`：长期保留的开发联调环境
+- `prod`：长期保留的生产环境
+- `staging`：默认关闭，只在高风险变更验证时临时拉起
 
 ## 常用命令
 
@@ -58,12 +61,15 @@ make ci-backend
 make ci-frontend
 make ci
 
-# Docker
-make docker-up
-make docker-down
-make docker-status
-make docker-smoke
-make docker-rebuild
+# 环境管理
+make dev-up
+make dev-down
+make dev-status
+make dev-smoke
+make prod-status
+make prod-smoke
+make staging-up
+make staging-down
 
 # 数据库
 make init-db
@@ -77,13 +83,36 @@ make init-db
 make version-show
 make version-check
 make version-set VERSION=0.2.0
+make version-bump-patch
+make version-bump-minor
 ```
+
+版本文件会同步写入：
+
+- `VERSION`
+- `pyproject.toml`
+- `web/package.json`
+- `web/package-lock.json`
+
+### 合并后的版本约定
+
+- 功能分支开发过程中不要求频繁 bump 版本；以合并回主线时 bump 一次为准。
+- 每次合并到主线后，默认至少执行一次 `patch` bump。
+- 合并的是向后兼容的新功能、明显的用户可见能力扩展时，执行 `minor` bump。
+- 合并的是破坏性 API、配置、数据结构调整时，执行 `major` bump。
+- 只有纯文档、注释、CI 文案等完全不影响运行产物的合并，可以不 bump；如果拿不准，优先 bump `patch`。
+
+对这个项目，建议把规则简化成一句话：
+
+- `bugfix / 重构 / 小优化 / 数据抓取修复` -> `make version-bump-patch`
+- `新增页面 / 新接口 / 新任务能力 / 新策略能力` -> `make version-bump-minor`
+- `破坏兼容` -> `make version-bump-major`
 
 发布环境可使用版本化镜像：
 
 ```bash
-make docker-build-version VERSION=0.2.0
-make docker-deploy-version VERSION=0.2.0
+make prod-build-version VERSION=0.2.0
+make prod-deploy-version VERSION=0.2.0
 ```
 
 运行时版本会暴露在：
@@ -98,7 +127,8 @@ make docker-deploy-version VERSION=0.2.0
 - 接口文档：`http://localhost:8000/docs`
 - 健康检查：`http://localhost:8000/health`
 - 前端开发服务器：`http://localhost:3000/`
-- Docker 统一入口：`http://localhost:3001/`
+- 开发前端容器：`http://localhost:3002/`
+- 生产前端入口：`http://localhost:3001/`
 
 ## 关键说明
 
@@ -109,6 +139,8 @@ make docker-deploy-version VERSION=0.2.0
 ## 文档导航
 
 - [文档索引](./docs/README.md)
+- [环境说明](./docs/deployment/compose_environments.md)
+- [发布流程](./docs/deployment/release_workflow.md)
 - [API 文档](./docs/api/api_document.md)
 - [架构说明](./docs/architecture/system_architecture.md)
 - [产品需求](./docs/PRD.md)

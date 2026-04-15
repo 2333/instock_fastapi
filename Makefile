@@ -1,8 +1,10 @@
 .PHONY: help install install-dev sync dev frontend-dev test lint clean setup init-db \
-        docker-up docker-down docker-rebuild docker-status docker-logs \
-        docker-clean docker-build docker-smoke format lint-check style-check style-fix \
-        test-cov sync ci-backend ci-frontend ci \
-        version-show version-check version-set docker-build-version docker-deploy-version \
+        docker-up docker-down docker-rebuild docker-status docker-logs docker-clean docker-build \
+        docker-smoke docker-build-version docker-deploy-version \
+        prod-status prod-logs prod-smoke prod-build-version prod-deploy-version prod-down \
+        format lint-check style-check style-fix test-cov sync ci-backend ci-frontend ci \
+        merge-check \
+        version-show version-check version-set version-bump-patch version-bump-minor version-bump-major \
         dev-up dev-down dev-rebuild dev-status dev-logs dev-smoke \
         dev-local frontend-dev-local \
         staging-up staging-down staging-rebuild staging-status staging-logs staging-smoke \
@@ -13,7 +15,7 @@ UV_CACHE_DIR ?= .uv-cache
 UV_RUN = UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run
 COV_FAIL_UNDER ?= 30
 ENV_FILE ?= .env
-DOCKER_COMPOSE = ENV_FILE=$(ENV_FILE) docker compose
+PROD_COMPOSE = ENV_FILE=$(ENV_FILE) docker compose -f docker-compose.deploy.yml
 STYLE_PATHS = \
 	app/config.py \
 	app/core/dependencies.py \
@@ -43,16 +45,16 @@ help:
 	@echo "  make dev            - 启动后端开发服务器 (:8000)"
 	@echo "  make frontend-dev   - 启动前端开发服务器 (:3000)"
 	@echo ""
-	@echo "Docker 命令:"
-	@echo "  make docker-up      - 启动 Docker 全栈服务"
-	@echo "  make docker-down    - 停止所有容器"
-	@echo "  make docker-status  - 查看容器状态和访问入口"
-	@echo "  make docker-smoke   - 执行 Docker 健康检查"
-	@echo "  make docker-rebuild - 重建并重启 Docker 全栈"
-	@echo "  make docker-build-version VERSION=x.y.z  - 构建带版本标签的镜像"
-	@echo "  make docker-deploy-version VERSION=x.y.z - 使用版本化镜像部署"
+	@echo "生产环境:"
+	@echo "  make prod-status      - 查看生产 app/frontend 状态"
+	@echo "  make prod-logs        - 查看生产后端日志"
+	@echo "  make prod-smoke       - 执行生产健康检查"
+	@echo "  make prod-build-version VERSION=x.y.z  - 构建带版本标签的生产镜像"
+	@echo "  make prod-deploy-version VERSION=x.y.z - 发布指定版本到生产"
+	@echo "  make prod-down        - 停止生产 app/frontend（不影响生产数据库）"
+	@echo "  make backup-prod-db   - 备份生产 PostgreSQL 到 backups/postgres"
 	@echo ""
-	@echo "测试环境 (不影响生产 8000/3001):"
+	@echo "开发环境:"
 	@echo "  make dev-up         - 构建并启动测试容器 (:8001 后端, :3002 前端)"
 	@echo "  make dev-down       - 停止测试容器"
 	@echo "  make dev-rebuild    - 重建测试容器（代码变动后）"
@@ -62,7 +64,8 @@ help:
 	@echo "  make dev-local      - 本地启动后端 (:8001, 连测试容器 DB)"
 	@echo "  make frontend-dev-local - 本地启动前端 (:3002)"
 	@echo ""
-	@echo "预发布环境 (独立 DB, 测试新代码):"
+	@echo "临时 staging:"
+	@echo "  默认不开，只在高风险变更验证时短时拉起"
 	@echo "  make staging-up       - 构建并启动预发布容器 (:$(STAGING_APP_PORT) 后端, :$(STAGING_FRONTEND_PORT) 前端)"
 	@echo "  make staging-down     - 停止预发布容器"
 	@echo "  make staging-rebuild  - 重建预发布容器"
@@ -71,7 +74,6 @@ help:
 	@echo "  make staging-smoke    - 预发布容器健康检查"
 	@echo "  make staging-local    - 本地启动后端 (:$(STAGING_APP_PORT), 连预发布 DB)"
 	@echo "  make frontend-staging-local - 本地启动前端 (:$(STAGING_FRONTEND_PORT))"
-	@echo "  make backup-prod-db   - 备份主栈 PostgreSQL 到 backups/postgres"
 	@echo "  make restore-staging-db BACKUP=path/to/file.dump - 用快照恢复预发布 DB"
 	@echo ""
 	@echo "代码质量:"
@@ -83,9 +85,13 @@ help:
 	@echo "  make ci-backend     - 本地执行后端 CI 检查"
 	@echo "  make ci-frontend    - 本地执行前端 CI 检查"
 	@echo "  make ci             - 运行完整 CI"
+	@echo "  make merge-check    - 合并前执行版本/CI/Compose 配置检查"
 	@echo "  make version-show   - 显示当前仓库版本"
 	@echo "  make version-check  - 检查版本文件是否同步"
 	@echo "  make version-set VERSION=x.y.z - 更新仓库版本"
+	@echo "  make version-bump-patch - 合并常规修复/小改动后递增 patch"
+	@echo "  make version-bump-minor - 合并向后兼容新功能后递增 minor"
+	@echo "  make version-bump-major - 合并破坏性变更后递增 major"
 	@echo ""
 	@echo "测试:"
 	@echo "  make test           - 运行测试"
@@ -123,27 +129,46 @@ dev:
 frontend-dev:
 	cd web && npm run dev
 
-# ============ Docker ============
+# ============ 生产环境 ============
 
-docker-up:
-	$(DOCKER_COMPOSE) up -d
+prod-status:
+	@echo "=== Production Status ==="
+	@$(PROD_COMPOSE) ps
+	@echo ""
+	@echo "=== Endpoints ==="
+	@echo "Home:     http://localhost:8000/"
+	@echo "Docs:     http://localhost:8000/docs"
+	@echo "ReDoc:    http://localhost:8000/redoc"
+	@echo "Health:   http://localhost:8000/health"
+	@echo "Frontend: http://localhost:3001/"
+
+prod-logs:
+	$(PROD_COMPOSE) logs -f app
+
+prod-smoke:
+	chmod +x scripts/docker_smoke.sh
+	BACKEND_URL=http://localhost:8000 FRONTEND_URL=http://localhost:3001 ./scripts/docker_smoke.sh
+
+prod-build-version:
+	@test -n "$(VERSION)" || (echo "Usage: make prod-build-version VERSION=x.y.z" && exit 1)
+	VERSION=$(VERSION) sh scripts/build_release_images.sh
+
+prod-deploy-version:
+	@test -n "$(VERSION)" || (echo "Usage: make prod-deploy-version VERSION=x.y.z" && exit 1)
+	VERSION=$(VERSION) ENV_FILE=$(ENV_FILE) sh scripts/deploy_release.sh
+
+prod-down:
+	$(PROD_COMPOSE) down --remove-orphans
+
+# 兼容旧命令，但不再允许使用默认 docker-compose.yml 主栈入口。
+docker-up docker-rebuild docker-build docker-clean:
+	@echo "This project no longer uses the default docker-compose.yml main stack." >&2
+	@echo "Use 'make dev-up' for development, 'make prod-deploy-version VERSION=x.y.z' for production, or 'make staging-up' for temporary staging." >&2
+	@exit 1
 
 docker-down:
-	$(DOCKER_COMPOSE) down
-
-docker-rebuild:
-	@echo "Stopping..."
-	$(DOCKER_COMPOSE) down -v
-	@echo "Building and starting..."
-	$(DOCKER_COMPOSE) up --build -d
-	@echo ""
-	@echo "Waiting for services..."
-	@for i in 1 2 3 4 5; do sleep 2; curl -s http://localhost:8000/health > /dev/null 2>&1 && echo "Backend: OK" && break; done
-	@curl -s http://localhost:3001 > /dev/null 2>&1 && echo "Frontend: OK" || echo "Frontend: Starting..."
-
-docker-build:
-	@echo "Building images..."
-	$(DOCKER_COMPOSE) build --no-cache || echo "Build failed"
+	@echo "Deprecated: use 'make prod-down' to stop only the production app/frontend." >&2
+	@$(MAKE) prod-down
 
 version-show:
 	python3 scripts/release_version.py show
@@ -155,41 +180,38 @@ version-set:
 	@test -n "$(VERSION)" || (echo "Usage: make version-set VERSION=x.y.z" && exit 1)
 	python3 scripts/release_version.py set $(VERSION)
 
+version-bump-patch:
+	python3 scripts/release_version.py bump patch
+
+version-bump-minor:
+	python3 scripts/release_version.py bump minor
+
+version-bump-major:
+	python3 scripts/release_version.py bump major
+
 docker-build-version:
-	@test -n "$(VERSION)" || (echo "Usage: make docker-build-version VERSION=x.y.z" && exit 1)
-	VERSION=$(VERSION) sh scripts/build_release_images.sh
+	@echo "Deprecated: use 'make prod-build-version VERSION=x.y.z'." >&2
+	@$(MAKE) prod-build-version VERSION=$(VERSION)
 
 docker-deploy-version:
-	@test -n "$(VERSION)" || (echo "Usage: make docker-deploy-version VERSION=x.y.z" && exit 1)
-	VERSION=$(VERSION) ENV_FILE=$(ENV_FILE) sh scripts/deploy_release.sh
+	@echo "Deprecated: use 'make prod-deploy-version VERSION=x.y.z'." >&2
+	@$(MAKE) prod-deploy-version VERSION=$(VERSION)
 
 docker-smoke:
-	chmod +x scripts/docker_smoke.sh
-	./scripts/docker_smoke.sh
+	@echo "Deprecated: use 'make prod-smoke'." >&2
+	@$(MAKE) prod-smoke
 
 docker-status:
-	@echo "=== Docker Status ==="
-	@$(DOCKER_COMPOSE) ps
-	@echo ""
-	@echo "=== Endpoints ==="
-	@echo "Home:     http://localhost:8000/"
-	@echo "Docs:     http://localhost:8000/docs"
-	@echo "ReDoc:    http://localhost:8000/redoc"
-	@echo "Health:   http://localhost:8000/health"
-	@echo "Frontend: http://localhost:3001/"
+	@echo "Deprecated: use 'make prod-status'." >&2
+	@$(MAKE) prod-status
 
 docker-logs:
-	$(DOCKER_COMPOSE) logs -f app
-
-docker-clean:
-	@echo "Cleaning up Docker resources..."
-	$(DOCKER_COMPOSE) down -v --remove-orphans 2>/dev/null || true
-	docker system prune -f 2>/dev/null || true
-	@echo "Cleaned!"
+	@echo "Deprecated: use 'make prod-logs'." >&2
+	@$(MAKE) prod-logs
 
 # ============ 测试环境 (Docker, 隔离端口) ============
 
-DEV_COMPOSE = docker compose -f docker-compose.dev.yml
+DEV_COMPOSE = docker compose -p instock_dev -f docker-compose.dev.yml
 STAGING_APP_PORT ?= 8002
 STAGING_FRONTEND_PORT ?= 3003
 STAGING_POSTGRES_PORT ?= 5434
@@ -260,12 +282,12 @@ dev-local:
 frontend-dev-local:
 	cd web && VITE_API_URL=http://localhost:8001 npm run dev -- --port 3002
 
-# ============ 预发布环境 (独立 DB, 测试新代码) ============
+# ============ 临时预发布环境 (按需启动) ============
 
 STAGING_COMPOSE = STAGING_POSTGRES_PORT=$(STAGING_POSTGRES_PORT) docker compose -p instock_staging -f docker-compose.staging.yml
 
 staging-up:
-	@echo "Building and starting staging environment (using isolated DB)..."
+	@echo "Building and starting temporary staging environment (isolated DB)..."
 	$(STAGING_COMPOSE) up --build -d
 	@echo ""
 	@echo "Waiting for services..."
@@ -386,6 +408,19 @@ ci-frontend:
 	cd web && npm run build
 
 ci: ci-backend ci-frontend
+
+merge-check:
+	@echo "=== Version Sync ==="
+	python3 scripts/release_version.py check
+	@echo ""
+	@echo "=== Backend / Frontend CI ==="
+	$(MAKE) ci
+	@echo ""
+	@echo "=== Compose Config Validation ==="
+	docker compose -f docker-compose.deploy.yml config >/dev/null
+	docker compose -p instock_dev -f docker-compose.dev.yml config >/dev/null
+	docker compose -p instock_staging -f docker-compose.staging.yml config >/dev/null
+	@echo "merge-check passed"
 
 # ============ 清理 ============
 
