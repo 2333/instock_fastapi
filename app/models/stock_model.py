@@ -68,6 +68,12 @@ class Stock(Base):
     name: Mapped[str] = mapped_column(String(50), nullable=False, comment="Stock name")
     area: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="Area")
     industry: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="Industry")
+    industry_label: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="Industry label from BaoStock")
+    industry_taxonomy: Mapped[str | None] = mapped_column(
+        String(80), nullable=True, comment="Industry taxonomy from BaoStock"
+    )
+    industry_source: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Industry source")
+    industry_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="Industry refresh time")
     market: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Market type")
     exchange: Mapped[str] = mapped_column(String(10), nullable=False, comment="Exchange")
     curr_type: Mapped[str] = mapped_column(String(10), default="CNY", comment="Currency type")
@@ -111,6 +117,7 @@ class DailyBar(Base):
     pct_chg: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=True)
     vol: Mapped[Decimal] = mapped_column(Numeric(30, 2), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(30, 2), nullable=False)
+    source: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Data source")
     adj_factor: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

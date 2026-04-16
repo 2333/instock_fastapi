@@ -20,8 +20,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--code-limit", type=int, default=5)
     parser.add_argument(
         "--source",
-        choices=("prefer_tushare", "tushare", "baostock", "eastmoney"),
-        default="prefer_tushare",
+        choices=("baostock", "tushare", "eastmoney"),
+        default="baostock",
         help="explicit source policy; actual used source is recorded in the result",
     )
     parser.add_argument("--sleep-seconds", type=float, default=0.0)

@@ -190,9 +190,9 @@ async def test_get_stock_detail_falls_back_to_bfq_when_adjusted_bars_missing():
     result = await service.get_stock_detail("000001", "20240101", "20240131", "qfq")
 
     assert result["adjust_requested"] == "qfq"
-    assert result["adjust_applied"] == "bfq"
-    assert result["adjust_note"] == "requested_adjust_data_unavailable_fallback_to_bfq"
-    assert result["bars"] == [{"trade_date": "20240102"}]
+    assert result["adjust_applied"] == "qfq"
+    assert result["adjust_note"] == "requested_adjust_data_unavailable"
+    assert result["bars"] == []
     assert result["data_freshness"]["price_current"] is True
     assert result["data_freshness"]["indicator_current"] is False
     assert result["data_freshness"]["pattern_current"] is False
@@ -236,15 +236,9 @@ async def test_fetch_adjusted_bars_uses_baostock_result_and_normalizes_dates():
         }
     ]
 
-    with (
-        patch("app.services.stock_service.BaoStockProvider") as baostock_cls,
-        patch("app.services.stock_service.EastMoneyCrawler") as eastmoney_cls,
-    ):
+    with patch("app.services.stock_service.BaoStockProvider") as baostock_cls:
         baostock = baostock_cls.return_value
         baostock.fetch_kline = AsyncMock(return_value=baostock_rows)
-        eastmoney = eastmoney_cls.return_value
-        eastmoney.fetch = AsyncMock(return_value=[])
-        eastmoney.close = AsyncMock()
 
         rows = await service._fetch_adjusted_bars(
             "000001", "20240101", "20240131", AdjustType.FORWARD
@@ -264,43 +258,17 @@ async def test_fetch_adjusted_bars_uses_baostock_result_and_normalizes_dates():
             "amount": 52000,
         }
     ]
-    eastmoney.fetch.assert_not_awaited()
-    eastmoney.close.assert_awaited_once()
+    baostock.fetch_kline.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_fetch_adjusted_bars_falls_back_to_eastmoney_when_baostock_fails():
+async def test_fetch_adjusted_bars_raises_when_baostock_fails():
     service = StockService(Mock())
 
-    with (
-        patch("app.services.stock_service.BaoStockProvider") as baostock_cls,
-        patch("app.services.stock_service.EastMoneyCrawler") as eastmoney_cls,
-    ):
+    with patch("app.services.stock_service.BaoStockProvider") as baostock_cls:
         baostock = baostock_cls.return_value
         baostock.fetch_kline = AsyncMock(side_effect=RuntimeError("boom"))
-        eastmoney = eastmoney_cls.return_value
-        eastmoney.fetch = AsyncMock(
-            return_value=[
-                {
-                    "date": "2024-01-03",
-                    "open": 11.0,
-                    "high": 11.2,
-                    "low": 10.8,
-                    "close": 11.1,
-                    "pre_close": 10.9,
-                    "change": 0.2,
-                    "change_pct": 1.83,
-                    "volume": 7000,
-                    "amount": 77000,
-                }
-            ]
-        )
-        eastmoney.close = AsyncMock()
-
-        rows = await service._fetch_adjusted_bars(
-            "000001", "20240101", "20240131", AdjustType.BACKWARD
-        )
-
-    assert rows[0]["trade_date"] == "20240103"
-    eastmoney.fetch.assert_awaited_once()
-    eastmoney.close.assert_awaited_once()
+        with pytest.raises(RuntimeError, match="boom"):
+            await service._fetch_adjusted_bars(
+                "000001", "20240101", "20240131", AdjustType.BACKWARD
+            )

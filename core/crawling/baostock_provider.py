@@ -3,19 +3,24 @@
 """
 BaoStock 数据提供器
 
-仅用于日线数据抓取，作为主数据源；失败时由其他数据源兜底。
+用于 BaoStock 单源抓取，并在提供器内执行 IP 级请求预算约束。
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.request import urlopen
+
+from app.utils.stock_codes import normalize_ts_code
 
 from .base import AdjustType, ProxyPool
 
@@ -29,9 +34,10 @@ class BaoStockConfig:
 
 class BaoStockProvider:
     _lock = threading.Lock()
-    _proxy_env_lock = threading.Lock()
+    _budget_lock = threading.Lock()
     _logged_in = False
     _last_request_ts = 0.0
+    _public_ip: str | None = None
 
     def __init__(
         self,
@@ -39,7 +45,9 @@ class BaoStockProvider:
         proxy_pool: Optional[ProxyPool] = None,
     ):
         self.config = config or BaoStockConfig()
-        self.proxy_pool = proxy_pool
+        if proxy_pool is not None:
+            logger.warning("BaoStockProvider ignores proxy_pool to keep a stable internet IP")
+        self.proxy_pool = None
 
     async def fetch_kline(
         self,
@@ -76,28 +84,20 @@ class BaoStockProvider:
         start = (start_date or "1990-01-01").replace("/", "-")
         end = (end_date or "2099-12-31").replace("/", "-")
         adjust_flag = self._to_adjust_flag(adjust)
-        proxy = self.proxy_pool.get_proxy() if self.proxy_pool else None
-
         try:
-            with self._proxy_env(proxy):
-                self._ensure_login(bs)
-                self._wait_rate_limit()
-                rs = bs.query_history_k_data_plus(
-                    bs_code,
-                    "date,open,high,low,close,preclose,volume,amount,pctChg",
-                    start_date=start,
-                    end_date=end,
-                    frequency="d",
-                    adjustflag=adjust_flag,
-                )
-                if rs.error_code != "0":
-                    logger.warning("BaoStock 查询失败 %s %s", bs_code, rs.error_msg)
-                    if self.proxy_pool and proxy:
-                        self.proxy_pool.mark_failed(proxy)
-                    return []
+            self._ensure_login(bs)
+            self._wait_rate_limit()
+            rs = bs.query_history_k_data_plus(
+                bs_code,
+                "date,open,high,low,close,preclose,volume,amount,pctChg",
+                start_date=start,
+                end_date=end,
+                frequency="d",
+                adjustflag=adjust_flag,
+            )
+            if rs.error_code != "0":
+                raise RuntimeError(f"BaoStock 查询失败 {bs_code}: {rs.error_msg}")
         except Exception:
-            if self.proxy_pool and proxy:
-                self.proxy_pool.mark_failed(proxy)
             raise
 
         rows: List[Dict[str, Any]] = []
@@ -133,13 +133,22 @@ class BaoStockProvider:
             )
         return rows
 
-    async def fetch_stock_list(self) -> List[Dict[str, Any]]:
-        logger.info("BaoStock 不提供 stock_list，返回空结果供下游降级")
-        return []
+    async def fetch_stock_list(self, include_industry: bool = True) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._fetch_security_list_sync,
+            "1",
+            include_industry=include_industry,
+        )
 
-    async def fetch_etf_list(self) -> List[Dict[str, Any]]:
-        logger.info("BaoStock 不提供 etf_list，返回空结果供下游降级")
-        return []
+    async def fetch_etf_list(self, include_industry: bool = True) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._fetch_security_list_sync,
+            "5",
+            include_industry=include_industry,
+        )
+
+    async def fetch_stock_classifications(self) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(self._fetch_stock_classification_sync)
 
     async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
         logger.info("BaoStock 不提供 fund_flow_rank，返回空结果供下游降级")
@@ -154,9 +163,123 @@ class BaoStockProvider:
             if self._logged_in:
                 return
             login_result = bs.login()
-            if getattr(login_result, "error_code", "-1") != "0":
+            error_code = getattr(login_result, "error_code", "-1")
+            if error_code != "0":
+                if error_code == "10001011":
+                    raise RuntimeError("BaoStock 登录失败: 当前公网 IP 已进入黑名单控制 (error_code=10001011)")
                 raise RuntimeError(f"BaoStock 登录失败: {login_result.error_msg}")
             self._logged_in = True
+
+    def _fetch_security_list_sync(
+        self,
+        security_type: str,
+        *,
+        include_industry: bool = True,
+    ) -> List[Dict[str, Any]]:
+        try:
+            import baostock as bs  # type: ignore
+        except Exception:
+            logger.warning("baostock 未安装，跳过 BaoStock 数据源")
+            return []
+
+        try:
+            self._ensure_login(bs)
+            self._wait_rate_limit()
+            basic_rs = bs.query_stock_basic()
+            if basic_rs.error_code != "0":
+                raise RuntimeError(f"BaoStock query_stock_basic 失败: {basic_rs.error_msg}")
+            basic_rows = self._collect_rows(basic_rs)
+
+            industry_map: dict[str, str] = {}
+            if include_industry:
+                self._wait_rate_limit()
+                industry_rs = bs.query_stock_industry()
+                if industry_rs.error_code == "0":
+                    for row in self._collect_rows(industry_rs):
+                        if len(row) < 4:
+                            continue
+                        code = str(row[1]).strip()
+                        industry = str(row[3]).strip()
+                        if code:
+                            industry_map[code] = industry
+                else:
+                    logger.warning("BaoStock query_stock_industry 失败: %s", industry_rs.error_msg)
+        except Exception:
+            raise
+
+        items: List[Dict[str, Any]] = []
+        for row in basic_rows:
+            if len(row) < 6:
+                continue
+            code = str(row[0]).strip()
+            if not code or str(row[4]).strip() != security_type or str(row[5]).strip() != "1":
+                continue
+            symbol = code.split(".", 1)[-1] if "." in code else code
+            exchange = code.split(".", 1)[0].upper() if "." in code else ""
+            items.append(
+                {
+                    "code": symbol,
+                    "symbol": symbol,
+                    "ts_code": f"{symbol}.{exchange.upper()}",
+                    "exchange": exchange.upper(),
+                    "name": str(row[1]).strip(),
+                    "industry": industry_map.get(code) if include_industry else None,
+                    "market": "ETF" if security_type == "5" else "A",
+                    "list_date": self._normalize_basic_date(row[2]),
+                    "delist_date": self._normalize_basic_date(row[3]),
+                }
+            )
+        logger.info("BaoStock %s 列表拉取完成: %s 条", "ETF" if security_type == "5" else "A股", len(items))
+        return items
+
+    def _fetch_stock_classification_sync(self) -> List[Dict[str, Any]]:
+        try:
+            import baostock as bs  # type: ignore
+        except Exception:
+            logger.warning("baostock 未安装，跳过 BaoStock 数据源")
+            return []
+
+        try:
+            self._ensure_login(bs)
+            self._wait_rate_limit()
+            industry_rs = bs.query_stock_industry()
+            if industry_rs.error_code != "0":
+                logger.warning("BaoStock query_stock_industry 失败: %s", industry_rs.error_msg)
+                return []
+
+            items: List[Dict[str, Any]] = []
+            for row in self._collect_rows(industry_rs):
+                if len(row) < 3:
+                    continue
+                code = str(row[1]).strip()
+                if not code:
+                    continue
+                if "." in code:
+                    exchange, symbol = code.split(".", 1)
+                    normalized_ts_code = normalize_ts_code(
+                        None,
+                        symbol=symbol,
+                        exchange=exchange,
+                    )
+                else:
+                    normalized_ts_code = normalize_ts_code(code)
+
+                items.append(
+                    {
+                        "ts_code": normalized_ts_code,
+                        "industry_label": str(row[3]).strip() if len(row) > 3 else None,
+                        "industry_taxonomy": (
+                            str(row[4]).strip() if len(row) > 4 else None
+                        ),
+                        "industry_source": "baostock",
+                        "update_date": str(row[0]).strip() if row else None,
+                    }
+                )
+
+            logger.info("BaoStock 行业分类拉取完成: %s 条", len(items))
+            return items
+        except Exception:
+            raise
 
     def _to_baostock_code(self, code: str) -> Optional[str]:
         if not code:
@@ -185,6 +308,23 @@ class BaoStockProvider:
         except Exception:
             return None
 
+    def _collect_rows(self, rs: Any) -> List[List[str]]:
+        rows: List[List[str]] = []
+        while getattr(rs, "error_code", "-1") == "0" and rs.next():
+            row = rs.get_row_data()
+            if row:
+                rows.append(row)
+        return rows
+
+    def _normalize_basic_date(self, value: Any) -> Optional[str]:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").strftime("%Y%m%d")
+        except ValueError:
+            return raw
+
     def _wait_rate_limit(self) -> None:
         with self._lock:
             now = time.monotonic()
@@ -192,32 +332,47 @@ class BaoStockProvider:
             if elapsed < self.config.min_delay:
                 time.sleep(self.config.min_delay - elapsed)
             self._last_request_ts = time.monotonic()
+        self._record_request_usage()
 
-    @contextmanager
-    def _proxy_env(self, proxy: Optional[str]):
-        if not proxy:
-            yield
-            return
+    def _record_request_usage(self) -> None:
+        budget = max(1, int(os.getenv("BAOSTOCK_DAILY_REQUEST_BUDGET", "90000")))
+        counter_file = Path(
+            os.getenv("BAOSTOCK_REQUEST_COUNTER_FILE", "runtime/baostock_request_counter.json")
+        )
+        counter_file.parent.mkdir(parents=True, exist_ok=True)
+        today = datetime.now().strftime("%Y-%m-%d")
+        public_ip = self._get_public_ip()
+        key = f"{today}:{public_ip}"
 
-        with self._proxy_env_lock:
-            old_http = os.environ.get("http_proxy")
-            old_https = os.environ.get("https_proxy")
-            old_all = os.environ.get("all_proxy")
-            try:
-                os.environ["http_proxy"] = proxy
-                os.environ["https_proxy"] = proxy
-                os.environ["all_proxy"] = proxy
-                yield
-            finally:
-                if old_http is None:
-                    os.environ.pop("http_proxy", None)
-                else:
-                    os.environ["http_proxy"] = old_http
-                if old_https is None:
-                    os.environ.pop("https_proxy", None)
-                else:
-                    os.environ["https_proxy"] = old_https
-                if old_all is None:
-                    os.environ.pop("all_proxy", None)
-                else:
-                    os.environ["all_proxy"] = old_all
+        with self._budget_lock:
+            payload: dict[str, int] = {}
+            if counter_file.exists():
+                try:
+                    payload = json.loads(counter_file.read_text(encoding="utf-8"))
+                except Exception:
+                    payload = {}
+
+            current = int(payload.get(key, 0))
+            if current + 1 > budget:
+                raise RuntimeError(
+                    "BaoStock request budget exceeded "
+                    f"(date={today}, public_ip={public_ip}, count={current}, budget={budget})"
+                )
+
+            payload = {k: int(v) for k, v in payload.items() if k.startswith(today)}
+            payload[key] = current + 1
+            counter_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _get_public_ip(self) -> str:
+        if self._public_ip:
+            return self._public_ip
+        configured = os.getenv("BAOSTOCK_INTERNET_IP", "").strip()
+        if configured:
+            self._public_ip = configured
+            return configured
+        try:
+            with urlopen("https://api.ipify.org", timeout=3) as response:
+                self._public_ip = response.read().decode("utf-8").strip() or "unknown"
+        except Exception:
+            self._public_ip = "unknown"
+        return self._public_ip

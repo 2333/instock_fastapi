@@ -1,10 +1,10 @@
-from datetime import datetime, time
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
-from app.jobs.scheduler import should_recover_market_job
+from app.jobs.scheduler import FETCH_FUND_FLOW_TIME, should_recover_market_job
 from tests.conftest import async_session_factory_test
 
 
@@ -180,7 +180,7 @@ class TestMarketTaskHealthAPI:
         ]
         should_recover = should_recover_market_job(
             now=datetime(2024, 1, 2, 16, 5, tzinfo=ZoneInfo("Asia/Shanghai")),
-            scheduled_time=time(hour=16, minute=0),
+            scheduled_time=FETCH_FUND_FLOW_TIME,
             today_trade_date=data["baseline_trade_date"],
             latest_trade_dates=latest_trade_dates,
             today_is_trading_day=True,
