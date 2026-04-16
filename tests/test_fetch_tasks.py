@@ -538,6 +538,7 @@ async def test_fetch_and_save_stock_universe_uses_stable_fields_only(monkeypatch
     )()
     monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: fetcher)
     monkeypatch.setattr(fetch_daily_task, "async_session_factory", async_session_factory_test)
+    monkeypatch.setattr(fetch_daily_task, "record_fetch_audit", AsyncMock())
     monkeypatch.setenv("SECURITY_MASTER_SOURCE", "baostock")
     await fetch_and_save_stock_universe()
 
