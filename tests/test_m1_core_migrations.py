@@ -1,8 +1,7 @@
 from pathlib import Path
 
-from app.models.stock_model import DailyBar, FundFlow, Indicator, Pattern
 from app.jobs.tasks.fetch_daily_task import DAILY_BAR_UPSERT_CONSTRAINT
-
+from app.models.stock_model import DailyBar, FundFlow, Indicator, Pattern
 
 MIGRATION_PATH = Path("alembic/versions/2026_04_08_0001-m1_core_fact_timescale.py")
 
@@ -19,18 +18,24 @@ def _index_names(model) -> set[str]:
 
 
 def test_core_fact_models_use_trade_date_dt_uniqueness():
-    assert _unique_constraint_columns(
-        DailyBar, "uq_daily_bars_ts_code_trade_date_dt"
-    ) == ("ts_code", "trade_date_dt")
-    assert _unique_constraint_columns(
-        FundFlow, "uq_fund_flows_ts_code_trade_date_dt"
-    ) == ("ts_code", "trade_date_dt")
-    assert _unique_constraint_columns(
-        Indicator, "uq_indicators_ts_code_trade_date_dt_name"
-    ) == ("ts_code", "trade_date_dt", "indicator_name")
-    assert _unique_constraint_columns(
-        Pattern, "uq_patterns_ts_code_date_name"
-    ) == ("ts_code", "trade_date_dt", "pattern_name")
+    assert _unique_constraint_columns(DailyBar, "uq_daily_bars_ts_code_trade_date_dt") == (
+        "ts_code",
+        "trade_date_dt",
+    )
+    assert _unique_constraint_columns(FundFlow, "uq_fund_flows_ts_code_trade_date_dt") == (
+        "ts_code",
+        "trade_date_dt",
+    )
+    assert _unique_constraint_columns(Indicator, "uq_indicators_ts_code_trade_date_dt_name") == (
+        "ts_code",
+        "trade_date_dt",
+        "indicator_name",
+    )
+    assert _unique_constraint_columns(Pattern, "uq_patterns_ts_code_date_name") == (
+        "ts_code",
+        "trade_date_dt",
+        "pattern_name",
+    )
 
 
 def test_daily_bar_writer_targets_m1_unique_constraint():

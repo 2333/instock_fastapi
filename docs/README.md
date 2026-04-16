@@ -25,6 +25,8 @@
 - [design/class_diagram.md](./design/class_diagram.md)：核心数据模型和模块关系说明。
 - [api/api_document.md](./api/api_document.md)：当前 API 说明与调用示例。
 - [api/integration_report.md](./api/integration_report.md)：前后端联调与检查记录。
+- [deployment/compose_environments.md](./deployment/compose_environments.md)：`dev / prod / 临时 staging` 环境模型说明。
+- [deployment/release_workflow.md](./deployment/release_workflow.md)：版本 bump、合并检查和生产发布流程。
 
 ## 代码结构对应关系
 

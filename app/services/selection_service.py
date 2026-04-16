@@ -324,8 +324,7 @@ class SelectionService:
                 {"target_date": date, "target_date_dt": target_date_dt},
             )
         else:
-            result = await self.db.execute(
-                text("""
+            result = await self.db.execute(text("""
                     SELECT trade_date AS resolved_date
                     FROM daily_bars
                     ORDER BY
@@ -333,8 +332,7 @@ class SelectionService:
                         trade_date_dt DESC,
                         trade_date DESC
                     LIMIT 1
-                    """)
-            )
+                    """))
         row = result.fetchone()
         return row[0] if row and row[0] else None
 

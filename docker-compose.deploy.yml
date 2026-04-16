@@ -1,32 +1,14 @@
-services:
-  postgres:
-    image: timescale/timescaledb:2.13.1-pg16
-    container_name: instock_postgres
-    environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-instock_pass}
-      POSTGRES_USER: ${POSTGRES_USER:-instock}
-      POSTGRES_DB: ${POSTGRES_DB:-instock}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-instock}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - instock_network
+name: instock_prod
 
+services:
   app:
     image: ${IMAGE_NAMESPACE:-instock}/instock-app:${APP_VERSION:-dev}
     container_name: instock_app
     env_file:
       - ${ENV_FILE:-.env}
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@postgres:5432/${POSTGRES_DB:-instock}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@postgres:5432/${POSTGRES_DB:-instock}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@${POSTGRES_HOST:-instock_postgres}:5432/${POSTGRES_DB:-instock}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-instock}:${POSTGRES_PASSWORD:-instock_pass}@${POSTGRES_HOST:-instock_postgres}:5432/${POSTGRES_DB:-instock}
       - APP_PORT=8000
       - UVICORN_WORKERS=${UVICORN_WORKERS:-1}
       - PYTHONPATH=/app
@@ -37,9 +19,6 @@ services:
       - CRAWLER_PROXY_ENABLED=${CRAWLER_PROXY_ENABLED:-false}
     ports:
       - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     volumes:
       - app_logs:/app/logs
     restart: unless-stopped
@@ -58,7 +37,8 @@ services:
     ports:
       - "3001:80"
     depends_on:
-      - app
+      app:
+        condition: service_started
     restart: unless-stopped
     networks:
       - instock_network
@@ -70,8 +50,10 @@ services:
 
 networks:
   instock_network:
-    driver: bridge
+    external: true
+    name: instock_network
 
 volumes:
-  postgres_data:
   app_logs:
+    external: true
+    name: instock_fastapi_app_logs

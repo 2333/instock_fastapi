@@ -16,6 +16,7 @@ WEB_LOCK_FILE = ROOT / "web" / "package-lock.json"
 SEMVER_PATTERN = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)" r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
 )
+SEMVER_CORE_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
 
 
 def validate_version(version: str) -> str:
@@ -27,6 +28,14 @@ def validate_version(version: str) -> str:
 
 def read_repo_version() -> str:
     return VERSION_FILE.read_text(encoding="utf-8").strip()
+
+
+def parse_version_core(version: str) -> tuple[int, int, int]:
+    normalized = validate_version(version)
+    match = SEMVER_CORE_PATTERN.match(normalized)
+    if not match:
+        raise SystemExit(f"Failed to parse semantic version core: {version}")
+    return tuple(int(part) for part in match.groups())
 
 
 def read_versions() -> dict[str, str]:
@@ -79,6 +88,17 @@ def sync_version(version: str) -> None:
     )
 
 
+def bump_version(level: str) -> str:
+    major, minor, patch = parse_version_core(read_repo_version())
+    if level == "major":
+        return f"{major + 1}.0.0"
+    if level == "minor":
+        return f"{major}.{minor + 1}.0"
+    if level == "patch":
+        return f"{major}.{minor}.{patch + 1}"
+    raise SystemExit(f"Unsupported bump level: {level}")
+
+
 def cmd_show() -> int:
     print(read_repo_version())
     return 0
@@ -101,6 +121,13 @@ def cmd_set(version: str) -> int:
     return 0
 
 
+def cmd_bump(level: str) -> int:
+    next_version = bump_version(level)
+    sync_version(next_version)
+    print(next_version)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Manage repository semantic version")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -111,6 +138,13 @@ def main() -> int:
     set_parser = subparsers.add_parser("set", help="Set and sync a new semantic version")
     set_parser.add_argument("version", help="Semantic version, for example 0.2.0")
 
+    bump_parser = subparsers.add_parser("bump", help="Increment the current semantic version")
+    bump_parser.add_argument(
+        "level",
+        choices=("patch", "minor", "major"),
+        help="Which semver segment to increment",
+    )
+
     args = parser.parse_args()
 
     if args.command == "show":
@@ -119,6 +153,8 @@ def main() -> int:
         return cmd_check()
     if args.command == "set":
         return cmd_set(args.version)
+    if args.command == "bump":
+        return cmd_bump(args.level)
     return 1
 
 

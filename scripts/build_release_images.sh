@@ -22,4 +22,16 @@ export APP_GIT_SHA
 echo "Building versioned images..."
 echo "  ${IMAGE_NAMESPACE}/instock-app:${APP_VERSION}"
 echo "  ${IMAGE_NAMESPACE}/instock-frontend:${APP_VERSION}"
-docker compose build app frontend
+
+docker build \
+  --build-arg APP_VERSION="$APP_VERSION" \
+  --build-arg APP_GIT_SHA="$APP_GIT_SHA" \
+  -t "${IMAGE_NAMESPACE}/instock-app:${APP_VERSION}" \
+  .
+
+docker build \
+  -f web/Dockerfile \
+  --build-arg APP_VERSION="$APP_VERSION" \
+  --build-arg APP_GIT_SHA="$APP_GIT_SHA" \
+  -t "${IMAGE_NAMESPACE}/instock-frontend:${APP_VERSION}" \
+  ./web

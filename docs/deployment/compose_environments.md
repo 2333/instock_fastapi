@@ -1,23 +1,26 @@
 # Compose Environments
 
-This repository currently keeps three runnable Docker Compose environments:
+This repository uses three supported runtime environments:
 
-| Compose file | Role | Ports | Database | Can run with main stack? |
+| Compose file | Role | Ports | Database | Can run alongside prod? |
 | --- | --- | --- | --- | --- |
-| `docker-compose.yml` | local prod-like stack with bind mounts | 5432 / 8000 / 3001 | `postgres_data` | no |
-| `docker-compose.dev.yml` | isolated development/test stack | 5433 / 8001 / 3002 | `postgres_dev_data` | yes |
-| `docker-compose.staging.yml` | isolated staging stack | 5434 / 8002 / 3003 | `postgres_staging_data` | yes |
-| `docker-compose.deploy.yml` | image-only deployment stack | 5432 / 8000 / 3001 | `postgres_data` | no |
+| `docker-compose.dev.yml` | long-lived development stack | 5433 / 8001 / 3002 | `postgres_dev_data` | yes |
+| `docker-compose.staging.yml` | temporary staging stack for high-risk verification | 5434 / 8002 / 3003 | `postgres_staging_data` | yes |
+| `docker-compose.deploy.yml` | image-only production app stack | 8000 / 3001 | external `instock_postgres` on `instock_network` | yes |
 
-`docker-compose.yml` and `docker-compose.deploy.yml` intentionally target the
-same main stack names, ports, network, and volumes. Treat them as two ways to
-run the same environment, not as two isolated environments.
+The repository no longer supports a default `docker-compose.yml` main stack.
+All environment operations should be explicit:
 
-Use `docker-compose.yml` for local source-mounted runs and image builds.
-Use `docker-compose.deploy.yml` for release image deployment via
-`scripts/deploy_release.sh`.
+- `make dev-*` for day-to-day development and front/back-end collaboration
+- `make prod-*` for production inspection and release tasks
+- `make staging-*` only when you need a short-lived verification environment
 
-The next cleanup step should be to convert deployment to a small override file
-or a generated compose file, but do that only after validating the release flow:
-Compose override semantics can accidentally preserve bind mounts or merge lists
-in surprising ways if not tested carefully.
+`docker-compose.deploy.yml` intentionally does not manage the production
+TimescaleDB container. The deploy stack joins the existing external
+`instock_network` and connects to `instock_postgres` so that rebuilding the app
+or frontend does not recreate the database container or switch it to a new
+named volume by accident.
+
+Release images are built directly from the Dockerfiles by
+`scripts/build_release_images.sh`, so image builds no longer depend on a hidden
+default Compose file.

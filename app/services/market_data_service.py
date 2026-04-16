@@ -47,8 +47,7 @@ class MarketDataService:
             )
         else:
             order_column = "trade_date_dt" if table_name in core_fact_tables else "trade_date"
-            result = await self.db.execute(
-                text(f"""
+            result = await self.db.execute(text(f"""
                     SELECT trade_date as resolved_date
                     FROM {table_name}
                     ORDER BY
@@ -56,8 +55,7 @@ class MarketDataService:
                         {order_column} DESC,
                         trade_date DESC
                     LIMIT 1
-                    """)
-            )
+                    """))
         row = result.fetchone()
         return row[0] if row and row[0] else None
 

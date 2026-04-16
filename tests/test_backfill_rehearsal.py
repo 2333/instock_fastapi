@@ -33,9 +33,7 @@ def test_backfill_rehearsal_plan_includes_daily_bars_daily_basic_and_technical_f
     assert "technical_factors" in technical_step["verification_queries"][0]["sql"]
     assert "daily_bars_local" in technical_step["notes"][1]
 
-    assert any(
-        "technical_factors" in query["sql"] for query in data["shared_verification_queries"]
-    )
+    assert any("technical_factors" in query["sql"] for query in data["shared_verification_queries"])
 
 
 def test_backfill_rehearsal_render_mentions_manual_gates():

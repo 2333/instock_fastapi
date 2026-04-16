@@ -1,6 +1,6 @@
-# 预发布环境 Docker Compose
-# 使用独立预发布数据库，前后端用测试新代码
-# 用法: docker compose -f docker-compose.staging.yml up --build -d
+# 临时预发布环境 Docker Compose
+# 默认关闭，仅在高风险变更验证时短时启用
+# 用法: docker compose -p instock_staging -f docker-compose.staging.yml up --build -d
 
 services:
   postgres:

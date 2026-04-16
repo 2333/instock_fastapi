@@ -3,11 +3,15 @@
 Staging uses an isolated PostgreSQL/TimescaleDB container. It must not connect
 directly to the production write database.
 
+Staging is intentionally temporary in this project. Keep it stopped by default
+and start it only when validating higher-risk changes such as migrations,
+backfills, scheduler behavior, or release candidates.
+
 ## Environment Layout
 
 | Environment | PostgreSQL port | App port | Frontend port | Volume |
 | --- | --- | --- | --- | --- |
-| default/prod-like | 5432 | 8000 | 3001 | postgres_data |
+| prod | 5432 | 8000 | 3001 | managed outside deploy compose |
 | dev | 5433 | 8001 | 3002 | postgres_dev_data |
 | staging | 5434 | 8002 | 3003 | postgres_staging_data |
 
@@ -17,7 +21,7 @@ snapshot data unless explicitly enabled.
 
 ## Refresh Staging From A Production Snapshot
 
-Create a production backup from the main compose stack:
+Create a production backup from the running production database container:
 
 ```bash
 make backup-prod-db
