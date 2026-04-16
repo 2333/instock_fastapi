@@ -9,6 +9,7 @@ from app.jobs import market_calendar
 from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
 from app.jobs.tasks.fetch_daily_task import (
     _ensure_backfill_state_table,
+    fetch_and_save_stock_classifications,
     fetch_and_save_stock_universe,
     run_daily_bars_backfill_window,
     save_stock_classifications,
@@ -483,6 +484,68 @@ async def test_save_stock_classifications_persists_provenance_without_mutating_l
 
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_save_stock_classifications_commits_audit_row(monkeypatch):
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    provider = type(
+        "BaoStockProvider",
+        (),
+        {
+            "fetch_stock_classifications": AsyncMock(
+                return_value=[
+                    {
+                        "ts_code": "sz.000001",
+                        "industry_label": "金融",
+                        "industry_taxonomy": "银行",
+                        "industry_source": "baostock",
+                        "update_date": "2026-03-01",
+                    }
+                ]
+            )
+        },
+    )()
+    monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: provider)
+    monkeypatch.setattr(fetch_daily_task, "async_session_factory", async_session_factory_test)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                area="深圳",
+                industry="银行",
+                market="主板",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    saved = await fetch_and_save_stock_classifications()
+
+    assert saved == 1
+
+    async with async_session_factory_test() as session:
+        result = await session.execute(text("""
+                SELECT status, source, note
+                FROM data_fetch_audit
+                WHERE task_name = 'fetch_stock_classification'
+                  AND entity_type = 'stock_classification'
+                  AND entity_key = 'baostock'
+            """))
+        audit_row = result.one()
+
+    assert audit_row == ("done", "baostock", "rows=1")
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS data_fetch_audit"))
 
 
 @pytest.mark.asyncio

@@ -625,6 +625,7 @@ async def fetch_and_save_stock_classifications() -> int:
                 source="baostock",
                 note=f"rows={saved}",
             )
+            await session.commit()
             logger.info("Saved %s stock classification records", saved)
             return saved
     except Exception as exc:

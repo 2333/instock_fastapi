@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.models.stock_model import Stock
+from app.models.stock_model import DailyBar, Stock
 
 MIGRATION_PATH = Path("alembic/versions/2026_04_16_0003-stock_classification_metadata.py")
 
@@ -15,6 +15,10 @@ def test_stock_model_exposes_classification_provenance_columns():
         assert column in Stock.__table__.columns
 
 
+def test_daily_bar_model_exposes_source_column():
+    assert "source" in DailyBar.__table__.columns
+
+
 def test_stock_classification_migration_adds_and_removes_columns():
     migration = MIGRATION_PATH.read_text()
 
@@ -27,3 +31,6 @@ def test_stock_classification_migration_adds_and_removes_columns():
     ):
         assert f'op.add_column("stocks", sa.Column("{column}"' in migration
         assert f'op.drop_column("stocks", "{column}")' in migration
+
+    assert 'op.add_column("daily_bars", sa.Column("source"' in migration
+    assert 'op.drop_column("daily_bars", "source")' in migration
