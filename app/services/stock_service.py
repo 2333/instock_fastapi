@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +10,6 @@ from app.services.date_utils import trade_date_dt_param
 from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.base import AdjustType
-from core.crawling.eastmoney import EastMoneyCrawler
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -581,12 +581,24 @@ class StockService:
                     end_date=end_date,
                 )
             else:
-                adjusted_bars = await self._fetch_adjusted_bars(
-                    symbol=stock["symbol"],
-                    start_date=start_date,
-                    end_date=end_date,
-                    adjust=adjust_type,
-                )
+                try:
+                    adjusted_bars = await self._fetch_adjusted_bars(
+                        symbol=stock["symbol"],
+                        start_date=start_date,
+                        end_date=end_date,
+                        adjust=adjust_type,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Adjusted bars unavailable for %s adjust=%s: %s",
+                        stock["symbol"],
+                        requested_adjust,
+                        exc,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Adjusted price data source unavailable",
+                    ) from exc
                 stock["bars"] = adjusted_bars
                 if not adjusted_bars:
                     stock["adjust_note"] = "requested_adjust_data_unavailable"

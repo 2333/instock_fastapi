@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from app.services.stock_service import StockService
 from core.crawling.base import AdjustType
@@ -157,7 +158,7 @@ async def test_get_stock_detail_uses_db_bars_for_bfq():
 
 
 @pytest.mark.asyncio
-async def test_get_stock_detail_falls_back_to_bfq_when_adjusted_bars_missing():
+async def test_get_stock_detail_reports_adjusted_data_missing_without_fallback():
     db = Mock()
     db.execute = AsyncMock(
         side_effect=[
@@ -272,3 +273,40 @@ async def test_fetch_adjusted_bars_raises_when_baostock_fails():
             await service._fetch_adjusted_bars(
                 "000001", "20240101", "20240131", AdjustType.BACKWARD
             )
+
+
+@pytest.mark.asyncio
+async def test_get_stock_detail_raises_503_when_adjusted_source_fails():
+    db = Mock()
+    db.execute = AsyncMock(
+        side_effect=[
+            make_result(
+                row=make_mapping_row(ts_code="000001.SZ", symbol="000001", name="平安银行")
+            ),
+            make_result(
+                row=make_mapping_row(
+                    trade_date="20240103",
+                    open=10.5,
+                    high=10.8,
+                    low=10.3,
+                    close=10.6,
+                    pre_close=10.4,
+                    change=0.2,
+                    pct_chg=1.92,
+                    vol=5000,
+                    amount=52000,
+                )
+            ),
+            make_result(row=("20240102",)),
+            make_result(rows=[]),
+            make_result(rows=[]),
+        ]
+    )
+    service = StockService(db)
+    service._fetch_adjusted_bars = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.get_stock_detail("000001", "20240101", "20240131", "qfq")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == "Adjusted price data source unavailable"

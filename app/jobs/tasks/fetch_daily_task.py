@@ -65,6 +65,7 @@ def _to_iso_ymd(value: str) -> str:
     normalized = _normalize_ymd(value)
     return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:]}"
 
+
 def _build_proxy_pool() -> ProxyPool | None:
     if os.getenv("CRAWLER_PROXY_ENABLED", "false").strip().lower() not in {
         "1",
@@ -81,6 +82,7 @@ def _build_proxy_pool() -> ProxyPool | None:
         return pool
     logger.warning("任务代理池为空，将直连运行（file=%s）", proxy_file)
     return None
+
 
 def _resolve_source(env_name: str, allowed: tuple[str, ...], default: str) -> str:
     value = os.getenv(env_name, default).strip().lower()
@@ -108,6 +110,29 @@ def _assert_baostock_request_budget(estimated_requests: int, *, context: str) ->
             f"BaoStock request budget exceeded for {context}: "
             f"estimated_requests={estimated_requests}, budget={budget}"
         )
+
+
+async def _resolve_trading_days(
+    start_date: str,
+    end_date: str,
+    *,
+    crawler: EastMoneyCrawler,
+) -> list[str]:
+    calendar = await crawler.fetch_trade_calendar(start_date=start_date, end_date=end_date)
+    if not calendar:
+        logger.warning(
+            "交易日历为空，跳过日线抓取窗口: start_date=%s end_date=%s",
+            start_date,
+            end_date,
+        )
+        return []
+
+    trading_days: list[str] = []
+    for item in calendar:
+        trade_date = str(item.get("trade_date") or "").strip()
+        if trade_date and item.get("is_trading"):
+            trading_days.append(trade_date)
+    return trading_days
 
 
 async def _ensure_backfill_state_table(session: AsyncSession) -> None:
@@ -342,9 +367,7 @@ async def save_stock_classifications(session: AsyncSession, classifications: lis
         by_ts_code[normalized_ts_code] = item
 
     saved = 0
-    result = await session.execute(
-        select(Stock).where(Stock.ts_code.in_(by_ts_code.keys()))
-    )
+    result = await session.execute(select(Stock).where(Stock.ts_code.in_(by_ts_code.keys())))
     stocks = result.scalars().all()
 
     for stock in stocks:
@@ -635,6 +658,7 @@ async def fetch_and_save_stocks(
     total_saved = 0
 
     try:
+
         async def _fetch_security_list(
             *,
             entity_key: str,
@@ -643,14 +667,18 @@ async def fetch_and_save_stocks(
             label = "ETF list" if is_etf_list else "A-share list"
             fetchers: dict[str, Callable[[], Any]] = {
                 "baostock": (
-                    lambda: baostock_provider.fetch_etf_list(include_industry=include_industry)
-                    if is_etf_list
-                    else baostock_provider.fetch_stock_list(include_industry=include_industry)
+                    lambda: (
+                        baostock_provider.fetch_etf_list(include_industry=include_industry)
+                        if is_etf_list
+                        else baostock_provider.fetch_stock_list(include_industry=include_industry)
+                    )
                 ),
                 "tushare": (
-                    lambda: tushare_provider.fetch_etf_list()
-                    if is_etf_list
-                    else tushare_provider.fetch_stock_list()
+                    lambda: (
+                        tushare_provider.fetch_etf_list()
+                        if is_etf_list
+                        else tushare_provider.fetch_stock_list()
+                    )
                 ),
                 "eastmoney": (
                     (lambda: crawler.fetch(data_type="etf_list"))
@@ -739,7 +767,9 @@ async def fetch_and_save_stocks(
 async def run_stock_universe_refresh() -> None:
     logger.info("执行股票主数据同步任务: %s", datetime.now())
     try:
-        if should_skip_market_task("股票主数据同步任务", today_is_trading_day=await is_trading_day()):
+        if should_skip_market_task(
+            "股票主数据同步任务", today_is_trading_day=await is_trading_day()
+        ):
             return
         await fetch_and_save_stock_universe()
         logger.info("股票主数据同步任务完成")
@@ -914,13 +944,11 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
     start_dt = end_dt - timedelta(days=days)
 
     try:
-        trading_days = []
-        current = start_dt.date()
-        end_date_dt = end_dt.date()
-        while current <= end_date_dt:
-            if current.weekday() < 5:
-                trading_days.append(current.strftime("%Y-%m-%d"))
-            current += timedelta(days=1)
+        trading_days = await _resolve_trading_days(
+            start_dt.date().isoformat(),
+            end_dt.date().isoformat(),
+            crawler=em_crawler,
+        )
 
         logger.info(
             "开始抓取日线数据: %d 个交易日, source=%s, concurrency=%d",
@@ -943,7 +971,9 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
                 continue
 
             if selected_source == "baostock":
-                _assert_baostock_request_budget(len(stocks), context=f"fetch_and_save_daily_bars:{trade_date}")
+                _assert_baostock_request_budget(
+                    len(stocks), context=f"fetch_and_save_daily_bars:{trade_date}"
+                )
 
             tasks = [
                 _fetch_single_stock(
@@ -1171,7 +1201,9 @@ async def run_daily_bars_backfill_window(
                 return result
 
             if source_policy == "baostock":
-                _assert_baostock_request_budget(len(targets), context="run_daily_bars_backfill_window")
+                _assert_baostock_request_budget(
+                    len(targets), context="run_daily_bars_backfill_window"
+                )
 
             for target in targets:
                 ts_code = target["ts_code"]
@@ -1224,7 +1256,9 @@ async def run_daily_bars_backfill_window(
                     attempts.append({"source": candidate, "error": str(exc)})
 
                 used_source = used_source or candidate
-                saved = await _save_daily_bars_small_batch(session, ts_code, bars, source=used_source)
+                saved = await _save_daily_bars_small_batch(
+                    session, ts_code, bars, source=used_source
+                )
                 status = "done" if saved else "nodata"
                 attempt_note = ",".join(
                     f"{item['source']}:{item.get('rows', 'error')}" for item in attempts
@@ -1359,7 +1393,9 @@ async def run_historical_backfill() -> bool:
                     is_etf=bool(stock.get("is_etf", False)),
                 )
                 if bars:
-                    count = await save_daily_bars(session, stock["ts_code"], bars, source=used_source)
+                    count = await save_daily_bars(
+                        session, stock["ts_code"], bars, source=used_source
+                    )
                     await upsert_fetch_audit(
                         session,
                         task_name="historical_backfill",
