@@ -13,6 +13,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect docker-related changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docker:
+              - ".github/workflows/ci.yml"
+              - "Dockerfile"
+              - "web/Dockerfile"
+              - "docker-compose*.yml"
+              - "config/docker-ci.env"
+              - "scripts/docker_smoke.sh"
+
   backend:
     runs-on: ubuntu-latest
     env:
@@ -96,16 +117,23 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     needs:
+      - changes
       - backend
       - frontend
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.ref_name == 'main' ||
+      github.ref_name == 'master' ||
+      needs.changes.outputs.docker == 'true'
     env:
       ENV_FILE: config/docker-ci.env
+      COMPOSE_FILE: docker-compose.ci.yml
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Start compose services
-        run: docker compose up -d --build postgres redis app frontend
+        run: docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build postgres app frontend
 
       - name: Docker smoke test
         run: |
@@ -114,12 +142,12 @@ jobs:
 
       - name: Show compose status
         if: always()
-        run: docker compose ps
+        run: docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps
 
       - name: Dump compose logs on failure
         if: failure()
-        run: docker compose logs --no-color app frontend postgres redis
+        run: docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs --no-color app frontend postgres
 
       - name: Stop compose services
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v --remove-orphans

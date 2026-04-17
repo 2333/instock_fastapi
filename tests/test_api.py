@@ -1,10 +1,10 @@
-from datetime import datetime, time
+from datetime import datetime
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
-from app.jobs.scheduler import should_recover_market_job
+from app.jobs.scheduler import FETCH_FUND_FLOW_TIME, should_recover_market_job
 from tests.conftest import async_session_factory_test
 
 
@@ -49,9 +49,7 @@ class TestDailyBarsAPI:
         assert "bars" in data
         assert len(data["bars"]) == 1
 
-    async def test_get_stock_detail_reports_adjust_fallback_when_requested_data_missing(
-        self, client
-    ):
+    async def test_get_stock_detail_keeps_requested_adjust_adjust_when_data_missing(self, client):
         with patch(
             "app.services.stock_service.StockService._fetch_adjusted_bars",
             new=AsyncMock(return_value=[]),
@@ -67,10 +65,26 @@ class TestDailyBarsAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["adjust_requested"] == "qfq"
-        assert data["adjust_applied"] == "bfq"
-        assert data["adjust_note"] == "requested_adjust_data_unavailable_fallback_to_bfq"
+        assert data["adjust_applied"] == "qfq"
+        assert data["adjust_note"] == "requested_adjust_data_unavailable"
         assert data["data_freshness"]["price_current"] is True
         assert data["data_freshness"]["indicator_current"] is True
+
+    async def test_get_stock_detail_returns_503_when_adjusted_source_fails(self, client):
+        with patch(
+            "app.services.stock_service.StockService._fetch_adjusted_bars",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            response = await client.get(
+                "/api/v1/stocks/000001.SZ",
+                params={
+                    "start_date": "20240101",
+                    "end_date": "20240131",
+                    "adjust": "qfq",
+                },
+            )
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Adjusted price data source unavailable"}
 
 
 class TestInfoAPI:
@@ -180,7 +194,7 @@ class TestMarketTaskHealthAPI:
         ]
         should_recover = should_recover_market_job(
             now=datetime(2024, 1, 2, 16, 5, tzinfo=ZoneInfo("Asia/Shanghai")),
-            scheduled_time=time(hour=16, minute=0),
+            scheduled_time=FETCH_FUND_FLOW_TIME,
             today_trade_date=data["baseline_trade_date"],
             latest_trade_dates=latest_trade_dates,
             today_is_trading_day=True,

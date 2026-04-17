@@ -19,7 +19,7 @@ def test_backfill_rehearsal_plan_includes_daily_bars_daily_basic_and_technical_f
     assert bars_step["mode"] == "bounded-job-dry-run"
     assert "scripts/run_m1_daily_bars_rehearsal.py" in bars_step["command"]
     assert "--code-limit 7" in bars_step["command"]
-    assert "--source prefer_tushare" in bars_step["command"]
+    assert "--source baostock" in bars_step["command"]
     assert bars_step["verification_queries"][0]["name"] == "row_count"
     assert "daily_bars" in bars_step["verification_queries"][0]["sql"]
 

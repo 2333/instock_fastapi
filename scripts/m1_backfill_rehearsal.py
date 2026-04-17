@@ -194,7 +194,7 @@ def build_rehearsal_plan(
         mode="bounded-job-dry-run",
         command=(
             ".venv/bin/python scripts/run_m1_daily_bars_rehearsal.py "
-            f"--start-date {start} --end-date {end} --code-limit {code_limit} --source prefer_tushare"
+            f"--start-date {start} --end-date {end} --code-limit {code_limit} --source baostock"
         ),
         manual_gate=(
             "Run without --execute first and inspect the target list. Add --execute "
@@ -204,7 +204,7 @@ def build_rehearsal_plan(
         smoke_command=_daily_bars_smoke_command("000001.SZ", start, end),
         notes=[
             "Uses the job-layer run_daily_bars_backfill_window function.",
-            "Uses an explicit source policy; prefer_tushare keeps Tushare first without making it mandatory.",
+            "Uses an explicit single-source policy; rerun manually with another source if the configured source returns empty.",
             "Does not call scripts/backfill_2020_2025.py because that wrapper loops until complete.",
         ],
     )
@@ -286,7 +286,7 @@ def build_rehearsal_plan(
     manual_gates = [
         "Confirm the target database is disposable or otherwise safe to write.",
         "Confirm Tushare token/point tier before any Tushare-sourced live backfill execution.",
-        "Confirm each multi-source command uses an explicit source policy; do not use untracked silent fallback.",
+        "Confirm each command runs with one explicit source only; switch sources by rerunning the job, not by inline fallback.",
         "Do not use scripts/backfill_2020_2025.py as the bounded daily_bars rehearsal command; it loops until complete.",
         "Do not widen the date window beyond the rehearsed range without re-running the duplicate-key checks.",
         "Run the rehearsal wrapper commands without --execute before running them with --execute.",

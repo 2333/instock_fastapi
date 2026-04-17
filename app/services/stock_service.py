@@ -1,6 +1,7 @@
 import logging
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +10,6 @@ from app.services.date_utils import trade_date_dt_param
 from app.utils.stock_codes import build_code_variants, extract_symbol, normalize_stock_payload
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.base import AdjustType
-from core.crawling.eastmoney import EastMoneyCrawler
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -448,33 +448,18 @@ class StockService:
         adjust: AdjustType,
     ) -> list[dict]:
         baostock_provider = BaoStockProvider()
-        eastmoney_crawler = EastMoneyCrawler()
         bars: list[dict] = []
 
         start = self._normalize_date(start_date)
         end = self._normalize_date(end_date)
 
-        try:
-            bars = await baostock_provider.fetch_kline(
-                code=symbol,
-                start_date=start,
-                end_date=end,
-                adjust=adjust,
-                period="daily",
-            )
-        except Exception as exc:
-            logger.warning("%s BaoStock 拉取失败，降级 EastMoney: %s", symbol, exc)
-
-        if not bars:
-            bars = await eastmoney_crawler.fetch(
-                data_type="kline",
-                code=symbol,
-                start_date=start,
-                end_date=end,
-                adjust=adjust,
-                period="daily",
-            )
-        await eastmoney_crawler.close()
+        bars = await baostock_provider.fetch_kline(
+            code=symbol,
+            start_date=start,
+            end_date=end,
+            adjust=adjust,
+            period="daily",
+        )
 
         normalized: list[dict] = []
         for row in bars or []:
@@ -596,22 +581,27 @@ class StockService:
                     end_date=end_date,
                 )
             else:
-                adjusted_bars = await self._fetch_adjusted_bars(
-                    symbol=stock["symbol"],
-                    start_date=start_date,
-                    end_date=end_date,
-                    adjust=adjust_type,
-                )
-                if adjusted_bars:
-                    stock["bars"] = adjusted_bars
-                else:
-                    stock["bars"] = await self._query_bars_from_db(
-                        ts_code=internal_ts_code,
+                try:
+                    adjusted_bars = await self._fetch_adjusted_bars(
+                        symbol=stock["symbol"],
                         start_date=start_date,
                         end_date=end_date,
+                        adjust=adjust_type,
                     )
-                    stock["adjust_applied"] = "bfq"
-                    stock["adjust_note"] = "requested_adjust_data_unavailable_fallback_to_bfq"
+                except Exception as exc:
+                    logger.warning(
+                        "Adjusted bars unavailable for %s adjust=%s: %s",
+                        stock["symbol"],
+                        requested_adjust,
+                        exc,
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Adjusted price data source unavailable",
+                    ) from exc
+                stock["bars"] = adjusted_bars
+                if not adjusted_bars:
+                    stock["adjust_note"] = "requested_adjust_data_unavailable"
 
         return normalize_stock_payload(stock)
 
