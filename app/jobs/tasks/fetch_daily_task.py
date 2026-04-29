@@ -18,7 +18,6 @@ from app.utils.stock_codes import extract_symbol, normalize_exchange_name, norma
 from core.crawling.baostock_provider import BaoStockProvider
 from core.crawling.base import AdjustType, ProxyPool
 from core.crawling.eastmoney import EastMoneyCrawler
-from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
 _supports_daily_bar_upsert = True
@@ -26,10 +25,9 @@ DAILY_BAR_UPSERT_CONSTRAINT = "uq_daily_bars_ts_code_trade_date_dt"
 BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
 DAILY_BARS_BACKFILL_SOURCE_POLICIES = (
     "baostock",
-    "tushare",
     "eastmoney",
 )
-SECURITY_MASTER_SOURCES = ("baostock", "tushare", "eastmoney")
+SECURITY_MASTER_SOURCES = ("baostock", "eastmoney")
 STOCK_CLASSIFICATION_COLUMNS = (
     "industry_label",
     "industry_taxonomy",
@@ -84,7 +82,11 @@ def _build_proxy_pool() -> ProxyPool | None:
     return None
 
 
-def _resolve_source(env_name: str, allowed: tuple[str, ...], default: str) -> str:
+def _resolve_source(
+    env_name: str,
+    allowed: tuple[str, ...],
+    default: str,
+) -> str:
     value = os.getenv(env_name, default).strip().lower()
     if value not in allowed:
         raise ValueError(f"{env_name} must be one of: {', '.join(allowed)}")
@@ -92,11 +94,35 @@ def _resolve_source(env_name: str, allowed: tuple[str, ...], default: str) -> st
 
 
 def _selected_security_master_source() -> str:
-    return _resolve_source("SECURITY_MASTER_SOURCE", SECURITY_MASTER_SOURCES, "baostock")
+    return _resolve_source(
+        "SECURITY_MASTER_SOURCE",
+        SECURITY_MASTER_SOURCES,
+        "baostock",
+    )
+
+
+def _normalize_security_master_source(source: str) -> str:
+    normalized = (source or "baostock").strip().lower()
+    if normalized not in SECURITY_MASTER_SOURCES:
+        allowed = ", ".join(SECURITY_MASTER_SOURCES)
+        raise ValueError(f"source must be one of: {allowed}")
+    return normalized
 
 
 def _selected_daily_bar_source() -> str:
-    return _resolve_source("DAILY_BARS_SOURCE", DAILY_BARS_BACKFILL_SOURCE_POLICIES, "baostock")
+    return _resolve_source(
+        "DAILY_BARS_SOURCE",
+        DAILY_BARS_BACKFILL_SOURCE_POLICIES,
+        "baostock",
+    )
+
+
+def _normalize_daily_bar_source(source: str) -> str:
+    normalized = (source or "baostock").strip().lower()
+    if normalized not in DAILY_BARS_BACKFILL_SOURCE_POLICIES:
+        allowed = ", ".join(DAILY_BARS_BACKFILL_SOURCE_POLICIES)
+        raise ValueError(f"source must be one of: {allowed}")
+    return normalized
 
 
 def _baostock_request_budget() -> int:
@@ -648,12 +674,11 @@ async def fetch_and_save_stocks(
 ) -> int:
     """抓取并保存股票列表。"""
     if source_override is not None:
-        source = source_override
+        source = _normalize_security_master_source(source_override)
     else:
         source = _selected_security_master_source()
 
     proxy_pool = _build_proxy_pool()
-    tushare_provider = TushareProvider()
     baostock_provider = BaoStockProvider()
     crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
     total_saved = 0
@@ -672,13 +697,6 @@ async def fetch_and_save_stocks(
                         baostock_provider.fetch_etf_list(include_industry=include_industry)
                         if is_etf_list
                         else baostock_provider.fetch_stock_list(include_industry=include_industry)
-                    )
-                ),
-                "tushare": (
-                    lambda: (
-                        tushare_provider.fetch_etf_list()
-                        if is_etf_list
-                        else tushare_provider.fetch_stock_list()
                     )
                 ),
                 "eastmoney": (
@@ -790,7 +808,7 @@ async def run_stock_classification_refresh() -> None:
 
 
 async def _fetch_bars_by_source(
-    tushare_provider: TushareProvider,
+    tushare_provider: Any | None,
     baostock_provider: BaoStockProvider,
     em_crawler: EastMoneyCrawler,
     source: str,
@@ -802,25 +820,17 @@ async def _fetch_bars_by_source(
     exchange: str | None = None,
     is_etf: bool = False,
 ) -> tuple[list[dict], str, str, str]:
+    del tushare_provider
+    source = _normalize_daily_bar_source(source)
     bars = []
     last_error = None
     normalized_exchange = (exchange or "").strip().upper()
-    if source in {"baostock", "tushare"} and (is_etf or normalized_exchange == "BJ"):
+    if source == "baostock" and (is_etf or normalized_exchange == "BJ"):
         return [], source, "needs_fallback", "selected source does not support ETF/BJ contract"
 
     for attempt in range(max_retries):
         try:
-            if source == "tushare":
-                ts_code = normalize_ts_code(None, symbol=symbol, exchange=exchange)
-                bars = await tushare_provider.fetch_pro_bar(
-                    ts_code=ts_code,
-                    asset="E",
-                    freq="D",
-                    adj=adjust,
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-            elif source == "baostock":
+            if source == "baostock":
                 bars = await baostock_provider.fetch_kline(
                     code=symbol,
                     start_date=start_date,
@@ -855,7 +865,7 @@ db_semaphore = asyncio.Semaphore(5)
 
 async def _fetch_single_stock(
     semaphore: asyncio.Semaphore,
-    tushare_provider: TushareProvider,
+    tushare_provider: Any | None,
     baostock_provider: BaoStockProvider,
     em_crawler: EastMoneyCrawler,
     source: str,
@@ -937,7 +947,6 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
     """
     proxy_pool = _build_proxy_pool()
     selected_source = _selected_daily_bar_source()
-    tushare_provider = TushareProvider()
     baostock_provider = BaoStockProvider()
     em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
 
@@ -979,7 +988,7 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
             tasks = [
                 _fetch_single_stock(
                     semaphore,
-                    tushare_provider,
+                    None,
                     baostock_provider,
                     em_crawler,
                     selected_source,
@@ -1153,26 +1162,22 @@ async def run_daily_bars_backfill_window(
     source: str = "baostock",
     execute: bool = False,
     sleep_seconds: float = 0.0,
-    provider: TushareProvider | None = None,
+    provider: Any | None = None,
     baostock_provider: BaoStockProvider | None = None,
     eastmoney_crawler: EastMoneyCrawler | None = None,
     session_factory: Callable[[], Any] = async_session_factory,
 ) -> dict[str, Any]:
     """Run one bounded daily_bars backfill pass with an explicit source policy."""
+    del provider
     start = _normalize_ymd(start_date)
     end = _normalize_ymd(end_date)
-    source_policy = source.strip().lower()
+    source_policy = _normalize_daily_bar_source(source)
     if start > end:
         raise ValueError("start_date must be <= end_date")
     if code_limit < 1:
         raise ValueError("code_limit must be >= 1")
     if sleep_seconds < 0:
         raise ValueError("sleep_seconds must be >= 0")
-    if source_policy not in DAILY_BARS_BACKFILL_SOURCE_POLICIES:
-        allowed = ", ".join(DAILY_BARS_BACKFILL_SOURCE_POLICIES)
-        raise ValueError(f"source must be one of: {allowed}")
-
-    active_tushare = provider
     active_baostock = baostock_provider
     active_eastmoney = eastmoney_crawler
     created_eastmoney = False
@@ -1216,18 +1221,7 @@ async def run_daily_bars_backfill_window(
 
                 candidate = source_order[0]
                 try:
-                    if candidate == "tushare":
-                        if active_tushare is None:
-                            active_tushare = TushareProvider()
-                        candidate_bars = await active_tushare.fetch_pro_bar(
-                            ts_code=ts_code,
-                            asset="E",
-                            freq="D",
-                            adj=AdjustType.NO_ADJUST,
-                            start_date=_to_iso_ymd(start),
-                            end_date=_to_iso_ymd(end),
-                        )
-                    elif candidate == "baostock":
+                    if candidate == "baostock":
                         if active_baostock is None:
                             active_baostock = BaoStockProvider()
                         candidate_bars = await active_baostock.fetch_kline(
@@ -1360,7 +1354,6 @@ async def run_historical_backfill() -> bool:
     proxy_pool = _build_proxy_pool()
     em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
     baostock_provider = BaoStockProvider()
-    tushare_provider = TushareProvider()
 
     async with async_session_factory() as session:
         total, covered = await _get_backfill_progress(session, start, end)
@@ -1382,7 +1375,7 @@ async def run_historical_backfill() -> bool:
         for idx, stock in enumerate(targets, 1):
             try:
                 bars, used_source, status, note = await _fetch_bars_by_source(
-                    tushare_provider=tushare_provider,
+                    tushare_provider=None,
                     baostock_provider=baostock_provider,
                     em_crawler=em_crawler,
                     source=selected_source,

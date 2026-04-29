@@ -324,7 +324,7 @@ async def run():
     tushare_provider = TushareProvider()
 
     try:
-        today_is_trading_day = await is_trading_day(crawler=crawler)
+        today_is_trading_day = await is_trading_day(provider=baostock_provider)
         if should_skip_market_task("资金流向抓取任务", today_is_trading_day=today_is_trading_day):
             return
 
