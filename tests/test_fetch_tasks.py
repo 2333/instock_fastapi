@@ -1,5 +1,7 @@
+import asyncio
 from datetime import date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,6 +19,7 @@ from app.jobs.tasks.fetch_daily_task import (
 )
 from app.jobs.tasks.fetch_market_reference_task import summarize_block_trades, summarize_top_list
 from app.models.stock_model import Base, DailyBar, Stock
+from core.crawling.baostock_provider import BaoStockProvider
 from tests.conftest import async_engine_test, async_session_factory_test
 
 
@@ -76,7 +79,7 @@ async def test_fetch_daily_bars_marks_etf_as_unsupported_for_baostock():
 
 
 @pytest.mark.asyncio
-async def test_fetch_daily_bars_marks_bj_as_unsupported_for_tushare():
+async def test_fetch_daily_bars_rejects_tushare_source():
     tushare = AsyncMock()
     tushare.fetch_kline = AsyncMock()
     baostock = AsyncMock()
@@ -84,23 +87,20 @@ async def test_fetch_daily_bars_marks_bj_as_unsupported_for_tushare():
     eastmoney = AsyncMock()
     eastmoney.fetch = AsyncMock()
 
-    bars, source, status, note = await fetch_daily_task._fetch_bars_by_source(
-        tushare_provider=tushare,
-        baostock_provider=baostock,
-        em_crawler=eastmoney,
-        source="tushare",
-        symbol="920000",
-        start_date="2026-03-10",
-        end_date="2026-03-13",
-        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
-        exchange="BJ",
-        is_etf=False,
-    )
+    with pytest.raises(ValueError, match="source must be one of: baostock, eastmoney"):
+        await fetch_daily_task._fetch_bars_by_source(
+            tushare_provider=tushare,
+            baostock_provider=baostock,
+            em_crawler=eastmoney,
+            source="tushare",
+            symbol="920000",
+            start_date="2026-03-10",
+            end_date="2026-03-13",
+            adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+            exchange="BJ",
+            is_etf=False,
+        )
 
-    assert bars == []
-    assert source == "tushare"
-    assert status == "needs_fallback"
-    assert "does not support ETF/BJ contract" in note
     eastmoney.fetch.assert_not_awaited()
     tushare.fetch_kline.assert_not_awaited()
     baostock.fetch_kline.assert_not_awaited()
@@ -145,40 +145,50 @@ async def test_fetch_daily_bars_uses_explicit_baostock_source():
     eastmoney.fetch.assert_not_awaited()
 
 
+def test_selected_daily_bar_source_rejects_legacy_tushare_env(monkeypatch):
+    monkeypatch.setenv("DAILY_BARS_SOURCE", "tushare")
+
+    with pytest.raises(
+        ValueError,
+        match="DAILY_BARS_SOURCE must be one of: baostock, eastmoney",
+    ):
+        fetch_daily_task._selected_daily_bar_source()
+
+
+def test_selected_security_master_source_rejects_legacy_tushare_env(monkeypatch):
+    monkeypatch.setenv("SECURITY_MASTER_SOURCE", "tushare")
+
+    with pytest.raises(
+        ValueError,
+        match="SECURITY_MASTER_SOURCE must be one of: baostock, eastmoney",
+    ):
+        fetch_daily_task._selected_security_master_source()
+
+
 @pytest.mark.asyncio
-async def test_fetch_daily_bars_uses_explicit_tushare_source():
+async def test_fetch_daily_bars_rejects_explicit_tushare_source():
     tushare = AsyncMock()
-    tushare.fetch_pro_bar = AsyncMock(return_value=[{"date": "2026-03-13", "close": 1}])
+    tushare.fetch_pro_bar = AsyncMock()
     baostock = AsyncMock()
-    baostock.fetch_kline = AsyncMock()
+    baostock.fetch_kline = AsyncMock(return_value=[{"date": "2026-03-13", "close": 1}])
     eastmoney = AsyncMock()
     eastmoney.fetch = AsyncMock()
 
-    bars, source, status, note = await fetch_daily_task._fetch_bars_by_source(
-        tushare_provider=tushare,
-        baostock_provider=baostock,
-        em_crawler=eastmoney,
-        source="tushare",
-        symbol="000001",
-        start_date="2026-03-10",
-        end_date="2026-03-13",
-        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
-        exchange="SZ",
-        is_etf=False,
-    )
+    with pytest.raises(ValueError, match="source must be one of: baostock, eastmoney"):
+        await fetch_daily_task._fetch_bars_by_source(
+            tushare_provider=tushare,
+            baostock_provider=baostock,
+            em_crawler=eastmoney,
+            source="tushare",
+            symbol="000001",
+            start_date="2026-03-10",
+            end_date="2026-03-13",
+            adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+            exchange="SZ",
+            is_etf=False,
+        )
 
-    assert bars == [{"date": "2026-03-13", "close": 1}]
-    assert source == "tushare"
-    assert status == "done"
-    assert note == ""
-    tushare.fetch_pro_bar.assert_awaited_once_with(
-        ts_code="000001.SZ",
-        asset="E",
-        freq="D",
-        adj=fetch_daily_task.AdjustType.NO_ADJUST,
-        start_date="2026-03-10",
-        end_date="2026-03-13",
-    )
+    tushare.fetch_pro_bar.assert_not_awaited()
     baostock.fetch_kline.assert_not_awaited()
     eastmoney.fetch.assert_not_awaited()
 
@@ -234,8 +244,8 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
         trade_dates.append(trade_date)
         return []
 
-    crawler = AsyncMock()
-    crawler.fetch_trade_calendar = AsyncMock(
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(
         return_value=[
             {"trade_date": "2026-03-18", "is_trading": False},
             {"trade_date": "2026-03-19", "is_trading": True},
@@ -244,9 +254,11 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
             {"trade_date": "2026-03-22", "is_trading": False},
         ]
     )
+    crawler = AsyncMock()
     crawler.close = AsyncMock()
 
     monkeypatch.setattr(fetch_daily_task, "datetime", FrozenDateTime)
+    monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: provider)
     monkeypatch.setattr(fetch_daily_task, "EastMoneyCrawler", lambda proxy_pool=None: crawler)
     monkeypatch.setattr(fetch_daily_task, "_get_daily_sync_targets", _get_targets)
     monkeypatch.setattr(fetch_daily_task, "async_session_factory", lambda: _DummySessionManager())
@@ -254,10 +266,11 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
     await fetch_daily_task.fetch_and_save_daily_bars(days=4, concurrency=1)
 
     assert trade_dates == ["2026-03-19", "2026-03-20"]
-    crawler.fetch_trade_calendar.assert_awaited_once_with(
+    provider.fetch_trade_calendar.assert_awaited_once_with(
         start_date="2026-03-18",
         end_date="2026-03-22",
     )
+    crawler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -275,11 +288,13 @@ async def test_fetch_and_save_daily_bars_skips_when_calendar_unavailable(monkeyp
             return False
 
     get_targets = AsyncMock(return_value=[])
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(return_value=[])
     crawler = AsyncMock()
-    crawler.fetch_trade_calendar = AsyncMock(return_value=[])
     crawler.close = AsyncMock()
 
     monkeypatch.setattr(fetch_daily_task, "datetime", FrozenDateTime)
+    monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: provider)
     monkeypatch.setattr(fetch_daily_task, "EastMoneyCrawler", lambda proxy_pool=None: crawler)
     monkeypatch.setattr(fetch_daily_task, "_get_daily_sync_targets", get_targets)
     monkeypatch.setattr(fetch_daily_task, "async_session_factory", lambda: _DummySessionManager())
@@ -287,6 +302,7 @@ async def test_fetch_and_save_daily_bars_skips_when_calendar_unavailable(monkeyp
     await fetch_daily_task.fetch_and_save_daily_bars(days=4, concurrency=1)
 
     get_targets.assert_not_awaited()
+    crawler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -915,13 +931,110 @@ async def test_daily_bars_backfill_window_does_not_fallback_from_baostock():
 
 
 @pytest.mark.asyncio
-async def test_is_trading_day_returns_false_on_weekend_without_calendar_call():
-    crawler = AsyncMock()
+async def test_baostock_provider_fetch_trade_calendar(monkeypatch):
+    class FakeResult:
+        error_code = "0"
+        error_msg = ""
 
-    result = await market_calendar.is_trading_day(date(2026, 3, 22), crawler=crawler)
+        def __init__(self):
+            self._rows = [["2026-04-27", "1"], ["2026-04-28", "0"]]
+            self._idx = -1
+
+        def next(self):
+            self._idx += 1
+            return self._idx < len(self._rows)
+
+        def get_row_data(self):
+            return self._rows[self._idx]
+
+    calls = []
+
+    def query_trade_dates(*, start_date, end_date):
+        calls.append((start_date, end_date))
+        return FakeResult()
+
+    fake_bs = SimpleNamespace(
+        login=lambda: SimpleNamespace(error_code="0", error_msg=""),
+        query_trade_dates=query_trade_dates,
+    )
+    monkeypatch.setitem(__import__("sys").modules, "baostock", fake_bs)
+    provider = BaoStockProvider()
+    monkeypatch.setattr(provider, "_record_request_usage", lambda: None)
+
+    calendar = await provider.fetch_trade_calendar("20260427", "2026-04-28")
+
+    assert calls == [("2026-04-27", "2026-04-28")]
+    assert calendar == [
+        {"trade_date": "2026-04-27", "is_trading": True},
+        {"trade_date": "2026-04-28", "is_trading": False},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_is_trading_day_returns_false_on_weekend_without_calendar_call():
+    provider = AsyncMock()
+
+    result = await market_calendar.is_trading_day(date(2026, 3, 22), provider=provider)
 
     assert result is False
-    crawler.fetch_trade_calendar.assert_not_called()
+    provider.fetch_trade_calendar.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_is_trading_day_uses_baostock_calendar_without_tushare(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "invalid-token")
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(
+        return_value=[{"trade_date": "2026-04-27", "is_trading": True}]
+    )
+
+    result = await market_calendar.is_trading_day(date(2026, 4, 27), provider=provider)
+
+    assert result is True
+    provider.fetch_trade_calendar.assert_awaited_once_with(
+        start_date="2026-04-27",
+        end_date="2026-04-27",
+    )
+
+
+@pytest.mark.asyncio
+async def test_is_trading_day_returns_calendar_closed_day(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "invalid-token")
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(
+        return_value=[{"trade_date": "2026-04-27", "is_trading": False}]
+    )
+
+    result = await market_calendar.is_trading_day(date(2026, 4, 27), provider=provider)
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_trading_day_returns_false_when_calendar_unavailable(monkeypatch):
+    monkeypatch.setenv("TUSHARE_TOKEN", "invalid-token")
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(return_value=[])
+
+    result = await market_calendar.is_trading_day(date(2026, 4, 27), provider=provider)
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_trading_day_returns_false_when_baostock_calendar_times_out(monkeypatch):
+    monkeypatch.setenv("MARKET_CALENDAR_TIMEOUT_SECONDS", "0.01")
+    provider = AsyncMock()
+
+    async def _slow_calendar(*_args, **_kwargs):
+        await asyncio.sleep(1)
+        return [{"trade_date": "2026-04-27", "is_trading": True}]
+
+    provider.fetch_trade_calendar = AsyncMock(side_effect=_slow_calendar)
+
+    result = await market_calendar.is_trading_day(date(2026, 4, 27), provider=provider)
+
+    assert result is False
 
 
 def test_should_skip_market_task_respects_force_run(monkeypatch):

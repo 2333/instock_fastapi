@@ -150,6 +150,17 @@ class BaoStockProvider:
     async def fetch_stock_classifications(self) -> List[Dict[str, Any]]:
         return await asyncio.to_thread(self._fetch_stock_classification_sync)
 
+    async def fetch_trade_calendar(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict[str, Any]]:
+        return await asyncio.to_thread(
+            self._fetch_trade_calendar_sync,
+            start_date,
+            end_date,
+        )
+
     async def fetch_fund_flow_rank(self, trade_date: str) -> List[Dict[str, Any]]:
         logger.info("BaoStock 不提供 fund_flow_rank，返回空结果供下游降级")
         return []
@@ -280,6 +291,50 @@ class BaoStockProvider:
             return items
         except Exception:
             raise
+
+    def _fetch_trade_calendar_sync(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict[str, Any]]:
+        try:
+            import baostock as bs  # type: ignore
+        except Exception:
+            logger.warning("baostock 未安装，跳过 BaoStock 交易日历")
+            return []
+
+        try:
+            self._ensure_login(bs)
+            self._wait_rate_limit()
+            rs = bs.query_trade_dates(
+                start_date=self._normalize_calendar_date(start_date),
+                end_date=self._normalize_calendar_date(end_date),
+            )
+            if rs.error_code != "0":
+                raise RuntimeError(f"BaoStock query_trade_dates 失败: {rs.error_msg}")
+
+            items: List[Dict[str, Any]] = []
+            for row in self._collect_rows(rs):
+                if len(row) < 2:
+                    continue
+                trade_date = str(row[0]).strip()
+                if not trade_date:
+                    continue
+                items.append(
+                    {
+                        "trade_date": trade_date,
+                        "is_trading": str(row[1]).strip() == "1",
+                    }
+                )
+            return items
+        except Exception:
+            raise
+
+    def _normalize_calendar_date(self, value: str) -> str:
+        normalized = value.strip().replace("/", "-")
+        if len(normalized) == 8 and normalized.isdigit():
+            return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:]}"
+        return normalized
 
     def _to_baostock_code(self, code: str) -> Optional[str]:
         if not code:

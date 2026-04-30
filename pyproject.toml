@@ -1,6 +1,6 @@
 [project]
 name = "instock-fastapi"
-version = "0.2.1"
+version = "0.3.2"
 description = "InStock FastAPI stock analysis platform"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -23,7 +23,7 @@ dependencies = [
     "ta-lib>=0.6.0",
     "python-dateutil>=2.8.0",
     "httpx>=0.28.0",
-    "baostock>=0.8.9",
+    "baostock>=0.9.1",
     "tushare>=1.4.16",
     "jinja2>=3.1.0",
     "tenacity>=8.0.0",
