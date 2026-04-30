@@ -244,8 +244,8 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
         trade_dates.append(trade_date)
         return []
 
-    crawler = AsyncMock()
-    crawler.fetch_trade_calendar = AsyncMock(
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(
         return_value=[
             {"trade_date": "2026-03-18", "is_trading": False},
             {"trade_date": "2026-03-19", "is_trading": True},
@@ -254,9 +254,11 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
             {"trade_date": "2026-03-22", "is_trading": False},
         ]
     )
+    crawler = AsyncMock()
     crawler.close = AsyncMock()
 
     monkeypatch.setattr(fetch_daily_task, "datetime", FrozenDateTime)
+    monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: provider)
     monkeypatch.setattr(fetch_daily_task, "EastMoneyCrawler", lambda proxy_pool=None: crawler)
     monkeypatch.setattr(fetch_daily_task, "_get_daily_sync_targets", _get_targets)
     monkeypatch.setattr(fetch_daily_task, "async_session_factory", lambda: _DummySessionManager())
@@ -264,10 +266,11 @@ async def test_fetch_and_save_daily_bars_uses_calendar_trading_days(monkeypatch)
     await fetch_daily_task.fetch_and_save_daily_bars(days=4, concurrency=1)
 
     assert trade_dates == ["2026-03-19", "2026-03-20"]
-    crawler.fetch_trade_calendar.assert_awaited_once_with(
+    provider.fetch_trade_calendar.assert_awaited_once_with(
         start_date="2026-03-18",
         end_date="2026-03-22",
     )
+    crawler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -285,11 +288,13 @@ async def test_fetch_and_save_daily_bars_skips_when_calendar_unavailable(monkeyp
             return False
 
     get_targets = AsyncMock(return_value=[])
+    provider = AsyncMock()
+    provider.fetch_trade_calendar = AsyncMock(return_value=[])
     crawler = AsyncMock()
-    crawler.fetch_trade_calendar = AsyncMock(return_value=[])
     crawler.close = AsyncMock()
 
     monkeypatch.setattr(fetch_daily_task, "datetime", FrozenDateTime)
+    monkeypatch.setattr(fetch_daily_task, "BaoStockProvider", lambda: provider)
     monkeypatch.setattr(fetch_daily_task, "EastMoneyCrawler", lambda proxy_pool=None: crawler)
     monkeypatch.setattr(fetch_daily_task, "_get_daily_sync_targets", get_targets)
     monkeypatch.setattr(fetch_daily_task, "async_session_factory", lambda: _DummySessionManager())
@@ -297,6 +302,7 @@ async def test_fetch_and_save_daily_bars_skips_when_calendar_unavailable(monkeyp
     await fetch_daily_task.fetch_and_save_daily_bars(days=4, concurrency=1)
 
     get_targets.assert_not_awaited()
+    crawler.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -955,7 +961,7 @@ async def test_baostock_provider_fetch_trade_calendar(monkeypatch):
     provider = BaoStockProvider()
     monkeypatch.setattr(provider, "_record_request_usage", lambda: None)
 
-    calendar = await provider.fetch_trade_calendar("2026-04-27", "2026-04-28")
+    calendar = await provider.fetch_trade_calendar("20260427", "2026-04-28")
 
     assert calls == [("2026-04-27", "2026-04-28")]
     assert calendar == [

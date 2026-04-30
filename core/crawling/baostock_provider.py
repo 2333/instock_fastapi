@@ -307,8 +307,8 @@ class BaoStockProvider:
             self._ensure_login(bs)
             self._wait_rate_limit()
             rs = bs.query_trade_dates(
-                start_date=start_date.replace("/", "-"),
-                end_date=end_date.replace("/", "-"),
+                start_date=self._normalize_calendar_date(start_date),
+                end_date=self._normalize_calendar_date(end_date),
             )
             if rs.error_code != "0":
                 raise RuntimeError(f"BaoStock query_trade_dates 失败: {rs.error_msg}")
@@ -329,6 +329,12 @@ class BaoStockProvider:
             return items
         except Exception:
             raise
+
+    def _normalize_calendar_date(self, value: str) -> str:
+        normalized = value.strip().replace("/", "-")
+        if len(normalized) == 8 and normalized.isdigit():
+            return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:]}"
+        return normalized
 
     def _to_baostock_code(self, code: str) -> Optional[str]:
         if not code:

@@ -1,6 +1,6 @@
 [project]
 name = "instock-fastapi"
-version = "0.3.1"
+version = "0.3.2"
 description = "InStock FastAPI stock analysis platform"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

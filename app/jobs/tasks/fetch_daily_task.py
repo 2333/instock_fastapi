@@ -142,9 +142,9 @@ async def _resolve_trading_days(
     start_date: str,
     end_date: str,
     *,
-    crawler: EastMoneyCrawler,
+    provider: BaoStockProvider,
 ) -> list[str]:
-    calendar = await crawler.fetch_trade_calendar(start_date=start_date, end_date=end_date)
+    calendar = await provider.fetch_trade_calendar(start_date=start_date, end_date=end_date)
     if not calendar:
         logger.warning(
             "交易日历为空，跳过日线抓取窗口: start_date=%s end_date=%s",
@@ -957,7 +957,7 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
         trading_days = await _resolve_trading_days(
             start_dt.date().isoformat(),
             end_dt.date().isoformat(),
-            crawler=em_crawler,
+            provider=baostock_provider,
         )
 
         logger.info(
