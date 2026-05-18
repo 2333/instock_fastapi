@@ -5,6 +5,7 @@ import pytest
 from app.core.dependencies import get_current_user
 from app.main import app
 from app.models.stock_model import SelectionCondition
+from app.services.screener_adapter import canonicalize_legacy_params
 from tests.conftest import async_session_factory_test
 
 
@@ -61,6 +62,14 @@ async def test_selection_today_summary_aggregates_saved_conditions(client, curre
                 ),
                 SelectionCondition(
                     user_id=current_user_override.id,
+                    name="MACD Canonical",
+                    category="custom",
+                    description="canonical definition should still work",
+                    params=canonicalize_legacy_params({"macdBullish": True}),
+                    is_active=True,
+                ),
+                SelectionCondition(
+                    user_id=current_user_override.id,
                     name="停用条件",
                     category="custom",
                     description="不应参与统计",
@@ -76,15 +85,19 @@ async def test_selection_today_summary_aggregates_saved_conditions(client, curre
     assert response.status_code == 200
     payload = response.json()["data"]
     assert payload["trade_date"] == "20240102"
-    assert payload["total_conditions"] == 3
-    assert payload["active_conditions"] == 2
-    assert payload["total_hits"] == 2
+    assert payload["total_conditions"] == 4
+    assert payload["active_conditions"] == 3
+    assert payload["total_hits"] == 3
 
     hammer = next(item for item in payload["items"] if item["name"] == "Hammer 组合")
     assert hammer["hit_count"] == 1
     assert hammer["pattern"] == "HAMMER"
     assert hammer["top_hits"][0]["code"] == "000001"
     assert hammer["top_hits"][0]["reason_summary"] == "Pattern = HAMMER"
+
+    macd = next(item for item in payload["items"] if item["name"] == "MACD Canonical")
+    assert macd["hit_count"] == 1
+    assert macd["top_hits"][0]["code"] == "000001"
 
 
 @pytest.mark.asyncio

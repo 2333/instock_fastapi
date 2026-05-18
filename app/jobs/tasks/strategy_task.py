@@ -6,12 +6,18 @@ from decimal import Decimal
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import is_trading_day, should_skip_market_task
 from app.models.stock_model import DailyBar, Pattern, Stock, Strategy, StrategyResult
 
 logger = logging.getLogger(__name__)
+
+_STRATEGY_TASK_LOAD_FIELDS = (
+    Strategy.id,
+    Strategy.name,
+)
 
 
 async def run_strategy(session: AsyncSession, strategy_name: str, ts_codes: list) -> list:
@@ -111,18 +117,16 @@ async def run():
         if should_skip_market_task("策略选股任务", today_is_trading_day=await is_trading_day()):
             return
         async with async_session_factory() as session:
-            result = await session.execute(select(Strategy).where(Strategy.is_active.is_(True)))
+            result = await session.execute(
+                select(Strategy)
+                .options(load_only(*_STRATEGY_TASK_LOAD_FIELDS))
+                .where(Strategy.is_active.is_(True))
+            )
             strategies = result.scalars().all()
 
             if not strategies:
-                default_strategy = Strategy(
-                    name="default",
-                    description="默认选股策略",
-                    is_active=True,
-                )
-                session.add(default_strategy)
-                await session.commit()
-                strategies = [default_strategy]
+                logger.info("未找到启用的已保存策略，跳过策略选股任务")
+                return
 
             result = await session.execute(
                 select(Stock.ts_code).where(

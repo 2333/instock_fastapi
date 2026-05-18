@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -49,6 +50,85 @@ async def test_build_indicator_snapshot_marks_bullish_and_inside_when_prices_tre
     assert snapshot["ema_slow_value"] is not None
     assert snapshot["boll_upper"] is not None
     assert snapshot["boll_lower"] is not None
+
+
+@pytest.mark.asyncio
+async def test_build_indicator_snapshot_normalizes_iso_trade_date_for_legacy_fallback():
+    db = Mock()
+    db.execute = AsyncMock(return_value=make_result(rows=[]))
+    service = PatternService(db)
+
+    snapshot = await service._build_indicator_snapshot(
+        ts_code="000001.SZ",
+        trade_date="2024-01-06",
+        ema_fast=2,
+        ema_slow=3,
+        boll_period=3,
+        boll_std=2,
+    )
+
+    assert snapshot["ema_signal"] == "nodata"
+    _, params = db.execute.await_args.args
+    assert params == {
+        "ts_code": "000001.SZ",
+        "trade_date": "20240106",
+        "trade_date_dt": date(2024, 1, 6),
+        "limit": 33,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_patterns_normalizes_iso_date_filters_for_legacy_trade_date_fallback():
+    db = Mock()
+    db.execute = AsyncMock(return_value=make_result(rows=[]))
+    service = PatternService(db)
+
+    rows = await service.get_patterns("000001", "2024-01-01", "2024-01-31", 20)
+
+    assert rows == []
+    _, params = db.execute.await_args.args
+    assert params == {
+        "code": "000001",
+        "limit": 20,
+        "start_date": "20240101",
+        "start_date_dt": date(2024, 1, 1),
+        "end_date": "20240131",
+        "end_date_dt": date(2024, 1, 31),
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_composite_patterns_normalizes_iso_date_filters_for_legacy_trade_date_fallback():
+    db = Mock()
+    db.execute = AsyncMock(return_value=make_result(rows=[]))
+    service = PatternService(db)
+
+    rows = await service.get_composite_patterns(
+        signal=None,
+        limit=10,
+        start_date="2024-01-01",
+        end_date="2024-01-31",
+        min_confidence=0,
+        pattern_names=None,
+        ema_fast=2,
+        ema_slow=3,
+        boll_period=5,
+        boll_std=1,
+        ema_signal=None,
+        boll_signal=None,
+        indicator_mode="all",
+    )
+
+    assert rows == []
+    _, params = db.execute.await_args.args
+    assert params == {
+        "limit": 10,
+        "min_confidence": 0,
+        "start_date": "20240101",
+        "start_date_dt": date(2024, 1, 1),
+        "end_date": "20240131",
+        "end_date_dt": date(2024, 1, 31),
+    }
 
 
 @pytest.mark.asyncio

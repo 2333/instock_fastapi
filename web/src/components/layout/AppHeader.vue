@@ -34,14 +34,6 @@
           <span>{{ t("nav_home") }}</span>
         </router-link>
         <router-link
-          to="/workspace"
-          class="nav-item"
-          :class="{ active: $route.path.startsWith('/workspace') }"
-        >
-          <span class="nav-icon">🖥️</span>
-          <span>{{ t('nav_workspace') }}</span>
-        </router-link>
-        <router-link
           to="/stocks"
           class="nav-item"
           :class="{ active: $route.path.startsWith('/stocks') }"
@@ -489,6 +481,70 @@ onUnmounted(() => {
 
   &:hover {
     background: #1e53e5;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    height: auto;
+    min-height: 60px;
+    padding: 10px 14px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-left {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .logo-text {
+    font-size: 18px;
+  }
+
+  .header-center {
+    order: 3;
+    flex: 0 0 100%;
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .header-nav {
+    width: 100%;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    gap: 6px;
+    padding: 8px 11px;
+    white-space: nowrap;
+  }
+
+  .header-right {
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+
+  .build-badge,
+  .market-status,
+  .header-actions {
+    display: none;
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .login-link {
+    padding: 8px 12px;
   }
 }
 </style>

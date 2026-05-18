@@ -18,7 +18,9 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.database import async_session_factory
 from app.jobs.market_calendar import is_trading_day, should_skip_market_task
+from app.jobs.tasks.fetch_audit import upsert_fetch_audit
 from app.models.stock_model import DailyBar, Pattern
+from app.services.date_utils import parse_trade_date
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +47,19 @@ PATTERN_MAP = {
 }
 
 
+def _normalize_trade_date(value: str) -> str:
+    return value.replace("-", "").strip()
+
+
+def _pattern_engine_available() -> bool:
+    return np is not None and tl is not None
+
+
 def detect_patterns(bars: list[DailyBar]) -> list[dict]:
     """基于TA-Lib的形态识别"""
     patterns = []
 
-    if np is None or tl is None:
+    if not _pattern_engine_available():
         logger.warning("numpy 或 talib 未安装，无法进行形态识别")
         return patterns
 
@@ -176,6 +186,46 @@ def detect_patterns(bars: list[DailyBar]) -> list[dict]:
     return patterns
 
 
+async def _resolve_target_trade_date(session) -> str | None:
+    result = await session.execute(text("""
+        SELECT MAX(REPLACE(COALESCE(db.trade_date, ''), '-', '')) AS trade_date
+        FROM daily_bars db
+        JOIN stocks s ON s.ts_code = db.ts_code
+        WHERE s.is_etf = false
+          AND s.list_status = 'L'
+          AND COALESCE(db.trade_date, '') <> ''
+        """))
+    trade_date = result.scalar_one_or_none()
+    return str(trade_date) if trade_date else None
+
+
+async def _load_target_ts_codes(session, target_trade_date: str) -> list[str]:
+    result = await session.execute(
+        text("""
+            SELECT DISTINCT db.ts_code
+            FROM daily_bars db
+            JOIN stocks s ON s.ts_code = db.ts_code
+            WHERE REPLACE(COALESCE(db.trade_date, ''), '-', '') = :target_trade_date
+              AND s.is_etf = false
+              AND s.list_status = 'L'
+            ORDER BY db.ts_code
+            """),
+        {"target_trade_date": _normalize_trade_date(target_trade_date)},
+    )
+    return [row[0] for row in result.fetchall()]
+
+
+async def _delete_existing_patterns(session, *, ts_code: str, trade_date: str) -> None:
+    await session.execute(
+        text("""
+            DELETE FROM patterns
+            WHERE ts_code = :ts_code
+              AND REPLACE(COALESCE(trade_date, ''), '-', '') = :trade_date
+            """),
+        {"ts_code": ts_code, "trade_date": _normalize_trade_date(trade_date)},
+    )
+
+
 async def run():
     logger.info(f"执行形态识别任务: {datetime.now()}")
 
@@ -183,26 +233,38 @@ async def run():
         if should_skip_market_task("形态识别任务", today_is_trading_day=await is_trading_day()):
             return
         async with async_session_factory() as session:
-            result = await session.execute(text("""
-                    SELECT DISTINCT db.ts_code
-                    FROM daily_bars db
-                    JOIN stocks s ON s.ts_code = db.ts_code
-                    WHERE db.trade_date >= (
-                        SELECT MIN(recent_dates.trade_date)
-                        FROM (
-                            SELECT DISTINCT trade_date
-                            FROM daily_bars
-                            ORDER BY trade_date DESC
-                            LIMIT 20
-                        ) AS recent_dates
-                    )
-                    AND s.is_etf = false
-                    AND s.list_status = 'L'
-                    """))
-            ts_codes = [row[0] for row in result.fetchall()]
-            logger.info(f"开始识别形态，共 {len(ts_codes)} 只股票")
+            target_trade_date = await _resolve_target_trade_date(session)
+            if not target_trade_date:
+                logger.info("形态识别任务跳过: 无可识别交易日")
+                return
 
-            success_count = 0
+            ts_codes = await _load_target_ts_codes(session, target_trade_date)
+            expected_count = len(ts_codes)
+            logger.info(f"开始识别形态: trade_date={target_trade_date}, 共 {expected_count} 只股票")
+
+            if not _pattern_engine_available():
+                await upsert_fetch_audit(
+                    session,
+                    task_name="pattern_recognition",
+                    entity_type="trade_date",
+                    entity_key="ALL",
+                    trade_date=target_trade_date,
+                    status="failed",
+                    source="local",
+                    note=(
+                        f"expected={expected_count}; evaluated=0; "
+                        f"skipped_insufficient_history=0; failed={expected_count}; "
+                        "matched_stocks=0; patterns=0; reason=pattern_engine_unavailable"
+                    ),
+                )
+                await session.commit()
+                logger.error("形态识别任务失败: numpy 或 talib 未安装")
+                return
+
+            matched_count = 0
+            evaluated_count = 0
+            skipped_insufficient_history_count = 0
+            failed_count = 0
             pattern_count = 0
 
             for idx, ts_code in enumerate(ts_codes):
@@ -216,21 +278,47 @@ async def run():
                         )
                         bars = result.scalars().all()
 
-                        if len(bars) < 30:
+                        if not bars:
+                            skipped_insufficient_history_count += 1
+                            continue
+
+                        latest_bar = bars[0]
+                        latest_trade_date = _normalize_trade_date(latest_bar.trade_date)
+                        if latest_trade_date != _normalize_trade_date(target_trade_date):
+                            skipped_insufficient_history_count += 1
                             continue
 
                         bars = list(reversed(bars))
+                        latest_bar = bars[-1]
+                        latest_trade_date_dt = latest_bar.trade_date_dt or parse_trade_date(
+                            latest_bar.trade_date
+                        )
+                        if len(bars) < 30 or latest_trade_date_dt is None:
+                            await _delete_existing_patterns(
+                                session_inner,
+                                ts_code=ts_code,
+                                trade_date=target_trade_date,
+                            )
+                            await session_inner.commit()
+                            skipped_insufficient_history_count += 1
+                            continue
+
+                        await _delete_existing_patterns(
+                            session_inner,
+                            ts_code=ts_code,
+                            trade_date=target_trade_date,
+                        )
                         patterns = detect_patterns(bars)
+                        evaluated_count += 1
 
                         if patterns:
-                            latest_bar = bars[-1]
                             for pat in patterns:
                                 stmt = (
                                     insert(Pattern)
                                     .values(
                                         ts_code=ts_code,
                                         trade_date=latest_bar.trade_date,
-                                        trade_date_dt=latest_bar.trade_date_dt,
+                                        trade_date_dt=latest_trade_date_dt,
                                         **pat,
                                     )
                                     .on_conflict_do_update(
@@ -242,19 +330,40 @@ async def run():
                                 )
                                 await session_inner.execute(stmt)
 
-                            await session_inner.commit()
                             pattern_count += len(patterns)
-                            success_count += 1
+                            matched_count += 1
+                        await session_inner.commit()
 
                         if (idx + 1) % 500 == 0:
                             logger.info(f"进度: {idx + 1}/{len(ts_codes)}")
 
                 except Exception as e:
+                    failed_count += 1
                     logger.error(f"形态识别失败 {ts_code}: {e}")
 
+            status = "done" if failed_count == 0 else "partial"
             logger.info(
-                f"形态识别任务完成: 成功处理 {success_count}/{len(ts_codes)} 只股票，共识别 {pattern_count} 个形态"
+                "形态识别任务完成: "
+                f"trade_date={target_trade_date}, expected={expected_count}, "
+                f"evaluated={evaluated_count}, skipped={skipped_insufficient_history_count}, "
+                f"failed={failed_count}, matched={matched_count}, patterns={pattern_count}"
             )
+            await upsert_fetch_audit(
+                session,
+                task_name="pattern_recognition",
+                entity_type="trade_date",
+                entity_key="ALL",
+                trade_date=target_trade_date,
+                status=status,
+                source="local",
+                note=(
+                    f"expected={expected_count}; evaluated={evaluated_count}; "
+                    f"skipped_insufficient_history={skipped_insufficient_history_count}; "
+                    f"failed={failed_count}; matched_stocks={matched_count}; "
+                    f"patterns={pattern_count}"
+                ),
+            )
+            await session.commit()
     except Exception as e:
         logger.error(f"形态识别任务失败: {e}", exc_info=True)
 

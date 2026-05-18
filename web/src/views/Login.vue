@@ -3,28 +3,28 @@
     <div class="login-card">
       <div class="login-header">
         <h1>InStock</h1>
-        <p>智能股票分析平台</p>
+        <p>{{ t('login_tagline') }}</p>
       </div>
       
       <form @submit.prevent="handleLogin" class="login-form">
         <div class="form-group">
-          <label for="username">用户名</label>
+          <label for="username">{{ t('login_username') }}</label>
           <input 
             id="username"
             v-model="username" 
             type="text" 
-            placeholder="请输入用户名"
+            :placeholder="t('login_username_placeholder')"
             required
           />
         </div>
         
         <div class="form-group">
-          <label for="password">密码</label>
+          <label for="password">{{ t('login_password') }}</label>
           <input 
             id="password"
             v-model="password" 
             type="password" 
-            placeholder="请输入密码"
+            :placeholder="t('login_password_placeholder')"
             required
           />
         </div>
@@ -34,49 +34,49 @@
         </div>
         
         <button type="submit" class="btn-login" :disabled="loading">
-          {{ loading ? '登录中...' : '登录' }}
+          {{ loading ? t('login_submitting') : t('login_submit') }}
         </button>
       </form>
       
       <div class="login-footer">
-        <p>还没有账号? <a href="#" @click.prevent="showRegister = true">立即注册</a></p>
+        <p>{{ t('login_register_prompt') }} <a href="#" @click.prevent="showRegister = true">{{ t('login_register_link') }}</a></p>
       </div>
     </div>
 
     <!-- Register Modal -->
     <div v-if="showRegister" class="modal-overlay" @click="showRegister = false">
       <div class="modal-card" @click.stop>
-        <h2>注册新账号</h2>
+        <h2>{{ t('register_title') }}</h2>
         <form @submit.prevent="handleRegister" class="login-form">
           <div class="form-group">
-            <label for="reg-username">用户名</label>
+            <label for="reg-username">{{ t('login_username') }}</label>
             <input 
               id="reg-username"
               v-model="regUsername" 
               type="text" 
-              placeholder="请输入用户名"
+              :placeholder="t('login_username_placeholder')"
               required
             />
           </div>
           
           <div class="form-group">
-            <label for="reg-email">邮箱</label>
+            <label for="reg-email">{{ t('register_email') }}</label>
             <input 
               id="reg-email"
               v-model="regEmail" 
               type="email" 
-              placeholder="请输入邮箱"
+              :placeholder="t('register_email_placeholder')"
               required
             />
           </div>
           
           <div class="form-group">
-            <label for="reg-password">密码</label>
+            <label for="reg-password">{{ t('login_password') }}</label>
             <input 
               id="reg-password"
               v-model="regPassword" 
               type="password" 
-              placeholder="请输入密码"
+              :placeholder="t('login_password_placeholder')"
               required
             />
           </div>
@@ -86,11 +86,11 @@
           </div>
           
           <button type="submit" class="btn-login" :disabled="regLoading">
-            {{ regLoading ? '注册中...' : '注册' }}
+            {{ regLoading ? t('register_submitting') : t('register_submit') }}
           </button>
           
           <button type="button" class="btn-cancel" @click="showRegister = false">
-            取消
+            {{ t('register_cancel') }}
           </button>
         </form>
       </div>
@@ -103,9 +103,11 @@ import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { authApi } from '@/api'
 import { getPreferredHomePath, loadUserPreferences } from '@/composables/useUserPreferences'
+import { useLocale } from '@/composables/useLocale'
 
 const router = useRouter()
 const route = useRoute()
+const { t } = useLocale()
 
 const username = ref('')
 const password = ref('')
@@ -131,7 +133,7 @@ const handleLogin = async () => {
     const redirect = route.query.redirect as string || getPreferredHomePath()
     router.push(redirect)
   } catch (e: any) {
-    error.value = e.response?.data?.detail || '登录失败，请检查用户名和密码'
+    error.value = e.response?.data?.detail || t('login_error_default')
   } finally {
     loading.value = false
   }
@@ -146,9 +148,9 @@ const handleRegister = async () => {
     showRegister.value = false
     username.value = regUsername.value
     password.value = regPassword.value
-    alert('注册成功，请登录')
+    window.alert(t('register_success'))
   } catch (e: any) {
-    regError.value = e.response?.data?.detail || '注册失败'
+    regError.value = e.response?.data?.detail || t('register_error_default')
   } finally {
     regLoading.value = false
   }

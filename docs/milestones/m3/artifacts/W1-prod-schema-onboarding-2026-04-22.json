@@ -1,0 +1,317 @@
+{
+  "audit_passed": true,
+  "blocking_findings": [],
+  "can_stamp_head": false,
+  "current_revision": "m2_user_events",
+  "database_identity": "postgresql+psycopg2://instock:***@localhost:5432/instock",
+  "evidence_file": "docs/milestones/m3/artifacts/W1-prod-schema-onboarding-2026-04-22.json",
+  "expected_revision": "m2_user_events",
+  "message": "Schema onboarding audit passed and Alembic was stamped to head 'm2_user_events'.",
+  "stamp_applied": true,
+  "warning_findings": [
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_attention_user_ts_code",
+      "table": "attention"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_daily_basic_ts_code_trade_date",
+      "table": "daily_basic"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_daily_basic_ts_code_trade_date_dt",
+      "table": "daily_basic"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_unique_constraint",
+      "level": "warn",
+      "name": "uq_daily_basic_ts_code_trade_date",
+      "table": "daily_basic"
+    },
+    {
+      "actual": "ts_code->stocks.ts_code",
+      "expected": null,
+      "kind": "extra_foreign_key",
+      "level": "warn",
+      "name": "ts_code->stocks.ts_code",
+      "table": "daily_basic"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_fund_flows_ts_code_trade_date",
+      "table": "fund_flows"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_fund_flows_ts_code_trade_date_dt",
+      "table": "fund_flows"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_unique_constraint",
+      "level": "warn",
+      "name": "uq_fund_flows_ts_code_trade_date",
+      "table": "fund_flows"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_indicators_ts_code_date_name",
+      "table": "indicators"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_indicators_ts_code_trade_date_dt_name",
+      "table": "indicators"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_unique_constraint",
+      "level": "warn",
+      "name": "uq_indicators_ts_code_date_name",
+      "table": "indicators"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_patterns_ts_code_date_name",
+      "table": "patterns"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_stock_st_ts_code_trade_date_dt",
+      "table": "stock_st"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "stocks_ts_code_key",
+      "table": "stocks"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_strategies_user_name",
+      "table": "strategies"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_technical_factors_ts_code_trade_date_dt",
+      "table": "technical_factors"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "users_email_key",
+      "table": "users"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "users_username_key",
+      "table": "users"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_daily_bars_ts_code_trade_date",
+      "table": "daily_bars"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "uq_daily_bars_ts_code_trade_date_dt",
+      "table": "daily_bars"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_unique_constraint",
+      "level": "warn",
+      "name": "uq_daily_bars_ts_code_trade_date",
+      "table": "daily_bars"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_column",
+      "level": "warn",
+      "name": "ip_hash",
+      "table": "user_events"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_column",
+      "level": "warn",
+      "name": "user_agent",
+      "table": "user_events"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "ix_user_events_created_at",
+      "table": "user_events"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "ix_user_events_event_type",
+      "table": "user_events"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "ix_user_events_user_id",
+      "table": "user_events"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_index",
+      "level": "warn",
+      "name": "user_settings_user_id_key",
+      "table": "user_settings"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "alert_conditions",
+      "table": "alert_conditions"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "backfill_daily_state",
+      "table": "backfill_daily_state"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "data_fetch_audit",
+      "table": "data_fetch_audit"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "notifications",
+      "table": "notifications"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "parameter_optimization_jobs",
+      "table": "parameter_optimization_jobs"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "parameter_optimization_trials",
+      "table": "parameter_optimization_trials"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "report_preferences",
+      "table": "report_preferences"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "strategy_comments",
+      "table": "strategy_comments"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "strategy_favorites",
+      "table": "strategy_favorites"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "strategy_ratings",
+      "table": "strategy_ratings"
+    },
+    {
+      "actual": "present",
+      "expected": null,
+      "kind": "extra_table",
+      "level": "warn",
+      "name": "user_reports",
+      "table": "user_reports"
+    }
+  ]
+}

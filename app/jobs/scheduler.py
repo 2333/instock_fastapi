@@ -36,10 +36,18 @@ FETCH_FUND_FLOW_TIME = time(hour=16, minute=0)
 CALCULATE_INDICATORS_TIME = time(hour=19, minute=10)
 RUN_PATTERN_RECOGNITION_TIME = time(hour=19, minute=40)
 RUN_STRATEGY_SELECTION_TIME = time(hour=20, minute=10)
+RUN_POST_CLOSE_ALERTS_TIME = time(hour=20, minute=25)
 FETCH_MARKET_REFERENCE_TIME = time(hour=21, minute=45)
 
 
 MarketJobRunner = Callable[[], Awaitable[None]]
+
+
+def _normalize_trade_date_value(trade_date: str | None) -> str | None:
+    if trade_date is None:
+        return None
+    normalized = trade_date.replace("-", "").strip()
+    return normalized or None
 
 
 def should_recover_market_job(
@@ -49,6 +57,7 @@ def should_recover_market_job(
     today_trade_date: str,
     latest_trade_dates: list[str | None],
     today_is_trading_day: bool,
+    has_partial_gap: bool = False,
 ) -> bool:
     if not today_is_trading_day:
         return False
@@ -57,7 +66,12 @@ def should_recover_market_job(
     if now < scheduled_at:
         return False
 
-    return any(latest_date != today_trade_date for latest_date in latest_trade_dates)
+    normalized_today_trade_date = _normalize_trade_date_value(today_trade_date)
+    normalized_latest_trade_dates = [_normalize_trade_date_value(latest_date) for latest_date in latest_trade_dates]
+
+    return has_partial_gap or any(
+        latest_date != normalized_today_trade_date for latest_date in normalized_latest_trade_dates
+    )
 
 
 async def _get_latest_trade_dates(table_names: tuple[str, ...]) -> dict[str, str | None]:
@@ -71,6 +85,50 @@ async def _get_latest_trade_dates(table_names: tuple[str, ...]) -> dict[str, str
     return latest_dates
 
 
+async def _get_daily_bar_coverage_status(trade_date: str) -> dict[str, int | bool]:
+    query = text(
+        """
+        WITH supported_active_universe AS (
+            SELECT s.ts_code
+            FROM stocks s
+            WHERE s.list_status = 'L'
+              AND COALESCE(s.is_etf, FALSE) = FALSE
+              AND (
+                    UPPER(COALESCE(s.exchange, '')) IN ('SH', 'SZ', 'SSE', 'SHSE', 'SZSE')
+                    OR s.ts_code LIKE '%.SH'
+                    OR s.ts_code LIKE '%.SZ'
+                    OR s.ts_code LIKE '%.SSE'
+                    OR s.ts_code LIKE '%.SHSE'
+                    OR s.ts_code LIKE '%.SZSE'
+                  )
+              AND REPLACE(COALESCE(NULLIF(s.list_date, ''), '19000101'), '-', '')
+                    <= REPLACE(:trade_date, '-', '')
+              AND REPLACE(COALESCE(NULLIF(s.delist_date, ''), '99991231'), '-', '')
+                    >= REPLACE(:trade_date, '-', '')
+        )
+        SELECT
+            (SELECT COUNT(*) FROM supported_active_universe) AS expected_count,
+            (
+                SELECT COUNT(DISTINCT db.ts_code)
+                FROM daily_bars db
+                JOIN supported_active_universe u ON u.ts_code = db.ts_code
+                WHERE REPLACE(COALESCE(db.trade_date, ''), '-', '') = REPLACE(:trade_date, '-', '')
+            ) AS covered_count
+        """
+    )
+
+    async with async_session_factory() as session:
+        row = (await session.execute(query, {"trade_date": trade_date})).mappings().one()
+
+    expected_count = int(row["expected_count"] or 0)
+    covered_count = int(row["covered_count"] or 0)
+    return {
+        "expected_count": expected_count,
+        "covered_count": covered_count,
+        "has_partial_gap": expected_count > covered_count,
+    }
+
+
 async def recover_missed_market_jobs() -> None:
     from app.jobs.tasks.fetch_daily_task import run as run_daily_task
     from app.jobs.tasks.fetch_fund_flow_task import run as run_fund_flow_task
@@ -78,6 +136,7 @@ async def recover_missed_market_jobs() -> None:
 
     now = datetime.now(MARKET_TIMEZONE)
     today = format_trade_date(current_market_date(now))
+    normalized_today = _normalize_trade_date_value(today)
     today_is_trading_day = await is_trading_day(target_date=current_market_date(now))
     recovery_jobs: tuple[tuple[str, time, tuple[str, ...], MarketJobRunner], ...] = (
         ("fetch_daily_data", FETCH_DAILY_DATA_TIME, ("daily_bars",), run_daily_task),
@@ -92,25 +151,65 @@ async def recover_missed_market_jobs() -> None:
 
     for job_id, scheduled_time, table_names, runner in recovery_jobs:
         latest_dates = await _get_latest_trade_dates(table_names)
+        daily_bar_coverage_status: dict[str, int | bool] | None = None
+        if (
+            job_id == "fetch_daily_data"
+            and _normalize_trade_date_value(latest_dates.get("daily_bars")) == normalized_today
+        ):
+            daily_bar_coverage_status = await _get_daily_bar_coverage_status(today)
+
         if not should_recover_market_job(
             now=now,
             scheduled_time=scheduled_time,
             today_trade_date=today,
             latest_trade_dates=list(latest_dates.values()),
             today_is_trading_day=today_is_trading_day,
+            has_partial_gap=bool(daily_bar_coverage_status and daily_bar_coverage_status["has_partial_gap"]),
         ):
             continue
 
+        coverage_log = ""
+        if daily_bar_coverage_status:
+            coverage_log = (
+                f", coverage={daily_bar_coverage_status['covered_count']}/"
+                f"{daily_bar_coverage_status['expected_count']}"
+            )
         logger.warning(
-            "检测到错过的市场任务，立即补跑 %s: latest=%s, target=%s",
+            "检测到错过的市场任务，立即补跑 %s: latest=%s, target=%s%s",
             job_id,
             latest_dates,
             today,
+            coverage_log,
         )
         try:
             await runner()
         except Exception:
             logger.exception("启动补偿任务失败: %s", job_id)
+
+
+async def recover_missed_alert_subscriptions() -> None:
+    from app.jobs.tasks.alert_subscription_task import has_due_post_close_runs, run as run_alert_subscriptions
+
+    now = datetime.now(MARKET_TIMEZONE)
+    today = format_trade_date(current_market_date(now))
+    today_is_trading_day = await is_trading_day(target_date=current_market_date(now))
+    scheduled_at = datetime.combine(now.date(), RUN_POST_CLOSE_ALERTS_TIME, tzinfo=now.tzinfo)
+
+    if not today_is_trading_day or now < scheduled_at:
+        return
+    if not await has_due_post_close_runs(today):
+        return
+
+    logger.warning("检测到错过的盘后告警订阅任务，立即补跑: target=%s", today)
+    try:
+        await run_alert_subscriptions(date=today)
+    except Exception:
+        logger.exception("启动盘后告警订阅补偿任务失败")
+
+
+async def recover_missed_jobs() -> None:
+    await recover_missed_market_jobs()
+    await recover_missed_alert_subscriptions()
 
 
 def _acquire_scheduler_lock() -> bool:
@@ -234,6 +333,19 @@ def start_scheduler() -> bool:
         ),
         name="策略选股",
         max_instances=1,
+    )
+    scheduler.add_job(
+        id="run_post_close_alerts",
+        func="app.jobs.tasks.alert_subscription_task:run",
+        trigger=CronTrigger(
+            hour=RUN_POST_CLOSE_ALERTS_TIME.hour,
+            minute=RUN_POST_CLOSE_ALERTS_TIME.minute,
+            day_of_week="mon-fri",
+        ),
+        name="告警订阅盘后检查",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
     )
     scheduler.add_job(
         id="cleanup_old_data",

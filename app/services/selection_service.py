@@ -1,22 +1,24 @@
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.date_utils import trade_date_dt_param
-from core.providers.market_data_provider import MarketDataProvider
+from app.services.screener_adapter import (
+    definition_to_filters,
+    get_resolved_predicates,
+    normalize_saved_screener_payload,
+)
+from app.services.screener_registry import get_filter_fields, get_registry_version, get_templates
+from app.services.screener_runtime import BaselineSQLScreenerRuntime, evaluate_technical_rules
 
 
 class SelectionService:
-    """Unified selection service with optional provider support.
+    """Unified selection service backed by the canonical saved-screener adapter."""
 
-    If provider is supplied, screening uses MarketDataProvider;
-    otherwise falls back to direct SQL queries.
-    """
-
-    def __init__(self, db: AsyncSession | None = None, provider: MarketDataProvider | None = None):
+    def __init__(self, db: AsyncSession | None = None):
         self.db = db
-        self.provider = provider
 
     @staticmethod
     def get_conditions() -> dict[str, Any]:
@@ -29,149 +31,14 @@ class SelectionService:
     @classmethod
     def get_screening_metadata(cls) -> dict[str, Any]:
         payload = cls.get_conditions()
-        payload["filter_fields"] = [
-            {
-                "key": "priceMin",
-                "label": "最低价格",
-                "value_type": "number",
-                "operators": [">="],
-            },
-            {
-                "key": "priceMax",
-                "label": "最高价格",
-                "value_type": "number",
-                "operators": ["<="],
-            },
-            {
-                "key": "changeMin",
-                "label": "最小涨跌幅",
-                "value_type": "number",
-                "operators": [">="],
-            },
-            {
-                "key": "changeMax",
-                "label": "最大涨跌幅",
-                "value_type": "number",
-                "operators": ["<="],
-            },
-            {
-                "key": "market",
-                "label": "市场范围",
-                "value_type": "enum",
-                "operators": ["="],
-            },
-            # Technical indicators
-            {
-                "key": "rsiMin",
-                "label": "RSI 下限",
-                "value_type": "number",
-                "operators": [">="],
-                "description": "RSI 指标最小值 (0-100)",
-            },
-            {
-                "key": "rsiMax",
-                "label": "RSI 上限",
-                "value_type": "number",
-                "operators": ["<="],
-                "description": "RSI 指标最大值 (0-100)",
-            },
-            {
-                "key": "macdBullish",
-                "label": "MACD 看涨",
-                "value_type": "boolean",
-                "operators": ["="],
-                "description": "是否要求 MACD 金叉/柱状图为正",
-            },
-            {
-                "key": "macdBearish",
-                "label": "MACD 看跌",
-                "value_type": "boolean",
-                "operators": ["="],
-                "description": "是否要求 MACD 死叉/柱状图为负",
-            },
-            {
-                "key": "pattern",
-                "label": "形态筛选",
-                "value_type": "enum",
-                "operators": ["="],
-                "description": "形态类型（如 HAMMER、HEAD_SHOULDERS、INVERSE_HEAD_SHOULDERS）",
-            },
-        ]
+        payload["registry_version"] = get_registry_version()
+        payload["filter_fields"] = get_filter_fields()
         return payload
 
     @staticmethod
     def get_templates() -> list[dict[str, Any]]:
         """Return predefined screening condition templates."""
-        return [
-            {
-                "id": "low-psi-oversold",
-                "name": "低位反弹",
-                "description": "价格低位 + RSI 超卖 + MACD 转多头",
-                "icon": "📈",
-                "filters": {
-                    "priceMin": 2.0,
-                    "priceMax": 15.0,
-                    "rsiMin": 0,
-                    "rsiMax": 30,
-                    "macdBullish": True,
-                },
-            },
-            {
-                "id": "strong-breakout",
-                "name": "强势突破",
-                "description": "价格突破 + 量增 + RSI 强势",
-                "icon": "🚀",
-                "filters": {
-                    "priceMin": 5.0,
-                    "changeMin": 5.0,
-                    "rsiMin": 50,
-                    "rsiMax": 80,
-                },
-            },
-            {
-                "id": "high-quality-blue",
-                "name": "优质蓝筹",
-                "description": "低估值 + 价格稳定 + 市场龙头",
-                "icon": "🏦",
-                "filters": {
-                    "priceMin": 5.0,
-                    "priceMax": 20.0,
-                    "changeMin": -2.0,
-                    "changeMax": 3.0,
-                },
-            },
-            {
-                "id": "speculative-momentum",
-                "name": "题材 momentum",
-                "description": "中小盘 + 活跃 + 涨跌波动大",
-                "icon": "🔥",
-                "filters": {
-                    "priceMin": 3.0,
-                    "priceMax": 30.0,
-                    "changeMin": -5.0,
-                    "changeMax": 10.0,
-                },
-            },
-            {
-                "id": "macd-golden-cross",
-                "name": "MACD 金叉池",
-                "description": "仅筛选 MACD 看涨信号",
-                "icon": "✨",
-                "filters": {
-                    "macdBullish": True,
-                },
-            },
-            {
-                "id": "rsi-neutral",
-                "name": "RSI 中性区间",
-                "description": "排除超买超卖，寻找正常波动股",
-                "icon": "🎯",
-                "filters": {
-                    "rsiMin": 30,
-                    "rsiMax": 70,
-                },
-            },
-        ]
+        return get_templates()
 
     @staticmethod
     def _normalize_pattern_filters(conditions: dict[str, Any]) -> list[str]:
@@ -186,86 +53,14 @@ class SelectionService:
 
     @staticmethod
     def _normalize_saved_condition_params(params: Any) -> dict[str, Any]:
+        if isinstance(params, dict) and params.get("kind") == "saved_screener":
+            return definition_to_filters(params)
         if not isinstance(params, dict):
             return {}
         nested_filters = params.get("filters")
         if isinstance(nested_filters, dict):
             params = nested_filters
         return {key: value for key, value in params.items() if value is not None}
-
-    @staticmethod
-    def _normalize_indicator_key(name: Any) -> str:
-        return "".join(char for char in str(name or "").lower() if char.isalnum())
-
-    @staticmethod
-    def _coerce_indicator_scalar(value: Any) -> float | None:
-        if value is None:
-            return None
-        if hasattr(value, "iloc"):
-            if len(value) == 0:  # type: ignore[arg-type]
-                return None
-            value = value.iloc[-1]
-        elif isinstance(value, (list, tuple)):
-            if not value:
-                return None
-            value = value[-1]
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def _normalize_provider_indicator_payload(self, raw: Any) -> dict[str, float | None]:
-        indicator_map: dict[str, float | None] = {}
-
-        if raw is None:
-            return indicator_map
-
-        if isinstance(raw, dict):
-            for key, value in raw.items():
-                normalized_key = self._normalize_indicator_key(key)
-                indicator_map[normalized_key] = self._coerce_indicator_scalar(value)
-            return indicator_map
-
-        if hasattr(raw, "empty"):
-            if raw.empty:
-                return indicator_map
-            row = raw.iloc[-1].to_dict()
-            for key, value in row.items():
-                normalized_key = self._normalize_indicator_key(key)
-                indicator_map[normalized_key] = self._coerce_indicator_scalar(value)
-        return indicator_map
-
-    async def _load_provider_indicator_rows(
-        self,
-        codes: list[str],
-        target_date,
-    ) -> list[dict[str, Any]]:
-        if not self.provider or not codes:
-            return []
-
-        indicator_rows: list[dict[str, Any]] = []
-        requested_indicators = ["RSI14", "RSI", "MACD", "MACD_SIGNAL"]
-
-        for code in codes:
-            raw_payload = await self.provider.get_technicals(
-                code=code,
-                indicators=requested_indicators,
-                start_date=target_date,
-                end_date=target_date,
-            )
-            indicator_map = self._normalize_provider_indicator_payload(raw_payload)
-            if not indicator_map:
-                continue
-            indicator_rows.append(
-                {
-                    "code": code,
-                    "rsi": indicator_map.get("rsi14", indicator_map.get("rsi")),
-                    "macd": indicator_map.get("macd"),
-                    "macd_signal": indicator_map.get("macdsignal"),
-                }
-            )
-
-        return indicator_rows
 
     async def _load_pattern_hits(
         self, trade_date: str, ts_codes: list[str], pattern_names: list[str] | None = None
@@ -378,7 +173,7 @@ class SelectionService:
         row: dict[str, Any],
         pattern_hits: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        pct = float(row["pct_chg"] or 0)
+        pct = float(row.get("pct_chg", row.get("change_rate")) or 0)
         amount = float(row["amount"] or 0)
         close = float(row["close"] or 0)
         market_value = "sh" if str(row["ts_code"]).endswith(".SH") else "sz"
@@ -569,6 +364,44 @@ class SelectionService:
             if matched:
                 summary_parts.append("MACD bearish")
 
+        boll_upper = row.get("boll_upper")
+        if boll_upper is not None and conditions.get("bollCloseAboveUpper"):
+            matched = close > float(boll_upper)
+            evidence.append(
+                {
+                    "key": "boll_upper",
+                    "label": "BOLL upper",
+                    "value": round(close, 4),
+                    "operator": ">",
+                    "condition": round(float(boll_upper), 4),
+                    "matched": matched,
+                    "condition_id": "boll_close_above_upper",
+                    "condition_name": "收盘价高于布林上轨",
+                    "description": "收盘价突破布林带上轨",
+                }
+            )
+            if matched:
+                summary_parts.append("Close > BOLL upper")
+
+        boll_lower = row.get("boll_lower")
+        if boll_lower is not None and conditions.get("bollCloseBelowLower"):
+            matched = close < float(boll_lower)
+            evidence.append(
+                {
+                    "key": "boll_lower",
+                    "label": "BOLL lower",
+                    "value": round(close, 4),
+                    "operator": "<",
+                    "condition": round(float(boll_lower), 4),
+                    "matched": matched,
+                    "condition_id": "boll_close_below_lower",
+                    "condition_name": "收盘价低于布林下轨",
+                    "description": "收盘价跌破布林带下轨",
+                }
+            )
+            if matched:
+                summary_parts.append("Close < BOLL lower")
+
         if summary_parts:
             summary = "; ".join(summary_parts[:3])
         else:
@@ -596,29 +429,191 @@ class SelectionService:
 
         return {"summary": summary, "evidence": evidence}
 
-    async def run_selection(
-        self, conditions: dict[str, Any], date: str | None, limit: int = 300
-    ) -> list[dict]:
-        pattern_names = self._normalize_pattern_filters(conditions)
+    @staticmethod
+    def _merge_reason_components(
+        row: dict[str, Any],
+        base_reason: dict[str, Any],
+        technical_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        summary_parts: list[str] = []
+        base_summary = str(base_reason.get("summary") or "").strip()
+        if base_summary and not base_summary.startswith("Included in latest screening universe"):
+            summary_parts.extend([part.strip() for part in base_summary.split(";") if part.strip()])
+        summary_parts.extend(technical_result.get("summary_parts") or [])
 
-        if pattern_names:
-            return await self._run_selection_with_sql(conditions, date, limit)
+        evidence = list(base_reason.get("evidence") or [])
+        evidence.extend(technical_result.get("evidence") or [])
 
-        # If provider is available, delegate to provider-based implementation
-        if self.provider:
-            try:
-                results = await self._run_selection_with_provider(conditions, date, limit)
-                if results:
-                    return results
-            except Exception as exc:
-                import logging
+        if summary_parts:
+            summary = "; ".join(summary_parts[:3])
+        else:
+            pct = float(row.get("pct_chg", row.get("change_rate")) or 0)
+            summary = f"Included in latest screening universe with daily change {pct:.2f}%"
+            if not evidence:
+                evidence = [
+                    {
+                        "key": "close",
+                        "label": "Close",
+                        "value": round(float(row["close"] or 0), 4),
+                        "matched": True,
+                    },
+                    {
+                        "key": "change_rate",
+                        "label": "Daily change",
+                        "value": round(pct, 4),
+                        "matched": True,
+                    },
+                    {
+                        "key": "amount",
+                        "label": "Turnover",
+                        "value": round(float(row["amount"] or 0), 4),
+                        "matched": True,
+                    },
+                ]
 
-                logging.getLogger(__name__).warning(
-                    "Provider-based selection failed, falling back to SQL: %s", exc
+        return {"summary": summary, "evidence": evidence}
+
+    @staticmethod
+    def _is_saved_screener_definition(payload: Any) -> bool:
+        return isinstance(payload, dict) and payload.get("kind") == "saved_screener"
+
+    @staticmethod
+    def _definition_requires_baseline_sql_runtime(definition: dict[str, Any]) -> bool:
+        for predicate in get_resolved_predicates(definition):
+            rule_key = predicate["rule_key"]
+            params = predicate["params"]
+            if rule_key in {"bollCloseAboveUpper", "bollCloseBelowLower"}:
+                return True
+            if rule_key in {"rsiMin", "rsiMax"} and int(params.get("period", 14)) != 14:
+                return True
+            if rule_key in {"macdBullish", "macdBearish"} and any(
+                int(params.get(key, default)) != default
+                for key, default in (
+                    ("fast_period", 12),
+                    ("slow_period", 26),
+                    ("signal_period", 9),
                 )
+            ):
+                return True
+        return False
 
-        # SQL-based implementation (default fallback)
-        return await self._run_selection_with_sql(conditions, date, limit)
+    async def _load_daily_bar_history(
+        self,
+        ts_codes: list[str],
+        trade_date: str,
+        lookback_bars: int,
+    ) -> dict[str, list[dict[str, Any]]]:
+        if not self.db or not ts_codes:
+            return {}
+
+        target_date_dt = trade_date_dt_param(trade_date)
+        if target_date_dt is None:
+            return {}
+
+        start_date_dt = target_date_dt - timedelta(days=max(lookback_bars * 4, 30))
+        params: dict[str, Any] = {
+            "trade_date": trade_date,
+            "trade_date_dt": target_date_dt,
+            "start_date": start_date_dt.strftime("%Y%m%d"),
+            "start_date_dt": start_date_dt,
+        }
+
+        ts_placeholders: list[str] = []
+        for index, ts_code in enumerate(ts_codes):
+            key = f"history_ts_code_{index}"
+            ts_placeholders.append(f":{key}")
+            params[key] = ts_code
+
+        query = text(f"""
+            SELECT ts_code, trade_date, trade_date_dt, close, high, low
+            FROM daily_bars
+            WHERE ts_code IN ({', '.join(ts_placeholders)})
+              AND (
+                (trade_date_dt BETWEEN :start_date_dt AND :trade_date_dt)
+                OR (trade_date_dt IS NULL AND trade_date BETWEEN :start_date AND :trade_date)
+              )
+            ORDER BY ts_code ASC,
+                     CASE WHEN trade_date_dt IS NULL THEN 1 ELSE 0 END,
+                     trade_date_dt ASC,
+                     trade_date ASC
+            """)
+        rows = (await self.db.execute(query, params)).mappings().all()
+        history: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            history.setdefault(str(row["ts_code"]), []).append(dict(row))
+        return history
+
+    async def _run_selection_with_runtime_plan(
+        self,
+        plan: dict[str, Any],
+        trade_date: str,
+        limit: int = 300,
+    ) -> list[dict[str, Any]]:
+        if not plan.get("technical_rules"):
+            return await self._run_selection_with_sql(plan["basic_filters"], trade_date, limit)
+
+        base_filters = dict(plan["basic_filters"])
+        candidate_limit = min(max(limit * 5, limit), 2000)
+        rows = await self._run_selection_with_sql(base_filters, trade_date, candidate_limit)
+        if not rows:
+            return []
+
+        ts_codes = [str(row["ts_code"]) for row in rows if row.get("ts_code")]
+        history = await self._load_daily_bar_history(
+            ts_codes, trade_date, int(plan["lookback_bars"])
+        )
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            ts_code = str(row["ts_code"])
+            technical_result = evaluate_technical_rules(plan, history.get(ts_code, []))
+            if not technical_result["matched"]:
+                continue
+            base_reason = row.get("reason") or self._build_reason(dict(base_filters), dict(row))
+            reason = self._merge_reason_components(dict(row), base_reason, technical_result)
+            row["reason_summary"] = reason["summary"]
+            row["evidence"] = reason["evidence"]
+            row["reason"] = reason
+            results.append(row)
+            if len(results) >= limit:
+                break
+
+        return results
+
+    async def run_selection(
+        self,
+        conditions: dict[str, Any] | None,
+        date: str | None,
+        limit: int = 300,
+        definition: dict[str, Any] | None = None,
+    ) -> list[dict]:
+        if definition is None and self._is_saved_screener_definition(conditions):
+            definition = dict(conditions or {})
+            conditions = definition_to_filters(definition)
+
+        if definition is None:
+            definition, conditions, _ = normalize_saved_screener_payload(
+                params=conditions or {},
+            )
+        else:
+            definition, conditions, _ = normalize_saved_screener_payload(
+                params=conditions or {},
+                definition=definition,
+            )
+
+        if not self.db:
+            return []
+
+        trade_date = await self._resolve_trade_date(date)
+        if not trade_date:
+            return []
+
+        runtime = BaselineSQLScreenerRuntime(self.db)
+        return await runtime.run(
+            definition=definition,
+            trade_date=trade_date,
+            limit=limit,
+            reason_builder=self._build_reason,
+        )
 
     async def _run_selection_with_sql(
         self, conditions: dict[str, Any], date: str | None, limit: int = 300
@@ -841,8 +836,16 @@ class SelectionService:
         total_hits = 0
 
         for condition in conditions:
+            definition = (
+                condition.params if self._is_saved_screener_definition(condition.params) else None
+            )
             filters = self._normalize_saved_condition_params(condition.params)
-            hits = await self._run_selection_with_sql(filters, trade_date, limit=1000)
+            hits = await self.run_selection(
+                filters,
+                trade_date,
+                limit=1000,
+                definition=definition,
+            )
             total_hits += len(hits)
             items.append(
                 {
@@ -988,207 +991,3 @@ class SelectionService:
             )
 
         return comparison_items
-
-    async def _run_selection_with_provider(
-        self, conditions: dict[str, Any], date: str | None, limit: int = 300
-    ) -> list[dict]:
-        """Execute screening using MarketDataProvider.
-
-        Falls back to SQL if provider is not available or returns empty.
-        """
-        if not self.provider:
-            return []
-
-        import logging
-        from datetime import date as date_cls
-
-        import pandas as pd
-
-        logger = logging.getLogger(__name__)
-
-        price_min = conditions.get("priceMin")
-        price_max = conditions.get("priceMax")
-        change_min = conditions.get("changeMin")
-        change_max = conditions.get("changeMax")
-        market = conditions.get("market")
-        rsi_min = conditions.get("rsiMin")
-        rsi_max = conditions.get("rsiMax")
-        macd_bullish = conditions.get("macdBullish", False)
-        macd_bearish = conditions.get("macdBearish", False)
-
-        # Resolve target date
-        if date:
-            target_date = date_cls.fromisoformat(date)
-        else:
-            target_date = await self.provider.get_latest_trade_date()
-
-        # Get stock list (with market filter)
-        markets_map = {
-            "sh": ["沪市"],
-            "sz": ["深市"],
-            "创业板": ["创业板"],
-            "科创板": ["科创板"],
-        }
-        market_filters = markets_map.get(market) if market else None
-        stock_list_df = await self.provider.get_stock_list(
-            markets=market_filters,
-            active_only=True,
-        )
-        if stock_list_df.empty:
-            return []
-
-        codes = stock_list_df["code"].tolist()
-
-        # Get daily bars
-        bars_df = await self.provider.get_daily_bars(
-            codes=codes,
-            start_date=target_date,
-            end_date=target_date,
-            adjusted=True,
-        )
-        if bars_df.empty:
-            return []
-
-        # Apply price/change filters
-        filtered = bars_df.copy()
-        if price_min is not None:
-            filtered = filtered[filtered["close"] >= price_min]
-        if price_max is not None:
-            filtered = filtered[filtered["close"] <= price_max]
-        if change_min is not None:
-            filtered = filtered[filtered["pct_chg"] >= change_min]
-        if change_max is not None:
-            filtered = filtered[filtered["pct_chg"] <= change_max]
-
-        if filtered.empty:
-            return []
-
-        # If no indicator filters needed, return basic results
-        if not (rsi_min or rsi_max or macd_bullish or macd_bearish):
-            return self._format_provider_results(filtered, conditions, target_date, limit)
-
-        # Get technical indicators for filtered stocks
-        try:
-            final_codes = filtered["code"].dropna().astype(str).unique().tolist()
-            indicator_rows = await self._load_provider_indicator_rows(final_codes, target_date)
-            if not indicator_rows:
-                raise RuntimeError("provider technical indicators unavailable")
-
-            technicals_df = pd.DataFrame(indicator_rows)
-            merged = filtered.merge(
-                technicals_df[["code", "rsi", "macd", "macd_signal"]],
-                on="code",
-                how="left",
-            )
-            if rsi_min is not None:
-                merged = merged[(merged["rsi"].notna()) & (merged["rsi"] >= rsi_min)]
-            if rsi_max is not None:
-                merged = merged[(merged["rsi"].notna()) & (merged["rsi"] <= rsi_max)]
-            if macd_bullish:
-                merged = merged[
-                    (merged["macd"].notna())
-                    & (merged["macd_signal"].notna())
-                    & (merged["macd"] > merged["macd_signal"])
-                ]
-            if macd_bearish:
-                merged = merged[
-                    (merged["macd"].notna())
-                    & (merged["macd_signal"].notna())
-                    & (merged["macd"] < merged["macd_signal"])
-                ]
-            return self._format_provider_results(merged, conditions, target_date, limit)
-        except Exception as exc:
-            logger.warning("Indicator fetch via provider failed: %s", exc)
-            raise
-
-    def _format_provider_results(
-        self, df, conditions: dict[str, Any], trade_date, limit: int
-    ) -> list[dict]:
-        """Format provider DataFrame results into standard screening output."""
-        results = []
-        for _, row in df.head(limit).iterrows():
-            pct = float(row.get("pct_chg", 0))
-            close = float(row.get("close", 0))
-            amount = float(row.get("amount", 0))
-            ts_code = str(row.get("ts_code", row.get("code", "")))
-            code = str(row.get("code", ts_code.split(".")[0]))
-            stock_name = str(row.get("stock_name", row.get("name", "")))
-            date_str = str(trade_date).replace("-", "")
-
-            # Build evidence
-            evidence = []
-            if conditions.get("priceMin") is not None:
-                evidence.append(
-                    {
-                        "key": "close",
-                        "label": "Close",
-                        "value": close,
-                        "operator": ">=",
-                        "condition": float(conditions["priceMin"]),
-                        "matched": close >= float(conditions["priceMin"]),
-                    }
-                )
-            if conditions.get("priceMax") is not None:
-                evidence.append(
-                    {
-                        "key": "close",
-                        "label": "Close",
-                        "value": close,
-                        "operator": "<=",
-                        "condition": float(conditions["priceMax"]),
-                        "matched": close <= float(conditions["priceMax"]),
-                    }
-                )
-            if conditions.get("changeMin") is not None:
-                evidence.append(
-                    {
-                        "key": "change_rate",
-                        "label": "Daily change",
-                        "value": round(pct, 4),
-                        "operator": ">=",
-                        "condition": float(conditions["changeMin"]),
-                        "matched": pct >= float(conditions["changeMin"]),
-                    }
-                )
-            if conditions.get("changeMax") is not None:
-                evidence.append(
-                    {
-                        "key": "change_rate",
-                        "label": "Daily change",
-                        "value": round(pct, 4),
-                        "operator": "<=",
-                        "condition": float(conditions["changeMax"]),
-                        "matched": pct <= float(conditions["changeMax"]),
-                    }
-                )
-
-            if evidence:
-                summary = "; ".join(
-                    f"{e['label']} {e['operator']} {e['condition']}" for e in evidence
-                )
-            else:
-                summary = f"Included in screening (pct_chg={pct:.2f}%)"
-
-            score = round(pct * 5 + min(amount / 1e8, 20), 4)
-            signal = "buy" if pct >= 2 else ("sell" if pct <= -2 else "hold")
-
-            results.append(
-                {
-                    "ts_code": ts_code,
-                    "code": code,
-                    "stock_name": stock_name,
-                    "score": score,
-                    "signal": signal,
-                    "trade_date": date_str,
-                    "date": date_str,
-                    "close": close,
-                    "change_rate": pct,
-                    "amount": amount,
-                    "reason_summary": summary,
-                    "evidence": evidence,
-                    "reason": {"summary": summary, "evidence": evidence},
-                }
-            )
-
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results

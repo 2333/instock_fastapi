@@ -1,9 +1,14 @@
 # M0 Rebaseline 跟踪板
 
-> 版本: 2026-04-06
-> 主分支策略: 只在 `rebaseline/m0-cleanup` 推进
-> 状态流转: `todo` -> `in_progress` -> `review` -> `done`
-> 阻塞态: `blocked`
+> 历史说明: 本文档记录的是 2026-04-06 ~ 2026-04-07 的 `M0 rebaseline` 治理过程，不再代表当前开发阶段的实时状态板。
+>
+> 当前使用约定:
+> - 如果要判断当前主路线推进到哪里，以 `docs/EXECUTION_PLAN.md` 为准
+> - 文中关于 “`M1` 未启动” 的表述，仅适用于当时的 rebaseline 治理窗口，不适用于当前仓库状态
+>
+> 状态: 历史治理跟踪板
+> 原状态流转: `todo` -> `in_progress` -> `review` -> `done`
+> 原阻塞态: `blocked`
 
 ---
 

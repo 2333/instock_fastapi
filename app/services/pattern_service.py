@@ -3,12 +3,22 @@ import math
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.date_utils import trade_date_dt_param
+from app.services.date_utils import parse_trade_date, trade_date_dt_param
 
 
 class PatternService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _normalize_trade_date_filter(value: str | None) -> str | None:
+        parsed = parse_trade_date(value)
+        if parsed is not None:
+            return parsed.strftime("%Y%m%d")
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     async def get_latest_trade_date(self) -> str | None:
         query = text("""
@@ -29,14 +39,20 @@ class PatternService:
     ) -> list[dict]:
         conditions = ["s.symbol = :code"]
         params: dict = {"code": code, "limit": limit}
+        normalized_start_date = self._normalize_trade_date_filter(start_date)
+        normalized_end_date = self._normalize_trade_date_filter(end_date)
 
-        if start_date:
-            conditions.append("(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))")
-            params["start_date"] = start_date
+        if normalized_start_date:
+            conditions.append(
+                "(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))"
+            )
+            params["start_date"] = normalized_start_date
             params["start_date_dt"] = trade_date_dt_param(start_date)
-        if end_date:
-            conditions.append("(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))")
-            params["end_date"] = end_date
+        if normalized_end_date:
+            conditions.append(
+                "(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))"
+            )
+            params["end_date"] = normalized_end_date
             params["end_date_dt"] = trade_date_dt_param(end_date)
 
         query = text(f"""
@@ -87,14 +103,20 @@ class PatternService:
     ) -> list[dict]:
         conditions = ["1=1"]
         params: dict = {"limit": limit, "min_confidence": min_confidence}
+        normalized_start_date = self._normalize_trade_date_filter(start_date)
+        normalized_end_date = self._normalize_trade_date_filter(end_date)
 
-        if start_date:
-            conditions.append("(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))")
-            params["start_date"] = start_date
+        if normalized_start_date:
+            conditions.append(
+                "(p.trade_date_dt >= :start_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date >= :start_date))"
+            )
+            params["start_date"] = normalized_start_date
             params["start_date_dt"] = trade_date_dt_param(start_date)
-        if end_date:
-            conditions.append("(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))")
-            params["end_date"] = end_date
+        if normalized_end_date:
+            conditions.append(
+                "(p.trade_date_dt <= :end_date_dt OR (p.trade_date_dt IS NULL AND p.trade_date <= :end_date))"
+            )
+            params["end_date"] = normalized_end_date
             params["end_date_dt"] = trade_date_dt_param(end_date)
         conditions.append("COALESCE(p.confidence, 0) >= :min_confidence")
 
@@ -168,6 +190,7 @@ class PatternService:
         boll_std: float,
     ) -> dict:
         max_period = max(ema_fast, ema_slow, boll_period)
+        normalized_trade_date = self._normalize_trade_date_filter(trade_date) or trade_date
         bars_query = text("""
             SELECT trade_date, close
             FROM daily_bars
@@ -183,7 +206,7 @@ class PatternService:
             bars_query,
             {
                 "ts_code": ts_code,
-                "trade_date": trade_date,
+                "trade_date": normalized_trade_date,
                 "trade_date_dt": trade_date_dt_param(trade_date),
                 "limit": max_period + 30,
             },

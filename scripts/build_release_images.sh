@@ -7,7 +7,13 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-CURRENT_VERSION="$(python3 scripts/release_version.py check)"
+PYTHON_BIN="${PYTHON_BIN:-.venv/bin/python}"
+if [ ! -x "$PYTHON_BIN" ]; then
+  echo "Python runtime for release tooling was not found: $PYTHON_BIN" >&2
+  exit 1
+fi
+
+CURRENT_VERSION="$("$PYTHON_BIN" scripts/release_version.py check)"
 if [ "$VERSION" != "$CURRENT_VERSION" ]; then
   echo "VERSION=$VERSION does not match repository version $CURRENT_VERSION. Run scripts/release_version.py set $VERSION first." >&2
   exit 1

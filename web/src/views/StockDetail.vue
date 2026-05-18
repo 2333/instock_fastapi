@@ -300,6 +300,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { attentionApi, patternApi, stockApi } from '@/api'
 import KLineChart from '@/components/charts/KLineChart.vue'
 import TradingViewWidget from '@/components/charts/TradingViewWidget.vue'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { useLocale } from '@/composables/useLocale'
 import { getPatternLabel as resolvePatternLabel } from '@/utils/patternLabels'
 
@@ -353,6 +354,7 @@ interface ValidationItem {
 const route = useRoute()
 const router = useRouter()
 const { locale, t } = useLocale()
+const { trackAttentionAction, trackPatternView } = useAnalytics()
 const loading = ref(false)
 const inWatchlist = ref(false)
 const activeChartMode = ref<'native' | 'tradingview'>('native')
@@ -662,6 +664,7 @@ const handleAdjustChange = (adjust: string) => {
 }
 
 const addToWatchlist = async () => {
+  const action = inWatchlist.value ? 'remove' : 'add'
   try {
     if (inWatchlist.value) {
       await attentionApi.remove(code.value)
@@ -669,6 +672,11 @@ const addToWatchlist = async () => {
       await attentionApi.add(code.value)
     }
     inWatchlist.value = !inWatchlist.value
+    trackAttentionAction({
+      action,
+      stockCode: code.value,
+      source: 'stock_detail',
+    })
     showNotification?.('success', inWatchlist.value ? '已添加到关注列表' : '已取消关注')
   } catch (error) {
     console.error('Failed to update watchlist:', error)
@@ -686,6 +694,13 @@ const analyzePatterns = () => {
 const openPatternDetail = (pattern: PatternDetail) => {
   selectedPattern.value = pattern
   showPatternDetail.value = true
+  trackPatternView({
+    stockCode: stockInfo.value?.code || code.value,
+    patternName: pattern.pattern_name,
+    patternType: pattern.pattern_type,
+    confidence: pattern.confidence,
+    tradeDate: pattern.trade_date,
+  })
 }
 
 const closePatternDetail = () => {

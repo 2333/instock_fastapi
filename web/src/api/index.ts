@@ -10,6 +10,11 @@ const api = axios.create({
   timeout: 20000,
 })
 
+interface ApiRequestFlags {
+  __silent?: boolean
+  __skipAuthRedirect?: boolean
+}
+
 const isAuthenticated = ref(!!localStorage.getItem(TOKEN_KEY))
 let refreshPromise: Promise<{ access_token: string; refresh_token: string }> | null = null
 
@@ -54,9 +59,15 @@ api.interceptors.response.use(
   (response) => response.data,
   async (error) => {
     const status = error.response?.status
-    const originalRequest = error.config as any
+    const originalRequest = (error.config || {}) as any & ApiRequestFlags
+    const isSilent = Boolean(originalRequest.__silent)
+    const skipAuthRedirect = Boolean(originalRequest.__skipAuthRedirect)
 
     if (status === 401) {
+      if (skipAuthRedirect) {
+        return Promise.reject(error)
+      }
+
       // refresh 请求本身失败时，不再重试，直接登出
       if (originalRequest?.url?.includes('/auth/refresh') || originalRequest?._retry) {
         localStorage.removeItem(TOKEN_KEY)
@@ -101,7 +112,9 @@ api.interceptors.response.use(
       }
     }
 
-    console.error('API Error:', error)
+    if (!isSilent) {
+      console.error('API Error:', error)
+    }
     return Promise.reject(error)
   }
 )
@@ -202,10 +215,24 @@ export const selectionApi = {
 
   getMyConditions: () => api.get('/selection/my-conditions') as Promise<any>,
 
-  createCondition: (condition: { name: string; category: string; description?: string; params?: Record<string, any>; is_active?: boolean }) =>
+  createCondition: (condition: {
+    name: string
+    category: string
+    description?: string
+    params?: Record<string, any>
+    definition?: Record<string, unknown>
+    is_active?: boolean
+  }) =>
     api.post('/selection/my-conditions', condition) as Promise<any>,
 
-  updateCondition: (id: number, condition: Partial<{ name: string; category: string; description: string; params: Record<string, any>; is_active: boolean }>) =>
+  updateCondition: (id: number, condition: Partial<{
+    name: string
+    category: string
+    description: string
+    params: Record<string, any>
+    definition: Record<string, unknown>
+    is_active: boolean
+  }>) =>
     api.put(`/selection/my-conditions/${id}`, condition) as Promise<any>,
 
   deleteCondition: (id: number) => api.delete(`/selection/my-conditions/${id}`) as Promise<any>,
@@ -220,7 +247,11 @@ export const selectionApi = {
   getTodaySummary: (params?: { date?: string; limit?: number }) =>
     api.get('/selection/today-summary', { params }) as Promise<any>,
 
-  runScreening: (payload: { filters?: Record<string, unknown>; scope?: Record<string, unknown> }) =>
+  runScreening: (payload: {
+    filters?: Record<string, unknown>
+    definition?: Record<string, unknown>
+    scope?: Record<string, unknown>
+  }) =>
     api.post('/screening/run', payload) as Promise<any>,
 
   getScreeningHistory: (params?: { date?: string; limit?: number }) =>
@@ -228,6 +259,25 @@ export const selectionApi = {
 
   compareScreeningResults: (historyIds: string[]) =>
     api.post('/screening/compare', { history_ids: historyIds }) as Promise<any>,
+}
+
+export const alertSubscriptionApi = {
+  list: () => api.get('/alerts/subscriptions') as Promise<any>,
+
+  create: (payload: {
+    selection_condition_id: number
+    name?: string
+    schedule_type?: 'post_close'
+    cooldown_trade_days?: number
+  }) => api.post('/alerts/subscriptions', payload) as Promise<any>,
+
+  run: (subscriptionId: number, params?: { date?: string }) =>
+    api.post(`/alerts/subscriptions/${subscriptionId}/run`, null, { params }) as Promise<any>,
+
+  listNotifications: () => api.get('/notifications') as Promise<any>,
+
+  markNotificationRead: (notificationId: number, isRead = true) =>
+    api.patch(`/notifications/${notificationId}`, { is_read: isRead }) as Promise<any>,
 }
 
 export const fundFlowApi = {
@@ -271,6 +321,19 @@ export const attentionApi = {
     api.put(`/attention/${id}`, updates) as Promise<any>,
 
   remove: (code: string) => api.delete(`/attention/${code}`) as Promise<any>,
+}
+
+export const eventsApi = {
+  track: (payload: {
+    event_type: string
+    page: string
+    referrer?: string | null
+    event_data?: Record<string, unknown> | null
+  }) =>
+    api.post('/events/track', payload, {
+      __silent: true,
+      __skipAuthRedirect: true,
+    } as any) as Promise<{ accepted: boolean; persisted?: boolean }>,
 }
 
 export default api

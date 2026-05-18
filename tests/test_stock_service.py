@@ -1,3 +1,4 @@
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -35,6 +36,9 @@ async def test_resolve_trade_date_handles_target_date_and_empty_result():
 
     assert resolved == "20240103"
     assert latest is None
+    _, params = db.execute.await_args_list[0].args
+    assert params["target_date"] == "20240105"
+    assert params["target_date_dt"] == date(2024, 1, 5)
 
 
 def test_normalize_date_and_parse_adjust():
@@ -61,6 +65,9 @@ async def test_get_stocks_with_total_uses_resolved_date_and_returns_data():
     assert rows == [{"code": "000001"}]
     assert total == 2
     service.get_stocks.assert_awaited_once_with("20240102", 1, 20)
+    _, params = db.execute.await_args.args
+    assert params["date"] == "20240102"
+    assert params["date_dt"] == date(2024, 1, 2)
 
 
 @pytest.mark.asyncio

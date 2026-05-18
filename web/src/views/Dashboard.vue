@@ -32,7 +32,7 @@
             <h2>盘后市场概览</h2>
             <span v-if="marketSummary.tradeDate" class="card-date" title="行情数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}">数据日期：{{ formatTradeDate(marketSummary.tradeDate) }}</span>
           </div>
-          <router-link to="/stocks" class="card-link">查看股票列表</router-link>
+          <router-link to="/stocks" class="card-link" @click="handleWorkbenchLink('market', '/stocks')">查看股票列表</router-link>
         </div>
 
         <div class="metric-strip metric-strip--market">
@@ -111,7 +111,7 @@
           </div>
           <div class="card-meta">
             <span :class="['freshness-dot', freshnessClass]" title="数据新鲜度"></span>
-            <router-link to="/attention" class="card-link">管理关注</router-link>
+            <router-link to="/attention" class="card-link" @click="handleWorkbenchLink('attention', '/attention')">管理关注</router-link>
             <button
               v-if="attentionItems.length > 0"
               class="card-action-btn"
@@ -179,7 +179,7 @@
             <h2>已保存条件的命中概要</h2>
             <span v-if="todaySummary.tradeDate" class="card-date" title="筛选执行日期：{{ formatTradeDate(todaySummary.tradeDate) }}">数据日期：{{ formatTradeDate(todaySummary.tradeDate) }}</span>
           </div>
-          <router-link to="/selection" class="card-link">进入筛选页</router-link>
+          <router-link to="/selection" class="card-link" @click="handleWorkbenchLink('selection', '/selection')">进入筛选页</router-link>
         </div>
 
         <div class="metric-strip metric-strip--compact">
@@ -236,7 +236,7 @@
             <h2>最近回测与策略记录</h2>
             <span v-if="latestBacktest?.createdAt" class="card-date" title="回测完成时间：{{ formatDate(latestBacktest.createdAt) }}">最近回测：{{ formatDate(latestBacktest.createdAt) }}</span>
           </div>
-          <router-link to="/backtest" class="card-link">查看回测页</router-link>
+          <router-link to="/backtest" class="card-link" @click="handleWorkbenchLink('backtest', '/backtest')">查看回测页</router-link>
         </div>
 
         <div class="metric-strip metric-strip--compact">
@@ -296,8 +296,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { attentionApi, backtestApi, marketApi, selectionApi } from '@/api'
+import { useAnalytics } from '@/composables/useAnalytics'
 
 const router = useRouter()
+const { trackDashboardCardClick } = useAnalytics()
 
 interface AttentionEntry {
   code: string
@@ -754,6 +756,13 @@ const buildBacktestLink = (item: BacktestEntry) => ({
 
 const isAttentionTriggered = (code: string) => {
   return todaySummary.value.triggeredCodes.includes(code)
+}
+
+const handleWorkbenchLink = (
+  card: 'market' | 'attention' | 'selection' | 'backtest',
+  targetPath: string,
+) => {
+  trackDashboardCardClick({ card, targetPath })
 }
 
 function refreshWorkbench() {

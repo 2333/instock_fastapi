@@ -1,137 +1,154 @@
-# Phase 3 任务设计：P3-03 预警规则引擎 + 推送集成
+# Phase 3 任务设计：P3-03 参数化指标筛选与订阅提醒
+
+> Status: revised design input
+> Last updated: 2026-04-23
+> Role: design asset, not plan-of-record
+> Active execution entry: [docs/milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md](../m3/M3_P3-03_ALERT_ENGINE_PLAN.md)
 
 ## 目标
-基于用户关注列表与自定义条件，主动推送风险预警与机会提醒。
 
-## 设计原则
-- **实时性**：价格/指标变动达到阈值时及时通知
-- **可配置**：用户可自定义预警条件（价格、涨跌幅、RSI、形态等）
-- **多渠道**：支持应用内通知、邮件（后续扩展）
-- **防骚扰**：去重与冷却机制，避免重复推送
+面向不具备代码能力的普通用户，提供“模板化 + 可调参数”的指标筛选能力，并允许把已保存筛选器订阅为盘后提醒。
 
-## 数据源
+用户应当能够：
 
-### 已有数据
-- **关注列表**（Attention）：用户主动关注的股票
-- **用户行为**（P3-01）：筛选执行、回测、形态查看历史
-- **市场数据**：实时行情、技术指标（已接入）
+- 从模板开始，而不是从空白公式开始
+- 调整 `MACD`、`RSI`、`BOLL` 等指标参数
+- 在全市场运行筛选并查看命中原因
+- 保存筛选器并订阅为提醒
 
-### 预警条件类型
-| 类型 | 字段 | 示例 |
-|------|------|------|
-| 价格提醒 | price_above / price_below | 股价 > 30.0 或 < 25.0 |
-| 涨跌幅提醒 | change_above / change_below | 日涨跌幅 > 5% 或 < -3% |
-| RSI 超买超卖 | rsi_above / rsi_below | RSI > 70（超买）或 < 30（超卖） |
-| 形态出现 | pattern_detected | 出现锤子线/吞没等形态 |
-| 资金流向 | fund_net_inflow | 主力净流入 > X 万元 |
+## 核心设计原则
 
-## 预警规则模型
+- **普通用户优先**：不暴露脚本语言或公式编辑器
+- **参数化而非脚本化**：支持“自定义参数集”，不支持“自定义公式语言”
+- **单一 authored truth**：所有已保存定义都锚定到 `Saved Screener`
+- **引擎可替换**：执行引擎可以从当前 adapter 切到 `vbtpro`，但不改变用户已保存的 definition
+- **注册表驱动**：字段、参数、操作符、文案和支持矩阵统一由 `Registry` 输出
 
-### 数据库表（alert_conditions）
-```python
-class AlertCondition(Base):
-    __tablename__ = "alert_conditions"
+## Canonical Domain Model
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    code: Mapped[str] = mapped_column(String(20), nullable=False)  # 股票代码
-    condition_type: Mapped[str] = mapped_column(String(50), nullable=False)  # price/change/rsi/pattern/fund
-    operator: Mapped[str] = mapped_column(String(10), nullable=False)  # gt/lt/ge/le
-    threshold: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True)
-    pattern_name: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 形态专用
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notify_channels: Mapped[list[str]] = mapped_column(JSONB, default=["in_app"])  # in_app/email
-    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-```
+### 1. `Saved Screener`
 
-### 预警检查任务（定时）
-```python
-# app/jobs/tasks/alert_checker.py
-async def check_alerts():
-    """定时检查所有活跃预警条件（每 5 分钟）"""
-    # 1. 查询所有活跃预警
-    # 2. 批量获取关注股票最新行情/指标
-    # 3. 逐条判断是否触发
-    # 4. 触发则创建通知记录 + 更新 last_triggered_at
-    # 5. 推送至用户（应用内 / 邮件）
-```
+唯一 canonical truth source。
 
-## 推送机制
+保存内容包括：
 
-### 应用内通知
-```python
-class Notification(Base):
-    __tablename__ = "notifications"
+- `template_key`
+- `template_version`
+- `schema_version`
+- `scope`
+- `logic`
+- `blocks`
+- `params`
+- `definition_hash`
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    type: Mapped[str] = mapped_column(String(50), nullable=False)  # alert/backtest_done/pattern_detected
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # {code: "000001", condition: "price_above"}
-    read: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-```
+### 2. `Alert Subscription`
 
-### API 端点
-```python
-# app/api/routers/alert_router.py
-@router.get("/alerts/conditions")      # 列出我的预警条件
-@router.post("/alerts/conditions")     # 创建预警条件
-@router.put("/alerts/conditions/{id}") # 修改预警条件
-@router.delete("/alerts/conditions/{id}")  # 删除预警条件
-@router.get("/notifications")          # 获取通知列表
-@router.patch("/notifications/{id}/read")  # 标记已读
-```
+只绑定 `Saved Screener` 的不可变版本。
 
-## 前端集成
+负责：
 
-### 关注列表快速设置
-在 Attention 页面，每只股票旁添加"设置预警"按钮，快速创建价格/形态预警。
+- 调度频率
+- 冷却窗口
+- dedupe
+- 启停
+- 通知渠道
 
-### 预警管理页面
-新建 `/alerts` 页面：
-- 列出所有预警条件（启用/禁用开关）
-- 创建/编辑表单（类型 + 条件 + 通知渠道）
-- 历史触发记录
+### 3. `Registry`
 
-### 通知铃铛
-在顶部导航栏添加通知图标，显示未读数量，下拉列表展示最近通知。
+唯一字段目录，定义：
 
-## 冷启动策略
-- 默认为关注股票启用"价格突破/跌破最近 5 日高低点"预警（智能默认）
-- 新用户关注股票后自动建议 3 条常用预警
+- 可用模板
+- 可用指标
+- 参数 schema
+- 默认值
+- UI metadata
+- 允许的操作符/触发器
+- 当前 adapter 支持矩阵
 
-## 验收标准
-- [ ] 预警条件 CRUD 接口完成
-- [ ] 定时检查任务每 5 分钟运行（开发环境可手动触发）
-- [ ] 应用内通知可创建、可读、可标记已读
-- [ ] 关注列表快速设置入口就绪
-- [ ] 通知铃铛组件就绪（未读数 + 下拉列表）
-- [ ] 冷启动默认预警自动创建
+### 4. `Adapter`
 
-## 风险与缓解
-| 风险 | 影响 | 缓解 |
-|------|------|------|
-| 推送太频繁 | 骚扰用户 | 冷却机制（同条件 1 小时内不重复推送） |
-| 性能开销 | 大量用户检查慢 | 批量查询 + 条件索引 + 异步任务 |
-| 误触发 | 用户失去信任 | 价格阈值设置缓冲（如突破 5 日均线而非实时） |
-| 邮件 deliverability | 进入垃圾箱 | 使用专业邮件服务（SendGrid/Mailgun） |
+执行层，负责 compile / execute。
 
-## 依赖项
-- P3-01 用户行为数据（可选，用于推荐预警模板）
-- 消息队列（可选，Celery/Redis Queue，用于异步检查）
-- 邮件服务（可选，SendGrid/Mailgun）
+当前默认可用：
 
-## 估算
-- 后端：6 小时（模型 + 任务 + API）
-- 前端：5 小时（Alert 页面 + 快速设置 + 通知铃铛）
-- 总计：**2.75 人日 ≈ 3 人日**
+- `SQL + TA-Lib`
 
----
+未来可扩展：
 
-**状态**: 草案待评审
-**创建时间**: 2026-04-03
-**负责人**: TBD
+- `vbtpro`
+
+约束：
+
+- 持久化层禁止存储引擎专有语义
+- 不允许把 TA-Lib 函数名、SQL 片段或 `vbtpro` 表达式写入 canonical schema
+
+## 用户使用方式
+
+推荐的产品路径是：
+
+1. 选择市场范围
+2. 选择模板
+3. 微调参数
+4. 预览结果
+5. 保存为 `Saved Screener`
+6. 可选地创建 `Alert Subscription`
+
+示例：
+
+- `MACD 金叉`
+  - 参数：`fast / slow / signal / direction`
+- `RSI 超卖`
+  - 参数：`period / threshold / operator`
+- `BOLL 突破上轨`
+  - 参数：`period / stddev / trigger`
+
+## 数据模型建议
+
+### Near-term persistence
+
+优先复用现有保存筛选能力，逐步收敛到 canonical envelope：
+
+- `selection_conditions`：兼容期内可承载 `Saved Screener`
+- `screening_subscriptions`：新增，存提醒绑定
+- `screening_runs`：新增，存执行历史
+- `selection_results` 或增强版命中表：存 `Hit`
+- `notifications`：继续复用，作为投递结果
+
+### Compatibility / legacy
+
+以下对象不再作为 M3 长期真相源：
+
+- `attention.alert_conditions`
+- `alert_conditions(rule_type + threshold)`
+- free-form `selection_conditions.params`
+
+它们只能作为迁移输入或兼容期 wrapper。
+
+## 执行与扩展策略
+
+- 默认只支持 `1d` 日线
+- 默认只允许有限 `ALL / ANY` 结构和受控 clause 数量
+- 普通模式隐藏复杂参数，高级模式暴露参数微调
+- 同一 compiled definition 允许多个订阅共享执行结果
+- 通知以“新增命中摘要”为默认形式，避免噪声
+
+## Superseded Prototypes
+
+以下方案已明确降级，不应再被解读为 M3 目标：
+
+1. typed row model：
+   - `condition_type / operator / threshold / pattern_name / notify_channels`
+   - 定性：`prototype exploration`
+2. 单一 JSONB `condition`：
+   - 定性：`discarded prototype`
+3. `alert_conditions(rule_type + threshold)`：
+   - 定性：`legacy baseline / compatibility input`
+
+## M3 设计验收口径
+
+设计层只有在同时满足以下条件时才算稳定：
+
+- canonical model 明确为 `Saved Screener + Alert Subscription + Registry + Adapter`
+- 文档中不存在第二套 authored rule persistence
+- 明确禁止用户公式语言、脚本表达式和引擎绑定 schema
+- 明确写出 future `vbtpro` 只替换 adapter，不改变 authored schema

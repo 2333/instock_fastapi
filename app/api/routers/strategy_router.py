@@ -2,12 +2,15 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import delete as sqlalchemy_delete
 from sqlalchemy import select
+from sqlalchemy import update as sqlalchemy_update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.dependencies import get_current_user
 from app.database import get_db
-from app.models.stock_model import Strategy, User
+from app.models.stock_model import BacktestResult, Strategy, StrategyResult, User
 from app.schemas.strategy_schema import (
     StrategyResponse,
     StrategyResultResponse,
@@ -49,6 +52,31 @@ class StrategyListResponse(BaseModel):
     is_active: bool
 
 
+_STRATEGY_CORE_LOAD_FIELDS = (
+    Strategy.id,
+    Strategy.user_id,
+    Strategy.name,
+    Strategy.description,
+    Strategy.params,
+    Strategy.is_active,
+)
+_STRATEGY_CORE_REFRESH_FIELDS = [
+    "id",
+    "user_id",
+    "name",
+    "description",
+    "params",
+    "is_active",
+]
+
+
+def _strategy_core_stmt(*conditions):
+    stmt = select(Strategy).options(load_only(*_STRATEGY_CORE_LOAD_FIELDS))
+    if conditions:
+        stmt = stmt.where(*conditions)
+    return stmt
+
+
 def _normalize_strategy_params(
     params: dict[str, Any] | None, *, default_source: str | None = None
 ) -> dict[str, Any] | None:
@@ -81,7 +109,7 @@ async def get_my_strategies(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Strategy).where(Strategy.user_id == current_user.id)
+    stmt = _strategy_core_stmt(Strategy.user_id == current_user.id)
     result = await db.execute(stmt)
     return [_serialize_strategy(item) for item in result.scalars().all()]
 
@@ -92,7 +120,7 @@ async def create_strategy(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Strategy).where(
+    stmt = select(Strategy.id).where(
         Strategy.user_id == current_user.id, Strategy.name == strategy.name
     )
     result = await db.execute(stmt)
@@ -110,7 +138,7 @@ async def create_strategy(
     )
     db.add(new_strategy)
     await db.commit()
-    await db.refresh(new_strategy)
+    await db.refresh(new_strategy, attribute_names=_STRATEGY_CORE_REFRESH_FIELDS)
     return _serialize_strategy(new_strategy)
 
 
@@ -120,7 +148,7 @@ async def create_strategy_from_selection(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Strategy).where(
+    stmt = select(Strategy.id).where(
         Strategy.user_id == current_user.id, Strategy.name == payload.name
     )
     result = await db.execute(stmt)
@@ -139,7 +167,7 @@ async def create_strategy_from_selection(
     )
     db.add(new_strategy)
     await db.commit()
-    await db.refresh(new_strategy)
+    await db.refresh(new_strategy, attribute_names=_STRATEGY_CORE_REFRESH_FIELDS)
     return _serialize_strategy(new_strategy)
 
 
@@ -150,13 +178,22 @@ async def update_strategy(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Strategy).where(Strategy.id == strategy_id, Strategy.user_id == current_user.id)
+    stmt = _strategy_core_stmt(Strategy.id == strategy_id, Strategy.user_id == current_user.id)
     result = await db.execute(stmt)
     existing = result.scalar_one_or_none()
     if not existing:
         raise HTTPException(status_code=404, detail="策略不存在")
 
     if strategy.name is not None:
+        duplicate_stmt = select(Strategy.id).where(
+            Strategy.user_id == current_user.id,
+            Strategy.name == strategy.name,
+            Strategy.id != strategy_id,
+        )
+        duplicate_result = await db.execute(duplicate_stmt)
+        duplicate_id = duplicate_result.scalar_one_or_none()
+        if duplicate_id is not None:
+            raise HTTPException(status_code=400, detail="策略名称已存在")
         existing.name = strategy.name
     if strategy.description is not None:
         existing.description = strategy.description
@@ -166,7 +203,7 @@ async def update_strategy(
         existing.is_active = strategy.is_active
 
     await db.commit()
-    await db.refresh(existing)
+    await db.refresh(existing, attribute_names=_STRATEGY_CORE_REFRESH_FIELDS)
     return _serialize_strategy(existing)
 
 
@@ -176,13 +213,21 @@ async def delete_strategy(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Strategy).where(Strategy.id == strategy_id, Strategy.user_id == current_user.id)
+    stmt = _strategy_core_stmt(Strategy.id == strategy_id, Strategy.user_id == current_user.id)
     result = await db.execute(stmt)
     existing = result.scalar_one_or_none()
     if not existing:
         raise HTTPException(status_code=404, detail="策略不存在")
 
-    await db.delete(existing)
+    await db.execute(
+        sqlalchemy_delete(StrategyResult).where(StrategyResult.strategy_id == existing.id)
+    )
+    await db.execute(
+        sqlalchemy_update(BacktestResult)
+        .where(BacktestResult.strategy_id == existing.id)
+        .values(strategy_id=None)
+    )
+    await db.execute(sqlalchemy_delete(Strategy).where(Strategy.id == existing.id))
     await db.commit()
     return {"status": "success", "message": "策略已删除"}
 

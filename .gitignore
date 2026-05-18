@@ -71,3 +71,4 @@ web/node_modules/
 
 # Runtime logs
 memory/*.jsonl
+runtime/

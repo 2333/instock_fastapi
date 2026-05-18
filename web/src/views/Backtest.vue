@@ -578,6 +578,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { backtestApi, strategyApi } from '@/api'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
 echarts.use([
@@ -689,6 +690,7 @@ useResizeObserver(compareChartRef, () => compareChartInstance.value?.resize())
 const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info', message: string, title?: string) => void>('showNotification')
 const route = useRoute()
 const router = useRouter()
+const { trackBacktestRun } = useAnalytics()
 const { panelWidth: configPanelWidth, hydrateWidth: hydrateConfigWidth, startResize: startConfigResize } = useResizablePanel({
   panelRef: configPanelRef,
   storageKey: PANEL_WIDTH_KEY,
@@ -1139,6 +1141,13 @@ const resolveDateRange = () => {
   if (config.period === '5y') start.setFullYear(start.getFullYear() - 5)
   if (config.period === '10y') start.setFullYear(start.getFullYear() - 10)
   return { start: formatDate(start), end: formatDate(end) }
+}
+
+const getTrackedStrategyParamKeys = () => {
+  return Object.entries(strategyParams)
+    .filter(([, value]) => value !== '' && value !== null && value !== undefined)
+    .map(([key]) => key)
+    .sort((left, right) => left.localeCompare(right))
 }
 
 const toggleConfigPanel = () => {
@@ -1720,6 +1729,14 @@ const runBacktest = async () => {
   loading.value = true
   try {
     const range = resolveDateRange()
+    trackBacktestRun({
+      strategy: config.strategyType,
+      stockCode: config.stockCode,
+      period: config.period,
+      startDate: range.start,
+      endDate: range.end,
+      paramKeys: getTrackedStrategyParamKeys(),
+    })
     const result = await backtestApi.runBacktest({
       strategy: config.strategyType,
       strategy_params: { ...strategyParams },

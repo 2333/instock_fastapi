@@ -21,9 +21,7 @@ from core.crawling.eastmoney import EastMoneyCrawler
 from core.crawling.tushare_provider import TushareProvider
 
 logger = logging.getLogger(__name__)
-_supports_daily_bar_upsert = True
 DAILY_BAR_UPSERT_CONSTRAINT = "uq_daily_bars_ts_code_trade_date_dt"
-BACKFILL_TERMINAL_STATUSES = ("done", "needs_fallback", "nodata")
 DAILY_BARS_BACKFILL_SOURCE_POLICIES = (
     "baostock",
     "tushare",
@@ -52,6 +50,66 @@ TS_CODE_CHILD_TABLES = (
     "north_bound_funds",
     "backfill_daily_state",
 )
+
+
+def build_baostock_code(
+    *,
+    ts_code: str | None = None,
+    symbol: str | None = None,
+    exchange: str | None = None,
+    is_etf: bool = False,
+) -> str | None:
+    if is_etf:
+        return None
+
+    raw_ts_code = str(ts_code or "").strip()
+    if raw_ts_code:
+        lowered = raw_ts_code.lower()
+        if lowered.startswith(("sh.", "sz.", "bj.")):
+            resolved_exchange, resolved_symbol = raw_ts_code.split(".", 1)
+        elif "." in raw_ts_code:
+            resolved_symbol, resolved_exchange = raw_ts_code.split(".", 1)
+        else:
+            resolved_symbol = raw_ts_code
+            resolved_exchange = str(exchange or "").strip()
+    else:
+        resolved_symbol = str(symbol or "").strip()
+        resolved_exchange = str(exchange or "").strip()
+
+    normalized_symbol = extract_symbol(resolved_symbol)
+    normalized_exchange = normalize_exchange_name(resolved_exchange, normalized_symbol)
+    if normalized_exchange not in {"SH", "SZ"} or not normalized_symbol:
+        return None
+    return f"{normalized_exchange.lower()}.{normalized_symbol}"
+
+
+def _source_supports_daily_bar_contract(
+    source_policy: str,
+    *,
+    ts_code: str | None = None,
+    symbol: str | None = None,
+    exchange: str | None = None,
+    is_etf: bool = False,
+) -> bool:
+    if source_policy == "baostock":
+        return (
+            build_baostock_code(
+                ts_code=ts_code,
+                symbol=symbol,
+                exchange=exchange,
+                is_etf=is_etf,
+            )
+            is not None
+        )
+
+    if source_policy == "tushare":
+        if is_etf:
+            return False
+        normalized_symbol = extract_symbol(str(ts_code or symbol or "").strip())
+        normalized_exchange = normalize_exchange_name(str(exchange or "").strip(), normalized_symbol)
+        return normalized_exchange in {"SH", "SZ"} and bool(normalized_symbol)
+
+    return True
 
 
 def _normalize_ymd(value: str) -> str:
@@ -440,61 +498,34 @@ async def save_daily_bars(
     if not values:
         return 0
 
-    global _supports_daily_bar_upsert
-    if _supports_daily_bar_upsert:
-        daily_bar_insert = insert(DailyBar)
-        stmt = daily_bar_insert.values(values).on_conflict_do_update(
-            constraint=DAILY_BAR_UPSERT_CONSTRAINT,
-            set_={
-                "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
-                "open": daily_bar_insert.excluded.open,
-                "high": daily_bar_insert.excluded.high,
-                "low": daily_bar_insert.excluded.low,
-                "close": daily_bar_insert.excluded.close,
-                "pre_close": daily_bar_insert.excluded.pre_close,
-                "change": daily_bar_insert.excluded.change,
-                "pct_chg": daily_bar_insert.excluded.pct_chg,
-                "vol": daily_bar_insert.excluded.vol,
-                "amount": daily_bar_insert.excluded.amount,
-                "source": daily_bar_insert.excluded.source,
-            },
+    daily_bar_insert = insert(DailyBar)
+    stmt = daily_bar_insert.values(values).on_conflict_do_update(
+        constraint=DAILY_BAR_UPSERT_CONSTRAINT,
+        set_={
+            "trade_date_dt": daily_bar_insert.excluded.trade_date_dt,
+            "open": daily_bar_insert.excluded.open,
+            "high": daily_bar_insert.excluded.high,
+            "low": daily_bar_insert.excluded.low,
+            "close": daily_bar_insert.excluded.close,
+            "pre_close": daily_bar_insert.excluded.pre_close,
+            "change": daily_bar_insert.excluded.change,
+            "pct_chg": daily_bar_insert.excluded.pct_chg,
+            "vol": daily_bar_insert.excluded.vol,
+            "amount": daily_bar_insert.excluded.amount,
+            "source": daily_bar_insert.excluded.source,
+        },
+    )
+    try:
+        await session.execute(stmt)
+        await session.commit()
+    except SQLAlchemyError:
+        await session.rollback()
+        logger.exception(
+            "daily_bars upsert failed; required constraint %s must exist and compatibility downgrade is disabled",
+            DAILY_BAR_UPSERT_CONSTRAINT,
         )
-        try:
-            await session.execute(stmt)
-            await session.commit()
-            return len(values)
-        except SQLAlchemyError as exc:
-            await session.rollback()
-            # 兼容历史库结构（可能缺失 M1 trade_date_dt 唯一约束）
-            _supports_daily_bar_upsert = False
-            logger.warning("daily_bars upsert 不可用，后续改为兼容写入: %s", exc)
-
-    count = 0
-    for item in values:
-        result = await session.execute(
-            select(DailyBar).where(
-                DailyBar.ts_code == item["ts_code"],
-                DailyBar.trade_date == item["trade_date"],
-            )
-        )
-        existing = result.scalar_one_or_none()
-        if existing:
-            existing.trade_date_dt = item["trade_date_dt"]
-            existing.open = item["open"]
-            existing.high = item["high"]
-            existing.low = item["low"]
-            existing.close = item["close"]
-            existing.pre_close = item["pre_close"]
-            existing.change = item["change"]
-            existing.pct_chg = item["pct_chg"]
-            existing.vol = item["vol"]
-            existing.amount = item["amount"]
-            existing.source = item["source"]
-        else:
-            session.add(DailyBar(**item))
-        count += 1
-    await session.commit()
-    return count
+        raise
+    return len(values)
 
 
 async def save_daily_bars_batch(
@@ -549,10 +580,9 @@ async def save_daily_bars_batch(
     # 分批写入，每批 2000 行
     batch_size = 2000
     total = 0
-    for i in range(0, len(all_values), batch_size):
-        chunk = all_values[i : i + batch_size]
-        global _supports_daily_bar_upsert
-        if _supports_daily_bar_upsert:
+    try:
+        for i in range(0, len(all_values), batch_size):
+            chunk = all_values[i : i + batch_size]
             daily_bar_insert = insert(DailyBar)
             stmt = daily_bar_insert.values(chunk).on_conflict_do_update(
                 constraint=DAILY_BAR_UPSERT_CONSTRAINT,
@@ -570,37 +600,17 @@ async def save_daily_bars_batch(
                     "source": daily_bar_insert.excluded.source,
                 },
             )
-            try:
-                await session.execute(stmt)
-                total += len(chunk)
-            except SQLAlchemyError as exc:
-                await session.rollback()
-                _supports_daily_bar_upsert = False
-                logger.warning("batch upsert 不可用，降级为逐行写入: %s", exc)
-
-    if total > 0:
+            await session.execute(stmt)
+            total += len(chunk)
         await session.commit()
-        return total
-
-    # 降级：逐行写入
-    count = 0
-    for item in all_values:
-        result = await session.execute(
-            select(DailyBar).where(
-                DailyBar.ts_code == item["ts_code"],
-                DailyBar.trade_date == item["trade_date"],
-            )
+    except SQLAlchemyError:
+        await session.rollback()
+        logger.exception(
+            "daily_bars batch upsert failed; required constraint %s must exist and compatibility downgrade is disabled",
+            DAILY_BAR_UPSERT_CONSTRAINT,
         )
-        existing = result.scalar_one_or_none()
-        if existing:
-            for k, v in item.items():
-                if k != "ts_code":
-                    setattr(existing, k, v)
-        else:
-            session.add(DailyBar(**item))
-        count += 1
-    await session.commit()
-    return count
+        raise
+    return total
 
 
 async def fetch_and_save_stock_universe() -> int:
@@ -821,8 +831,15 @@ async def _fetch_bars_by_source(
                     end_date=end_date,
                 )
             elif source == "baostock":
+                baostock_code = build_baostock_code(
+                    symbol=symbol,
+                    exchange=exchange,
+                    is_etf=is_etf,
+                )
+                if baostock_code is None:
+                    return [], source, "needs_fallback", "selected source does not support ETF/BJ contract"
                 bars = await baostock_provider.fetch_kline(
-                    code=symbol,
+                    code=baostock_code,
                     start_date=start_date,
                     end_date=end_date,
                     adjust=adjust,
@@ -1006,15 +1023,60 @@ async def fetch_and_save_daily_bars(days: int = 30, concurrency: int = 20):
         await em_crawler.close()
 
 
-async def _get_backfill_targets(
+def _effective_list_interval_boundaries(
+    *,
+    start: str,
+    end: str,
+    list_date: str | None,
+    delist_date: str | None,
+) -> tuple[str, str] | None:
+    normalized_start = _normalize_ymd(start)
+    normalized_end = _normalize_ymd(end)
+    stock_list_start = _normalize_ymd(list_date or "19000101")
+    stock_delist = delist_date
+    stock_list_end = _normalize_ymd(stock_delist if stock_delist else end)
+    effective_start = max(normalized_start, stock_list_start)
+    effective_end = min(normalized_end, stock_list_end)
+    if effective_start > effective_end:
+        return None
+    return effective_start, effective_end
+
+async def _get_backfill_window_partial_gap_targets(
     session: AsyncSession,
     start: str,
     end: str,
     batch_size: int,
     *,
+    source_policy: str,
+    eastmoney_crawler: EastMoneyCrawler | None = None,
     ensure_state_table: bool = True,
 ) -> list[dict]:
+    effective_crawler = eastmoney_crawler
+    created_crawler = False
+    if effective_crawler is None:
+        effective_crawler = EastMoneyCrawler(proxy_pool=_build_proxy_pool())
+        created_crawler = True
+
+    try:
+        trading_days = {
+            _normalize_ymd(item)
+            for item in await _resolve_trading_days(
+                _to_iso_ymd(start),
+                _to_iso_ymd(end),
+                crawler=effective_crawler,
+            )
+        }
+        trading_days.discard("")
+        if not trading_days:
+            raise RuntimeError(
+                f"无法解析交易日历或交易日为空: start={start}, end={end}"
+            )
+    finally:
+        if created_crawler:
+            await effective_crawler.close()
+
     state_filter = ""
+    window_marker = f"window={start}:{end}|"
     if ensure_state_table:
         await _ensure_backfill_state_table(session)
         state_filter = """
@@ -1023,6 +1085,7 @@ async def _get_backfill_targets(
                 FROM backfill_daily_state st
                 WHERE st.ts_code = s.ts_code
                   AND st.status IN ('done', 'needs_fallback', 'nodata')
+                  AND st.note LIKE :window_filter_token
           )
         """
     else:
@@ -1037,32 +1100,127 @@ async def _get_backfill_targets(
                     FROM backfill_daily_state st
                     WHERE st.ts_code = s.ts_code
                       AND st.status IN ('done', 'needs_fallback', 'nodata')
+                      AND st.note LIKE :window_filter_token
               )
             """
 
     query = text(f"""
-        SELECT s.*
+        SELECT
+            s.ts_code,
+            s.symbol,
+            s.exchange,
+            s.is_etf,
+            s.list_date,
+            s.delist_date,
+            COALESCE(COUNT(DISTINCT REPLACE(db.trade_date, '-', '')), 0) AS covered_days
         FROM stocks s
+        LEFT JOIN daily_bars db
+               ON db.ts_code = s.ts_code
+              AND REPLACE(db.trade_date, '-', '') BETWEEN (
+                  CASE
+                    WHEN COALESCE(REPLACE(s.list_date, '-', ''), '19000101') <= :start
+                    THEN :start
+                    ELSE COALESCE(REPLACE(s.list_date, '-', ''), '19000101')
+                  END
+              ) AND (
+                  CASE
+                    WHEN s.delist_date IS NULL OR REPLACE(s.delist_date, '-', '') = ''
+                    THEN :end
+                    WHEN REPLACE(s.delist_date, '-', '') >= :end THEN :end
+                    ELSE REPLACE(s.delist_date, '-', '')
+                  END
+              )
         WHERE s.list_status = 'L'
-          AND COALESCE(s.list_date, '19000101') <= :end
+          AND COALESCE(REPLACE(s.list_date, '-', ''), '19000101') <= :end
           AND (
                 s.delist_date IS NULL
                 OR s.delist_date = ''
-                OR s.delist_date >= :start
+                OR REPLACE(s.delist_date, '-', '') >= :start
               )
-          AND NOT EXISTS (
-                SELECT 1
-                FROM daily_bars db
-                WHERE db.ts_code = s.ts_code
-                  AND db.trade_date BETWEEN :start AND :end
-          )
           {state_filter}
+        GROUP BY s.ts_code, s.symbol, s.exchange, s.is_etf, s.list_date, s.delist_date
         ORDER BY s.ts_code
-        LIMIT :limit
         """)
-    result = await session.execute(query, {"start": start, "end": end, "limit": batch_size})
+    params = {
+        "start": start,
+        "end": end,
+        "window_filter_token": f"{window_marker}%",
+    }
+    result = await session.execute(query, params)
     rows = result.mappings().all()
-    return [dict(row) for row in rows]
+
+    targets: list[dict] = []
+    for row in rows:
+        row_data = dict(row)
+        if not _source_supports_daily_bar_contract(
+            source_policy,
+            ts_code=row_data["ts_code"],
+            symbol=row_data["symbol"],
+            exchange=row_data["exchange"],
+            is_etf=bool(row_data["is_etf"]),
+        ):
+            continue
+
+        interval = _effective_list_interval_boundaries(
+            start=start,
+            end=end,
+            list_date=row_data["list_date"],
+            delist_date=row_data["delist_date"],
+        )
+        if interval is None:
+            continue
+
+        interval_start, interval_end = interval
+        expected_days = len(
+            {
+                trade_day
+                for trade_day in trading_days
+                if interval_start <= trade_day <= interval_end
+            }
+        )
+        covered_days = int(row_data["covered_days"] or 0)
+        if 0 < expected_days and covered_days < expected_days:
+            row_data["expected_days"] = expected_days
+            row_data["covered_days"] = covered_days
+            targets.append(row_data)
+
+    return targets[:batch_size]
+
+
+async def _count_covered_days_in_window(
+    session: AsyncSession,
+    start: str,
+    end: str,
+    *,
+    ts_code: str,
+    list_date: str | None,
+    delist_date: str | None,
+) -> int:
+    interval = _effective_list_interval_boundaries(
+        start=start,
+        end=end,
+        list_date=list_date,
+        delist_date=delist_date,
+    )
+    if interval is None:
+        return 0
+
+    interval_start, interval_end = interval
+    await session.flush()
+    covered = await session.scalar(
+        text("""
+            SELECT COALESCE(COUNT(DISTINCT REPLACE(trade_date, '-', '')), 0)
+            FROM daily_bars
+            WHERE ts_code = :ts_code
+              AND REPLACE(trade_date, '-', '') BETWEEN :interval_start AND :interval_end
+            """),
+        {
+            "ts_code": ts_code,
+            "interval_start": interval_start,
+            "interval_end": interval_end,
+        },
+    )
+    return int(covered or 0)
 
 
 async def _get_daily_sync_targets(session: AsyncSession, trade_date: str) -> list[Stock]:
@@ -1179,11 +1337,13 @@ async def run_daily_bars_backfill_window(
 
     try:
         async with session_factory() as session:
-            targets = await _get_backfill_targets(
+            targets = await _get_backfill_window_partial_gap_targets(
                 session,
                 start,
                 end,
                 code_limit,
+                source_policy=source_policy,
+                eastmoney_crawler=active_eastmoney,
                 ensure_state_table=execute,
             )
             result: dict[str, Any] = {
@@ -1209,6 +1369,7 @@ async def run_daily_bars_backfill_window(
             for target in targets:
                 ts_code = target["ts_code"]
                 symbol = target.get("symbol") or extract_symbol(ts_code)
+                expected_days = int(target.get("expected_days", 0))
                 source_order = _resolve_backfill_source_order(source_policy)
                 bars: list[dict] = []
                 used_source: str | None = None
@@ -1230,13 +1391,23 @@ async def run_daily_bars_backfill_window(
                     elif candidate == "baostock":
                         if active_baostock is None:
                             active_baostock = BaoStockProvider()
-                        candidate_bars = await active_baostock.fetch_kline(
-                            code=symbol,
-                            start_date=_to_iso_ymd(start),
-                            end_date=_to_iso_ymd(end),
-                            adjust=AdjustType.NO_ADJUST,
-                            period="daily",
+                        baostock_code = build_baostock_code(
+                            ts_code=ts_code,
+                            symbol=symbol,
+                            exchange=target.get("exchange"),
+                            is_etf=bool(target.get("is_etf", False)),
                         )
+                        if baostock_code is None:
+                            attempts.append({"source": candidate, "error": "unsupported ETF/BJ contract"})
+                            candidate_bars = []
+                        else:
+                            candidate_bars = await active_baostock.fetch_kline(
+                                code=baostock_code,
+                                start_date=_to_iso_ymd(start),
+                                end_date=_to_iso_ymd(end),
+                                adjust=AdjustType.NO_ADJUST,
+                                period="daily",
+                            )
                     else:
                         if active_eastmoney is None:
                             active_eastmoney = EastMoneyCrawler(proxy_pool=_build_proxy_pool())
@@ -1260,7 +1431,20 @@ async def run_daily_bars_backfill_window(
                 saved = await _save_daily_bars_small_batch(
                     session, ts_code, bars, source=used_source
                 )
-                status = "done" if saved else "nodata"
+                covered_days = 0
+                if expected_days:
+                    covered_days = await _count_covered_days_in_window(
+                        session,
+                        start,
+                        end,
+                        ts_code=ts_code,
+                        list_date=target.get("list_date"),
+                        delist_date=target.get("delist_date"),
+                    )
+                if expected_days and covered_days < expected_days:
+                    status = "partial" if covered_days else "nodata"
+                else:
+                    status = "done"
                 attempt_note = ",".join(
                     f"{item['source']}:{item.get('rows', 'error')}" for item in attempts
                 )
@@ -1285,6 +1469,7 @@ async def run_daily_bars_backfill_window(
                         "ts_code": ts_code,
                         "status": status,
                         "note": (
+                            f"window={start}:{end}|"
                             f"rows={saved},source={used_source},"
                             f"source_policy={source_policy},attempts={attempt_note}"
                         ),
@@ -1309,179 +1494,6 @@ async def run_daily_bars_backfill_window(
     finally:
         if created_eastmoney and active_eastmoney is not None:
             await active_eastmoney.close()
-
-
-async def _get_backfill_progress(session: AsyncSession, start: str, end: str) -> tuple[int, int]:
-    await _ensure_backfill_state_table(session)
-
-    total_q = text("""
-        SELECT COUNT(*)
-        FROM stocks s
-        WHERE s.list_status = 'L'
-          AND COALESCE(s.list_date, '19000101') <= :end
-          AND (
-                s.delist_date IS NULL
-                OR s.delist_date = ''
-                OR s.delist_date >= :start
-              )
-        """)
-    covered_q = text("""
-        SELECT COUNT(DISTINCT db.ts_code)
-        FROM daily_bars db
-        JOIN stocks s ON s.ts_code = db.ts_code
-        WHERE db.trade_date BETWEEN :start AND :end
-          AND s.list_status = 'L'
-          AND COALESCE(s.list_date, '19000101') <= :end
-          AND (
-                s.delist_date IS NULL
-                OR s.delist_date = ''
-                OR s.delist_date >= :start
-              )
-        """)
-    state_q = text("""
-        SELECT COUNT(*)
-        FROM backfill_daily_state
-        WHERE status IN ('done', 'needs_fallback', 'nodata')
-        """)
-    total = (await session.execute(total_q, {"start": start, "end": end})).scalar() or 0
-    covered = (await session.execute(covered_q, {"start": start, "end": end})).scalar() or 0
-    marked = (await session.execute(state_q)).scalar() or 0
-    return int(total), int(max(covered, marked))
-
-
-async def run_historical_backfill() -> bool:
-    """增量回补 2020-2025 日线。仅按显式单源执行。"""
-    start = os.getenv("BACKFILL_START_DATE", "20200101")
-    end = os.getenv("BACKFILL_END_DATE", "20251231")
-    batch_size = int(os.getenv("BACKFILL_BATCH_SIZE", "150"))
-    sleep_seconds = float(os.getenv("BACKFILL_ITEM_SLEEP", "0.05"))
-    selected_source = _selected_daily_bar_source()
-
-    proxy_pool = _build_proxy_pool()
-    em_crawler = EastMoneyCrawler(proxy_pool=proxy_pool)
-    baostock_provider = BaoStockProvider()
-    tushare_provider = TushareProvider()
-
-    async with async_session_factory() as session:
-        total, covered = await _get_backfill_progress(session, start, end)
-        logger.info("历史回补进度: %s/%s", covered, total)
-        if total > 0 and covered >= total:
-            logger.info("历史回补已完成（%s-%s）", start, end)
-            await em_crawler.close()
-            return True
-
-        targets = await _get_backfill_targets(session, start, end, batch_size)
-        if not targets:
-            logger.info("本轮回补无待处理标的")
-            await em_crawler.close()
-            return True
-
-        logger.info("开始回补 %s 只股票（%s-%s）", len(targets), start, end)
-        if selected_source == "baostock":
-            _assert_baostock_request_budget(len(targets), context="run_historical_backfill")
-        for idx, stock in enumerate(targets, 1):
-            try:
-                bars, used_source, status, note = await _fetch_bars_by_source(
-                    tushare_provider=tushare_provider,
-                    baostock_provider=baostock_provider,
-                    em_crawler=em_crawler,
-                    source=selected_source,
-                    symbol=stock["symbol"],
-                    start_date=f"{start[:4]}-{start[4:6]}-{start[6:]}",
-                    end_date=f"{end[:4]}-{end[4:6]}-{end[6:]}",
-                    adjust=AdjustType.NO_ADJUST,
-                    exchange=stock.get("exchange"),
-                    is_etf=bool(stock.get("is_etf", False)),
-                )
-                if bars:
-                    count = await save_daily_bars(
-                        session, stock["ts_code"], bars, source=used_source
-                    )
-                    await upsert_fetch_audit(
-                        session,
-                        task_name="historical_backfill",
-                        entity_type="daily_bar",
-                        entity_key=stock["ts_code"],
-                        trade_date=end,
-                        status="done",
-                        source=used_source,
-                        note=f"rows={count}",
-                    )
-                    await session.execute(
-                        text("""
-                            INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
-                            VALUES (:ts_code, 'done', :note, NOW())
-                            ON CONFLICT (ts_code)
-                            DO UPDATE SET status='done', note=:note, updated_at=NOW()
-                            """),
-                        {"ts_code": stock["ts_code"], "note": f"rows={count},source={used_source}"},
-                    )
-                    await session.commit()
-                    logger.info(
-                        "[%s/%s] 回补 %s 成功，写入 %s 条, source=%s",
-                        idx,
-                        len(targets),
-                        stock["symbol"],
-                        count,
-                        used_source,
-                    )
-                else:
-                    await upsert_fetch_audit(
-                        session,
-                        task_name="historical_backfill",
-                        entity_type="daily_bar",
-                        entity_key=stock["ts_code"],
-                        trade_date=end,
-                        status=status,
-                        source=used_source,
-                        note=note,
-                    )
-                    await session.execute(
-                        text("""
-                            INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
-                            VALUES (:ts_code, :status, :note, NOW())
-                            ON CONFLICT (ts_code)
-                            DO UPDATE SET status=:status, note=:note, updated_at=NOW()
-                            """),
-                        {"ts_code": stock["ts_code"], "status": status, "note": note},
-                    )
-                    await session.commit()
-                    logger.warning(
-                        "[%s/%s] %s 跳过，status=%s, source=%s, note=%s",
-                        idx,
-                        len(targets),
-                        stock["symbol"],
-                        status,
-                        used_source,
-                        note,
-                    )
-            except Exception as exc:
-                logger.error("[%s/%s] %s 回补失败: %s", idx, len(targets), stock["symbol"], exc)
-                await session.rollback()
-                await upsert_fetch_audit(
-                    session,
-                    task_name="historical_backfill",
-                    entity_type="daily_bar",
-                    entity_key=stock["ts_code"],
-                    trade_date=end,
-                    status="needs_fallback",
-                    source=selected_source,
-                    note=f"unexpected task error: {exc}",
-                )
-                await session.execute(
-                    text("""
-                        INSERT INTO backfill_daily_state(ts_code, status, note, updated_at)
-                        VALUES (:ts_code, 'needs_fallback', :note, NOW())
-                        ON CONFLICT (ts_code)
-                        DO UPDATE SET status='needs_fallback', note=:note, updated_at=NOW()
-                        """),
-                    {"ts_code": stock["ts_code"], "note": f"unexpected task error: {exc}"},
-                )
-                await session.commit()
-            await asyncio.sleep(sleep_seconds)
-
-    await em_crawler.close()
-    return False
 
 
 async def run():

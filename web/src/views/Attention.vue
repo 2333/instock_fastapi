@@ -3,14 +3,14 @@
     <div class="page-header">
       <div class="header-left">
         <h1>我的关注</h1>
-        <p class="subtitle">关注您感兴趣的股票，设置提醒条件</p>
+        <p class="subtitle">管理您关注的股票，支持分组与备注整理</p>
       </div>
       <div class="header-right">
         <div class="search-box">
           <input
             type="text"
             v-model="searchQuery"
-            placeholder="搜索股票代码..."
+            placeholder="输入股票代码，如 600519"
             class="search-input"
             @keyup.enter="addStock"
           >
@@ -27,8 +27,17 @@
     </div>
 
     <div v-else-if="attentionList.length === 0" class="empty-state">
-      <p>暂无关注的股票</p>
-      <p class="hint">搜索股票代码并添加关注</p>
+      <div class="empty-icon">☆</div>
+      <h3>先建立你的观察池</h3>
+      <p>输入股票代码后加入关注，后续可以从首页、个股验证和筛选结果里回到这里统一管理。</p>
+      <div class="empty-guide">
+        <span>1. 输入代码</span>
+        <span>2. 添加关注</span>
+        <span>3. 分组和备注</span>
+      </div>
+      <button class="btn btn-primary" :disabled="!searchQuery" @click="addStock">
+        添加第一只股票
+      </button>
     </div>
 
     <div v-else class="stock-grid">
@@ -86,6 +95,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { attentionApi } from '@/api'
+import { useAnalytics } from '@/composables/useAnalytics'
 
 interface AttentionItem {
   id: number
@@ -101,6 +111,7 @@ const loading = ref(false)
 const searchQuery = ref('')
 const attentionList = ref<AttentionItem[]>([])
 const editingId = ref<number | null>(null)
+const { trackAttentionAction } = useAnalytics()
 const editForm = ref<{
   group: string
   notes: string
@@ -131,10 +142,15 @@ const fetchAttention = async () => {
 
 const addStock = async () => {
   if (!searchQuery.value) return
-  const code = searchQuery.value
+  const code = searchQuery.value.trim()
 
   try {
     await attentionApi.add(code, 'watch')
+    trackAttentionAction({
+      action: 'add',
+      stockCode: code,
+      source: 'attention_page',
+    })
     searchQuery.value = ''
     await fetchAttention()
   } catch (e) {
@@ -148,6 +164,11 @@ const removeStock = async (id: number) => {
     const stock = attentionList.value.find(s => s.id === id)
     if (stock) {
       await attentionApi.remove(stock.code)
+      trackAttentionAction({
+        action: 'remove',
+        stockCode: stock.code,
+        source: 'attention_page',
+      })
       await fetchAttention()
     }
   } catch (e) {
@@ -173,11 +194,19 @@ const cancelEdit = () => {
 
 const saveEdit = async (id: number) => {
   try {
+    const stock = attentionList.value.find((item) => item.id === id)
     const updates: any = {}
     if (editForm.value.group) updates.group = editForm.value.group
     if (editForm.value.notes !== undefined) updates.notes = editForm.value.notes || null
 
     await attentionApi.update(id, updates)
+    if (stock?.code) {
+      trackAttentionAction({
+        action: 'update',
+        stockCode: stock.code,
+        source: 'attention_page',
+      })
+    }
     editingId.value = null
     await fetchAttention()
   } catch (e) {
@@ -194,6 +223,10 @@ onMounted(() => {
 <style scoped lang="scss">
 .attention-page {
   padding: 24px;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(41, 98, 255, 0.1), transparent 32rem),
+    #0d0d0d;
 }
 
 .page-header {
@@ -229,7 +262,7 @@ onMounted(() => {
     border-radius: 8px;
     color: #fff;
     font-size: 14px;
-    width: 200px;
+    width: 240px;
 
     &:focus {
       outline: none;
@@ -296,15 +329,56 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px;
-  background: rgba(26, 26, 26, 0.5);
-  border-radius: 12px;
+  min-height: 300px;
+  padding: 56px;
+  background:
+    linear-gradient(135deg, rgba(41, 98, 255, 0.1), rgba(255, 255, 255, 0.03)),
+    rgba(26, 26, 26, 0.56);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  text-align: center;
   color: rgba(255, 255, 255, 0.6);
 
-  .hint {
-    margin-top: 8px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.4);
+  .empty-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 54px;
+    height: 54px;
+    margin-bottom: 16px;
+    border-radius: 18px;
+    background: rgba(41, 98, 255, 0.16);
+    color: #9ab7ff;
+    font-size: 30px;
+  }
+
+  h3 {
+    margin: 0 0 8px;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 22px;
+  }
+
+  p {
+    max-width: 520px;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.52);
+    line-height: 1.7;
+  }
+
+  .empty-guide {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin: 22px 0;
+
+    span {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 13px;
+    }
   }
 }
 

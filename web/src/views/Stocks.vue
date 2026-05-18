@@ -767,11 +767,13 @@ watch(selectedDate, () => {
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .data-table {
   width: 100%;
+  min-width: 860px;
   border-collapse: collapse;
 
   th,
@@ -896,6 +898,86 @@ watch(selectedDate, () => {
   &:focus {
     outline: none;
     border-color: #2962FF;
+  }
+}
+
+@media (max-width: 760px) {
+  .stocks-page {
+    padding: 16px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 18px;
+
+    h1 {
+      font-size: 26px;
+    }
+  }
+
+  .header-right {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .search-box {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .filters-bar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .filter-tabs {
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  .filter-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .filter-options {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .date-filter {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .date-input-wrapper,
+  .filter-select,
+  .filter-input {
+    flex: 1 1 150px;
+    min-width: 0;
+  }
+
+  .info-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pagination {
+    flex-wrap: wrap;
+    gap: 10px;
   }
 }
 </style>
