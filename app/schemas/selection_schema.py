@@ -5,8 +5,10 @@ screening-first schema that is more structured and can carry minimal reason and
 evidence summaries for each result.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,6 +31,8 @@ class SelectionFilters(BaseModel):
     rsi_max: float | None = Field(None, alias="rsiMax")
     macd_bullish: bool | None = Field(None, alias="macdBullish")
     macd_bearish: bool | None = Field(None, alias="macdBearish")
+    boll_close_above_upper: bool | None = Field(None, alias="bollCloseAboveUpper")
+    boll_close_below_lower: bool | None = Field(None, alias="bollCloseBelowLower")
     # Pattern filters (future)
     pattern: str | None = Field(
         None, description="Pattern name to filter by (for example HAMMER or HEAD_SHOULDERS)"
@@ -83,6 +87,7 @@ class ScreeningRequest(BaseModel):
     filters: SelectionFilters = Field(default_factory=SelectionFilters)
     scope: ScreeningScope = Field(default_factory=ScreeningScope)
     conditions: SelectionFilters | dict[str, Any] | None = Field(default=None)
+    definition: SavedScreenerDefinition | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -169,6 +174,40 @@ class SelectionHistoryResponse(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
+class SavedScreenerPredicate(BaseModel):
+    """One bounded screening predicate in the canonical screener definition."""
+
+    type: Literal["predicate"] = "predicate"
+    rule_key: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class SavedScreenerGroup(BaseModel):
+    """Top-level bounded group for canonical screening definitions."""
+
+    type: Literal["group"] = "group"
+    op: Literal["all"] = "all"
+    children: list[SavedScreenerPredicate] = Field(default_factory=list)
+
+
+class SavedScreenerDefinition(BaseModel):
+    """Canonical saved screener envelope used by M3-A."""
+
+    kind: Literal["saved_screener"] = "saved_screener"
+    ast_version: int = 1
+    registry_version: int = 1
+    scope: ScreeningScope = Field(default_factory=ScreeningScope)
+    root: SavedScreenerGroup = Field(default_factory=SavedScreenerGroup)
+
+    @model_validator(mode="after")
+    def validate_supported_shape(self) -> "SavedScreenerDefinition":
+        if self.ast_version != 1:
+            raise ValueError("unsupported ast_version")
+        if self.root.op != "all":
+            raise ValueError("only all-groups are supported in M3-A")
+        return self
+
+
 class SelectionConditionCreate(BaseModel):
     """Request to create/update a saved selection condition."""
 
@@ -176,6 +215,7 @@ class SelectionConditionCreate(BaseModel):
     category: str
     description: str | None = None
     params: dict[str, Any] | None = None
+    definition: SavedScreenerDefinition | None = None
     is_active: bool = True
 
 
@@ -189,8 +229,16 @@ class SelectionConditionResponse(BaseModel):
     name: str
     category: str
     description: str | None
-    params: dict[str, Any] | None
+    params: dict[str, Any] | None = Field(
+        default=None,
+        description="Compatibility filter params derived from the canonical definition",
+    )
+    definition: SavedScreenerDefinition | None = None
+    schema_version: int = 1
+    definition_version: int = 1
+    definition_hash: str | None = None
     is_active: bool
+    updated_at: datetime | None = None
 
 
 class SelectionConditionsMetaResponse(BaseModel):
@@ -208,6 +256,10 @@ class ScreeningFilterField(BaseModel):
     label: str
     value_type: str
     operators: list[str]
+    description: str | None = None
+    param_schema: dict[str, Any] | None = None
+    default_params: dict[str, Any] | None = None
+    supported_adapters: list[str] = Field(default_factory=list)
 
 
 class ScreeningMetadata(BaseModel):
@@ -216,6 +268,7 @@ class ScreeningMetadata(BaseModel):
     markets: list[str]
     indicators: list[str]
     strategies: list[str]
+    registry_version: int = 1
     filter_fields: list[ScreeningFilterField] = Field(default_factory=list)
 
 
@@ -234,6 +287,8 @@ class ScreeningQuery(BaseModel):
 
     filters: SelectionFilters = Field(default_factory=SelectionFilters)
     scope: ScreeningScope = Field(default_factory=ScreeningScope)
+    definition: SavedScreenerDefinition | None = None
+    definition_hash: str | None = None
     trade_date: str | None = None
 
 

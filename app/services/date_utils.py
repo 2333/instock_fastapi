@@ -26,6 +26,5 @@ def parse_trade_date(value: str | date | None) -> date | None:
         return None
 
 
-def trade_date_dt_param(value: str | date | None) -> str | None:
-    parsed = parse_trade_date(value)
-    return parsed.isoformat() if parsed else None
+def trade_date_dt_param(value: str | date | None) -> date | None:
+    return parse_trade_date(value)

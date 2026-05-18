@@ -20,7 +20,7 @@ async def get_indicators(
     return await service.get_indicators(code, start_date, end_date, limit)
 
 
-@router.get("/indicators/latest")
+@router.get("/indicators/latest", response_model=IndicatorResponse | None)
 async def get_latest_indicator(
     code: str = Query(..., description="股票代码"), db: AsyncSession = Depends(get_db)
 ):

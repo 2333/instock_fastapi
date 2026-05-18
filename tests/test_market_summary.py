@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -84,6 +85,23 @@ async def test_market_data_service_get_summary_builds_breadth_and_proxy_indices(
     assert summary["indices"][1]["constituent_count"] == 1
     assert summary["indices"][2]["code"] == "chinext_index"
     assert summary["indices"][2]["constituent_count"] == 1
+    _, params = db.execute.await_args.args
+    assert params["trade_date"] == "20240102"
+    assert params["trade_date_dt"] == date(2024, 1, 2)
+
+
+@pytest.mark.asyncio
+async def test_market_data_service_resolve_trade_date_binds_date_param_for_core_tables():
+    db = Mock()
+    db.execute = AsyncMock(return_value=make_result(row=("20240102",)))
+    service = MarketDataService(db)
+
+    resolved = await service._resolve_trade_date("20240107", "daily_bars")
+
+    assert resolved == "20240102"
+    _, params = db.execute.await_args.args
+    assert params["target_date"] == "20240107"
+    assert params["target_date_dt"] == date(2024, 1, 7)
 
 
 @pytest.mark.asyncio

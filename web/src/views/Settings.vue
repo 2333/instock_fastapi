@@ -1,243 +1,149 @@
 <template>
   <div class="settings-page">
     <div class="page-header">
-      <h1>设置</h1>
-      <p class="subtitle">配置应用程序首选项</p>
+      <h1>{{ t('settings_page_title') }}</h1>
+      <p class="subtitle">{{ t('settings_page_subtitle') }}</p>
     </div>
 
-    <div class="settings-layout">
-      <aside class="settings-nav">
-        <button 
-          v-for="section in sections" 
-          :key="section.id"
-          class="nav-item"
-          :class="{ active: activeSection === section.id }"
-          @click="activeSection = section.id"
-        >
-          <span class="nav-icon">{{ section.icon }}</span>
-          <span>{{ section.label }}</span>
+    <main class="settings-card">
+      <section class="settings-section">
+        <h2>{{ t('settings_current_section') }}</h2>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <h4>{{ t('settings_language_label') }}</h4>
+            <p>{{ t('settings_language_help') }}</p>
+          </div>
+          <select v-model="settings.language" class="setting-select" :disabled="isSaving">
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <h4>{{ t('settings_default_home_label') }}</h4>
+            <p>{{ t('settings_default_home_help') }}</p>
+          </div>
+          <div class="setting-static">{{ t('settings_default_home_value') }}</div>
+        </div>
+      </section>
+
+      <section class="settings-section settings-section--muted">
+        <h2>{{ t('settings_unavailable_section') }}</h2>
+        <p>
+          {{ t('settings_unavailable_help') }}
+        </p>
+      </section>
+
+      <p v-if="statusMessage" class="settings-status" :class="`is-${statusTone}`">
+        {{ statusMessage }}
+      </p>
+
+      <div class="settings-footer">
+        <button class="btn btn-primary" @click="saveSettings" :disabled="isSaving">
+          {{ isSaving ? t('settings_saving') : t('settings_save') }}
         </button>
-      </aside>
-
-      <main class="settings-content">
-        <div v-if="activeSection === 'general'" class="settings-section">
-          <h2>通用设置</h2>
-          
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>深色模式</h4>
-              <p>启用深色主题以获得更好的视觉体验</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.darkMode" checked>
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>语言</h4>
-              <p>选择您偏好的语言</p>
-            </div>
-            <select v-model="settings.language" class="setting-select">
-              <option value="zh">中文</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>日期格式</h4>
-              <p>选择日期显示格式</p>
-            </div>
-            <select v-model="settings.dateFormat" class="setting-select">
-              <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-              <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-            </select>
-          </div>
-        </div>
-
-        <div v-if="activeSection === 'data'" class="settings-section">
-          <h2>数据设置</h2>
-          
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>自动刷新</h4>
-              <p>自动按指定间隔刷新数据</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.autoRefresh">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>刷新间隔</h4>
-              <p>数据刷新间隔（秒）</p>
-            </div>
-            <select v-model="settings.refreshInterval" class="setting-select">
-              <option value="30">30 秒</option>
-              <option value="60">1 分钟</option>
-              <option value="300">5 分钟</option>
-              <option value="600">10 分钟</option>
-            </select>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>数据源</h4>
-              <p>市场数据的主要数据源</p>
-            </div>
-            <select v-model="settings.dataSource" class="setting-select">
-              <option value="eastmoney">东方财富</option>
-              <option value="tushare">Tushare</option>
-              <option value="sina">新浪</option>
-            </select>
-          </div>
-        </div>
-
-        <div v-if="activeSection === 'notifications'" class="settings-section">
-          <h2>通知设置</h2>
-          
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>价格提醒</h4>
-              <p>当达到目标价格时接收通知</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.priceAlerts">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>形态通知</h4>
-              <p>当检测到形态时获取通知</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.patternNotifications">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>涨跌停提醒</h4>
-              <p>股票涨跌停时的通知</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.limitAlerts">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-        </div>
-
-        <div v-if="activeSection === 'display'" class="settings-section">
-          <h2>显示设置</h2>
-          
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>图表样式</h4>
-              <p>默认图表可视化样式</p>
-            </div>
-            <select v-model="settings.chartStyle" class="setting-select">
-              <option value="candlestick">K线图</option>
-              <option value="hollow">空心K线</option>
-              <option value="heikin">平均K线</option>
-            </select>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>成交量显示</h4>
-              <p>在图表上显示成交量</p>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" v-model="settings.showVolume">
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item">
-            <div class="setting-info">
-              <h4>默认指标</h4>
-              <p>图表上默认显示的技术指标</p>
-            </div>
-            <div class="indicator-checkboxes">
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="settings.defaultMA">
-                <span>MA</span>
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="settings.defaultMACD">
-                <span>MACD</span>
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="settings.defaultRSI">
-                <span>RSI</span>
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" v-model="settings.defaultBOLL">
-                <span>BOLL</span>
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="settings-footer">
-          <button class="btn btn-primary" @click="saveSettings">保存更改</button>
-          <button class="btn btn-secondary" @click="resetSettings">重置默认</button>
-        </div>
-      </main>
-    </div>
+        <button class="btn btn-secondary" @click="resetSettings" :disabled="isSaving">
+          {{ t('settings_reset') }}
+        </button>
+      </div>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { useLocale, type Locale } from '@/composables/useLocale'
+import { onMounted, reactive, ref } from 'vue'
+import { authApi } from '@/api'
+import { buildSettingsExtra, setUserPreferences } from '@/composables/useUserPreferences'
+import { applyLocaleFromSettings, normalizeLocale, useLocale, type Locale } from '@/composables/useLocale'
 
-const activeSection = ref('general')
-const { locale, setLocale } = useLocale()
+interface AuthSettingsSnapshot {
+  language?: string | null
+  extra?: unknown
+}
 
-const sections = [
-  { id: 'general', label: '通用', icon: '⚙️' },
-  { id: 'data', label: '数据', icon: '📊' },
-  { id: 'notifications', label: '通知', icon: '🔔' },
-  { id: 'display', label: '显示', icon: '🎨' },
-]
+const { locale, t } = useLocale()
 
 const settings = reactive({
-  darkMode: true,
   language: locale.value as Locale,
-  dateFormat: 'YYYY-MM-DD',
-  autoRefresh: false,
-  refreshInterval: '60',
-  dataSource: 'eastmoney',
-  priceAlerts: true,
-  patternNotifications: true,
-  limitAlerts: false,
-  chartStyle: 'candlestick',
-  showVolume: true,
-  defaultMA: true,
-  defaultMACD: true,
-  defaultRSI: true,
-  defaultBOLL: false,
 })
 
-const saveSettings = () => {
-  setLocale(settings.language as Locale)
-  console.log('Saving settings...')
+const isSaving = ref(false)
+const statusMessage = ref('')
+const statusTone = ref<'success' | 'error'>('success')
+const persisted = ref<AuthSettingsSnapshot>({
+  language: locale.value,
+  extra: null,
+})
+
+const toBackendLanguage = (value: Locale): string => {
+  return value === 'en' ? 'en-US' : 'zh-CN'
 }
 
-const resetSettings = () => {
-  settings.language = 'zh'
-  setLocale('zh')
-  console.log('Resetting settings...')
+const setStatus = (message: string, tone: 'success' | 'error') => {
+  statusMessage.value = message
+  statusTone.value = tone
 }
+
+const applyPersistedSettings = (snapshot: AuthSettingsSnapshot | null | undefined) => {
+  settings.language = normalizeLocale(snapshot?.language ?? locale.value)
+}
+
+const syncDefaultHomeResidue = () => {
+  setUserPreferences({ defaultHome: '/' })
+}
+
+const loadSettings = async () => {
+  try {
+    const response = await authApi.getSettings()
+    persisted.value = response ?? {}
+    applyPersistedSettings(persisted.value)
+    applyLocaleFromSettings(persisted.value)
+  } catch (error) {
+    applyPersistedSettings(persisted.value)
+    setStatus(t('settings_load_fallback'), 'error')
+  } finally {
+    syncDefaultHomeResidue()
+  }
+}
+
+const saveSettings = async () => {
+  isSaving.value = true
+  statusMessage.value = ''
+
+  try {
+    const nextExtra = buildSettingsExtra(persisted.value?.extra, { defaultHome: '/' })
+    const response = await authApi.updateSettings({
+      language: toBackendLanguage(settings.language),
+      extra: nextExtra,
+    })
+
+    persisted.value = response ?? {
+      ...persisted.value,
+      language: toBackendLanguage(settings.language),
+      extra: nextExtra,
+    }
+
+    applyPersistedSettings(persisted.value)
+    applyLocaleFromSettings(persisted.value)
+    syncDefaultHomeResidue()
+    setStatus(t('settings_saved'), 'success')
+  } catch (error) {
+    setStatus(t('settings_save_failed'), 'error')
+  } finally {
+    isSaving.value = false
+  }
+}
+
+const resetSettings = async () => {
+  settings.language = 'zh'
+  await saveSettings()
+}
+
+onMounted(() => {
+  loadSettings()
+})
 </script>
 
 <style scoped lang="scss">
@@ -261,52 +167,8 @@ const resetSettings = () => {
   }
 }
 
-.settings-layout {
-  display: flex;
-  gap: 24px;
-}
-
-.settings-nav {
-  width: 200px;
-  flex-shrink: 0;
-  background: rgba(26, 26, 26, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 12px 16px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-  transition: all 0.2s;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  &.active {
-    background: rgba(41, 98, 255, 0.15);
-    color: #2962FF;
-  }
-}
-
-.nav-icon {
-  font-size: 16px;
-}
-
-.settings-content {
-  flex: 1;
+.settings-card {
+  max-width: 860px;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
@@ -314,18 +176,27 @@ const resetSettings = () => {
 }
 
 .settings-section {
-  margin-bottom: 32px;
-
-  &:last-of-type {
-    margin-bottom: 0;
-  }
+  display: grid;
+  gap: 20px;
 
   h2 {
-    margin: 0 0 24px;
-    font-size: 18px;
+    margin: 0;
+    font-size: 20px;
     font-weight: 600;
-    padding-bottom: 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+.settings-section + .settings-section {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-section--muted {
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.68);
+    line-height: 1.6;
   }
 }
 
@@ -333,111 +204,78 @@ const resetSettings = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 16px;
+  padding: 18px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 
-  &:last-child {
-    border-bottom: none;
+  &:first-of-type {
+    border-top: none;
+    padding-top: 0;
   }
 }
 
 .setting-info {
   h4 {
-    margin: 0 0 4px;
-    font-size: 14px;
-    font-weight: 500;
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 600;
   }
 
   p {
     margin: 0;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.68);
+    line-height: 1.5;
   }
+}
+
+.setting-select,
+.setting-static {
+  min-width: 220px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
 }
 
 .setting-select {
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
-  cursor: pointer;
+  color: #fff;
 
   &:focus {
     outline: none;
-    border-color: #2962FF;
+    border-color: #2962ff;
   }
 }
 
-.toggle {
-  position: relative;
-  display: inline-block;
-  width: 48px;
-  height: 26px;
-
-  input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
+.setting-static {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+  text-align: center;
 }
 
-.toggle-slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 26px;
-  transition: all 0.3s;
-
-  &::before {
-    content: '';
-    position: absolute;
-    height: 20px;
-    width: 20px;
-    left: 3px;
-    bottom: 3px;
-    background: white;
-    border-radius: 50%;
-    transition: all 0.3s;
-  }
+.settings-status {
+  margin: 24px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 14px;
 }
 
-input:checked + .toggle-slider {
-  background: #2962FF;
+.settings-status.is-success {
+  background: rgba(0, 200, 83, 0.12);
+  border: 1px solid rgba(0, 200, 83, 0.25);
+  color: #7de3a3;
 }
 
-input:checked + .toggle-slider::before {
-  transform: translateX(22px);
-}
-
-.indicator-checkboxes {
-  display: flex;
-  gap: 16px;
-}
-
-.checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-
-  input {
-    accent-color: #2962FF;
-  }
-
-  span {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-  }
+.settings-status.is-error {
+  background: rgba(255, 92, 122, 0.12);
+  border: 1px solid rgba(255, 92, 122, 0.25);
+  color: #ff9caf;
 }
 
 .settings-footer {
   display: flex;
   gap: 12px;
-  padding-top: 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
   margin-top: 24px;
 }
 
@@ -448,23 +286,42 @@ input:checked + .toggle-slider::before {
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  transition: all 0.2s;
 
-  &.btn-primary {
-    background: #2962FF;
-    color: white;
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
 
-    &:hover {
-      background: #1E53E5;
-    }
+.btn-primary {
+  background: #2962ff;
+  color: white;
+
+  &:hover:not(:disabled) {
+    background: #1e53e5;
+  }
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+@media (max-width: 760px) {
+  .setting-item {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
-  &.btn-secondary {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.8);
+  .setting-select,
+  .setting-static {
+    width: 100%;
+    min-width: 0;
+  }
 
-    &:hover {
-      background: rgba(255, 255, 255, 0.12);
-    }
+  .settings-footer {
+    flex-direction: column;
   }
 }
 </style>

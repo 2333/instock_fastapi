@@ -1,5 +1,7 @@
+from app.services.alert_subscription_service import AlertSubscriptionService
 from app.services.attention_service import AttentionService
 from app.services.backtest_service import BacktestService
+from app.services.event_service import EventService
 from app.services.fund_flow_service import FundFlowService
 from app.services.indicator_service import IndicatorService
 from app.services.pattern_service import PatternService
@@ -16,4 +18,6 @@ __all__ = [
     "SelectionService",
     "FundFlowService",
     "AttentionService",
+    "EventService",
+    "AlertSubscriptionService",
 ]

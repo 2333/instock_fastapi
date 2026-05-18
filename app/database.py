@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -67,10 +67,9 @@ def get_sync_session() -> Generator[Session, None, None]:
 
 
 async def init_db():
-    from app.models.stock_model import Base as StockBase
-
-    async with async_engine.begin() as conn:
-        await conn.run_sync(StockBase.metadata.create_all)
+    """Verify database connectivity without mutating Alembic-managed schema."""
+    async with async_engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
 
 
 async def close_db():

@@ -1,87 +1,123 @@
-# Phase 3 实施任务：P3-03 预警规则引擎 - 后端实现
+# Phase 3 实施任务：P3-03 参数化指标筛选与订阅提醒 - 实施方向
 
-## 任务目标
-完成预警规则引擎的后端基础：模型 + API + 定时检查任务框架。
+> Status: revised implementation input
+> Last updated: 2026-04-23
+> Role: implementation reference, not plan-of-record
+> Active execution entry: [docs/milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md](../m3/M3_P3-03_ALERT_ENGINE_PLAN.md)
 
-## 实施范围（本次）
+## 实施目标
 
-### 1. 数据库模型
-- `AlertCondition` - 预警条件定义
-- `Notification` - 通知记录（已存在，复用）
-- 索引设计：user_id + is_active + condition_type
+把 `P3-03` 从“单条阈值预警 CRUD”纠正为“参数化筛选 + 订阅提醒”的统一实现路径：
 
-### 2. API 端点（CRUD）
-- `GET /api/v1/alerts/conditions` - 列出我的预警
-- `POST /api/v1/alerts/conditions` - 创建预警
-- `PUT /api/v1/alerts/conditions/{id}` - 更新预警
-- `DELETE /api/v1/alerts/conditions/{id}` - 删除预警
-- `GET /api/v1/notifications` - 通知列表
-- `PATCH /api/v1/notifications/{id}/read` - 标记已读
+- 先建立 `Saved Screener` canonical envelope
+- 再建立 `Registry`
+- 再实现默认 adapter
+- 最后接入 `Alert Subscription`、runner 和 `Notification`
 
-### 3. 定时检查任务框架
-- 基础任务结构（每 5 分钟触发）
-- 查询活跃预警
-- 批量获取行情数据（待实现）
-- 条件判断逻辑框架
-- 通知创建逻辑
+## 实施分层
 
-### 4. 前端准备（后端只需提供接口）
-- 待后续 heartbeat 实现
+### 1. Authored Layer
 
-## 验收标准
-- [ ] AlertCondition 模型可通过 `Base.metadata.create_all` 自动建表
-- [ ] 5 个 CRUD 接口全部可用（含认证）
-- [ ] 定时任务框架可运行（开发环境手动触发）
-- [ ] 类型检查（vue-tsc 不涉及，后端 mypy/pyright 通过）
-- [ ] 测试 128/128 无回归
+持久化真相只允许：
 
-## 技术决策
+- `Saved Screener`
+- `Alert Subscription`
 
-### 预警条件存储格式
-```python
-class AlertCondition(Base):
-    condition: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    # 示例：
-    # { "type": "price", "operator": "gt", "value": 30.0 }
-    # { "type": "rsi", "operator": "lt", "value": 30 }
-    # { "type": "pattern", "pattern_name": "hammer" }
-```
-使用单一 JSONB 字段存储条件，灵活支持未来扩展。
+必须包含：
 
-### 定时任务执行器
-使用 Celery Beat（已存在）或简单 asyncio 循环（开发环境）：
-- 生产：Celery periodic task（5 分钟）
-- 开发：提供 `/api/v1/alerts/check` 手动触发端点
+- `schema_version`
+- `definition_version`
+- `definition_hash`
+- immutable snapshot 引用
 
-### 通知去重与冷却
-```python
-# 同条件 1 小时内不重复推送
-if last_triggered_at and (now - last_triggered_at) < timedelta(hours=1):
-    skip
-```
+### 2. Registry Layer
 
-## 文件清单
+每个模板/指标都应注册：
 
-### 新增
-- `app/models/alert_condition_model.py` - 预警条件模型
-- `app/models/notification_model.py` - 通知模型（如不存在）
-- `app/api/routers/alert_router.py` - 预警 API
-- `app/jobs/tasks/alert_checker.py` - 定时检查任务
-- `app/services/alert_service.py` - 预警业务逻辑
+- `key`
+- `version`
+- `param_schema`
+- `default_params`
+- `ui_schema`
+- `supported_triggers`
+- `capability_matrix`
 
-### 修改
-- `app/models/__init__.py` - 导出新模型
-- `app/api/routers/__init__.py` - 注册新路由
+### 3. Adapter Layer
 
-## 估算
-- 模型 + 迁移：1 小时
-- API 端点：2 小时
-- 定时任务框架：1 小时
-- 测试验证：1 小时
-- **总计：5 小时**
+统一接口建议：
 
----
+- `compile(definition, registry_version) -> compiled_plan`
+- `evaluate(compiled_plan, trade_date) -> run_result`
 
-**状态**: 待实施
-**优先级**: P0（Phase 3 首个实施任务）
-**依赖**: 无
+默认实现：
+
+- `SQL + TA-Lib`
+
+未来可替换实现：
+
+- `vbtpro`
+
+### 4. Execution History Layer
+
+至少保留：
+
+- `Run`
+- `Hit`
+- `Notification`
+
+要求：
+
+- 执行记录引用 definition snapshot
+- 历史命中不因后续编辑而改变语义
+
+## 推荐实施顺序
+
+### Phase 1. Canonical contract 与 registry
+
+- 定义 `Saved Screener` envelope
+- 定义 `Registry` 元数据输出
+- 冻结首批 `MACD / RSI / BOLL`
+- 明确 compatibility strategy
+
+### Phase 2. 手动筛选运行
+
+- 手动运行 API
+- `Selection` 结果预览
+- compiled hash / execution grouping
+- focused tests
+
+### Phase 3. 订阅提醒
+
+- `Alert Subscription`
+- 盘后 runner
+- dedupe / cooldown
+- `Notification`
+
+### Phase 4. 兼容与迁移
+
+- 旧 `selection_conditions.params` 包装迁移
+- 旧 `alert_conditions` 映射到 compatibility template
+- 明确 `attention.alert_conditions` 只读兼容，不再扩展
+
+## 必须避免的实现方向
+
+- 不要把 `alert_conditions(rule_type + threshold)` 继续扩成主模型
+- 不要再引入第二套 authored rule persistence
+- 不要把 TA-Lib / SQL / `vbtpro` 语义直接写进 persisted schema
+- 不要开放用户公式字符串、脚本表达式或原生 SQL
+
+## 兼容策略
+
+如共享环境已经落过窄版 `alert_conditions` migration，应采用“向 canonical model 迁移”的方式处理：
+
+- 把旧行映射到 compatibility template
+- 绑定到 `Saved Screener + Alert Subscription`
+- 保留通知读路径兼容
+- 不再新增以 `rule_type + threshold` 为核心的新 contract
+
+## 实施完成标准
+
+- 文档和实现都只有一个 authored truth source
+- 手动筛选与订阅提醒共用同一套 registry 和 adapter
+- 当前默认 adapter 可运行，future `vbtpro` 入口已被边界设计预留
+- 兼容对象被明确降级并写入迁移说明

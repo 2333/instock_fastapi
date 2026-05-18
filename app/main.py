@@ -10,10 +10,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.routers import (
+    alert_subscription_router,
     attention_router,
     auth_router,
     backtest_router,
     etf_router,
+    events_router,
     fact_router,
     fund_flow_router,
     indicator_router,
@@ -26,7 +28,11 @@ from app.api.routers import (
 from app.build_info import get_build_info
 from app.config import get_settings
 from app.database import close_db, init_db
-from app.jobs.scheduler import recover_missed_market_jobs, start_scheduler, stop_scheduler
+from app.jobs.scheduler import (
+    recover_missed_jobs,
+    start_scheduler,
+    stop_scheduler,
+)
 from app.logging_config import logger
 
 settings = get_settings()
@@ -37,13 +43,13 @@ build_info = get_build_info()
 async def lifespan(app: FastAPI):
     logger.info(f"Starting InStock API {build_info.release} ({build_info.git_sha})...")
     await init_db()
-    logger.info("Database initialized")
+    logger.info("Database connectivity verified")
     scheduler_started = False
     if settings.SCHEDULER_ENABLED:
         scheduler_started = start_scheduler()
         if scheduler_started:
             logger.info("Scheduler started")
-            app.state.market_recovery_task = asyncio.create_task(recover_missed_market_jobs())
+            app.state.scheduler_recovery_task = asyncio.create_task(recover_missed_jobs())
         else:
             logger.info("Scheduler skipped in this worker")
     else:
@@ -106,9 +112,11 @@ app.include_router(strategy_router.router, prefix="/api/v1")
 app.include_router(pattern_router.router, prefix="/api/v1")
 app.include_router(backtest_router.router, prefix="/api/v1")
 app.include_router(selection_router.router, prefix="/api/v1")
+app.include_router(alert_subscription_router.router, prefix="/api/v1")
 app.include_router(fund_flow_router.router, prefix="/api/v1")
 app.include_router(attention_router.router, prefix="/api/v1")
 app.include_router(auth_router.router, prefix="/api/v1")
+app.include_router(events_router.router, prefix="/api/v1")
 app.include_router(market_router.router, prefix="/api/v1")
 
 

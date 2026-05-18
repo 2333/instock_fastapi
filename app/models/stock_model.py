@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    CheckConstraint,
     ForeignKey,
     Index,
     Integer,
@@ -55,6 +56,23 @@ class UserSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+
+class UserEvent(Base):
+    __tablename__ = "user_events"
+    __table_args__ = (
+        Index("ix_user_events_user_created", "user_id", "created_at"),
+        Index("ix_user_events_event_type_created", "event_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    event_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    page: Mapped[str] = mapped_column(String(120), nullable=False)
+    referrer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    event_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class Stock(Base):
@@ -160,6 +178,65 @@ class Attention(Base):
     alert_conditions: Mapped[dict | None] = mapped_column(JSONB, nullable=True, comment="Alert thresholds: price_min, price_max, rsi_min, rsi_max")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+
+class AlertCondition(Base):
+    __tablename__ = "alert_conditions"
+    __table_args__ = (
+        Index("ix_alert_conditions_user_id", "user_id"),
+        Index("ix_alert_conditions_ts_code", "ts_code"),
+        UniqueConstraint(
+            "user_id",
+            "ts_code",
+            "rule_type",
+            "threshold",
+            name="uq_alert_conditions_user_ts_code_rule_type_threshold",
+        ),
+        CheckConstraint(
+            "rule_type IN ('price_above', 'price_below', 'change_above', 'change_below')",
+            name="ck_alert_conditions_rule_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    rule_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    threshold: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_user_id", "user_id"),
+        Index("ix_notifications_user_unread", "user_id", "is_read"),
+        Index("ix_notifications_alert_condition_id", "alert_condition_id"),
+        Index("ix_notifications_subscription_id", "subscription_id"),
+        Index("ix_notifications_alert_run_id", "alert_run_id"),
+        Index("uq_notifications_dedupe_key", "dedupe_key", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    alert_condition_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("alert_conditions.id"), nullable=True
+    )
+    subscription_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alert_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notification_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Indicator(Base):
     __tablename__ = "indicators"
@@ -295,19 +372,6 @@ class Strategy(Base):
     params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # 社交字段
-    is_public: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否公开到社区")
-    is_official: Mapped[bool] = mapped_column(Boolean, default=False, comment="官方认证策略")
-    rating: Mapped[float] = mapped_column(Numeric(3, 2), default=0.0, comment="平均评分 0-5")
-    rating_count: Mapped[int] = mapped_column(Integer, default=0, comment="评分人数")
-    favorite_count: Mapped[int] = mapped_column(Integer, default=0, comment="收藏数")
-    comment_count: Mapped[int] = mapped_column(Integer, default=0, comment="评论数")
-    backtest_count: Mapped[int] = mapped_column(Integer, default=0, comment="被回测次数")
-    view_count: Mapped[int] = mapped_column(Integer, default=0, comment="查看次数")
-    tags: Mapped[list[str]] = mapped_column(JSONB, default=list, comment="质量标签")
-    risk_level: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="风险等级 low/medium/high")
-    suitable_market: Mapped[str | None] = mapped_column(String(50), nullable=True, comment="适用市场 bull/bear/sideway")
-
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -366,7 +430,98 @@ class SelectionCondition(Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     params: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    definition_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class AlertSubscription(Base):
+    __tablename__ = "alert_subscriptions"
+    __table_args__ = (
+        Index("ix_alert_subscriptions_user_id", "user_id"),
+        Index("ix_alert_subscriptions_selection_condition_id", "selection_condition_id"),
+        Index("ix_alert_subscriptions_status", "status"),
+        UniqueConstraint(
+            "user_id",
+            "selection_condition_id",
+            "definition_hash",
+            "schedule_type",
+            name="uq_alert_subscriptions_user_condition_hash_schedule",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    selection_condition_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    schedule_type: Mapped[str] = mapped_column(String(20), nullable=False, default="post_close")
+    cooldown_trade_days: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    last_run_trade_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_notified_trade_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    stale_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class AlertRun(Base):
+    __tablename__ = "alert_runs"
+    __table_args__ = (
+        Index("ix_alert_runs_subscription_id", "subscription_id"),
+        Index("ix_alert_runs_trade_date", "trade_date"),
+        Index("ix_alert_runs_user_id", "user_id"),
+        UniqueConstraint(
+            "subscription_id",
+            "trade_date",
+            "definition_hash",
+            name="uq_alert_runs_subscription_trade_date_definition_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    selection_condition_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    definition_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="completed")
+    match_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_match_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    notification_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AlertRunHit(Base):
+    __tablename__ = "alert_run_hits"
+    __table_args__ = (
+        Index("ix_alert_run_hits_run_id", "run_id"),
+        Index("ix_alert_run_hits_ts_code", "ts_code"),
+        UniqueConstraint("run_id", "ts_code", name="uq_alert_run_hits_run_ts_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ts_code: Mapped[str] = mapped_column(String(20), nullable=False)
+    trade_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    signal: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

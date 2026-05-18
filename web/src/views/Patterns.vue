@@ -192,15 +192,6 @@
         @touchstart.prevent="startFilterResize"
       ></div>
 
-      <div
-        class="panel-resizer"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="调整形态筛选宽度"
-        @mousedown="startFilterResize"
-        @touchstart.prevent="startFilterResize"
-      ></div>
-
       <main class="results-panel">
         <div class="results-header">
           <div class="results-summary">

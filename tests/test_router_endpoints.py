@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.build_info import get_build_info
-from app.core.dependencies import get_current_user, get_provider
+from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.main import app
 
@@ -274,7 +274,7 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         name="低回撤",
         category="technical",
         description="desc",
-        params={"rsi": 30},
+        params={"rsiMax": 30, "market": "sz"},
         is_active=True,
     )
     list_result = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [condition]))
@@ -287,7 +287,14 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
 
     fake_db = SimpleNamespace(
         execute=AsyncMock(
-            side_effect=[list_result, missing_result, existing_result, existing_result]
+            side_effect=[
+                list_result,
+                missing_result,
+                existing_result,
+                existing_result,
+                existing_result,
+                existing_result,
+            ]
         ),
         add=Mock(),
         commit=AsyncMock(),
@@ -299,7 +306,63 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         yield fake_db
 
     app.dependency_overrides[get_db] = override_router_db
-    app.dependency_overrides[get_provider] = lambda: None  # 强制回退到父类实现以便patch生效
+
+    run_selection_mock = AsyncMock(
+        return_value=[
+            {
+                "ts_code": "000001.SZ",
+                "code": "000001",
+                "stock_name": "平安银行",
+                "trade_date": "20240102",
+                "date": "20240102",
+                "close": 10.6,
+                "change_rate": 2.5,
+                "amount": 300000000.0,
+                "score": 15.5,
+                "signal": "buy",
+                "reason_summary": "Change >= 1.50%; Market = sz",
+                "evidence": [
+                    {
+                        "key": "change_rate",
+                        "label": "Daily change",
+                        "value": 2.5,
+                        "operator": ">=",
+                        "condition": 1.5,
+                        "matched": True,
+                    },
+                    {
+                        "key": "market",
+                        "label": "Market",
+                        "value": "sz",
+                        "operator": "=",
+                        "condition": "sz",
+                        "matched": True,
+                    },
+                ],
+                "reason": {
+                    "summary": "Change >= 1.50%; Market = sz",
+                    "evidence": [
+                        {
+                            "key": "change_rate",
+                            "label": "Daily change",
+                            "value": 2.5,
+                            "operator": ">=",
+                            "condition": 1.5,
+                            "matched": True,
+                        },
+                        {
+                            "key": "market",
+                            "label": "Market",
+                            "value": "sz",
+                            "operator": "=",
+                            "condition": "sz",
+                            "matched": True,
+                        },
+                    ],
+                },
+            }
+        ]
+    )
 
     try:
         with (
@@ -313,62 +376,7 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.run_selection",
-                new=AsyncMock(
-                    return_value=[
-                        {
-                            "ts_code": "000001.SZ",
-                            "code": "000001",
-                            "stock_name": "平安银行",
-                            "trade_date": "20240102",
-                            "date": "20240102",
-                            "close": 10.6,
-                            "change_rate": 2.5,
-                            "amount": 300000000.0,
-                            "score": 15.5,
-                            "signal": "buy",
-                            "reason_summary": "Change >= 1.50%; Market = sz",
-                            "evidence": [
-                                {
-                                    "key": "change_rate",
-                                    "label": "Daily change",
-                                    "value": 2.5,
-                                    "operator": ">=",
-                                    "condition": 1.5,
-                                    "matched": True,
-                                },
-                                {
-                                    "key": "market",
-                                    "label": "Market",
-                                    "value": "sz",
-                                    "operator": "=",
-                                    "condition": "sz",
-                                    "matched": True,
-                                },
-                            ],
-                            "reason": {
-                                "summary": "Change >= 1.50%; Market = sz",
-                                "evidence": [
-                                    {
-                                        "key": "change_rate",
-                                        "label": "Daily change",
-                                        "value": 2.5,
-                                        "operator": ">=",
-                                        "condition": 1.5,
-                                        "matched": True,
-                                    },
-                                    {
-                                        "key": "market",
-                                        "label": "Market",
-                                        "value": "sz",
-                                        "operator": "=",
-                                        "condition": "sz",
-                                        "matched": True,
-                                    },
-                                ],
-                            },
-                        }
-                    ]
-                ),
+                new=run_selection_mock,
             ),
             patch(
                 "app.api.routers.selection_router.SelectionService.get_history",
@@ -391,14 +399,41 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
         ):
             conditions = await client.get("/api/v1/selection/conditions")
             screening_metadata = await client.get("/api/v1/screening/metadata")
+            screening_templates = await client.get("/api/v1/screening/templates")
             my_conditions = await client.get("/api/v1/selection/my-conditions")
             create_response = await client.post(
                 "/api/v1/selection/my-conditions",
-                json={"name": "低回撤", "category": "technical", "description": "desc"},
+                json={
+                    "name": "低回撤",
+                    "category": "technical",
+                    "description": "desc",
+                    "params": {"rsiMax": 30, "market": "sz"},
+                },
             )
             update_response = await client.put(
                 "/api/v1/selection/my-conditions/1",
-                json={"name": "低回撤2", "category": "technical", "description": "desc"},
+                json={
+                    "name": "低回撤2",
+                    "category": "technical",
+                    "description": "desc",
+                    "definition": {
+                        "kind": "saved_screener",
+                        "ast_version": 1,
+                        "registry_version": 1,
+                        "scope": {"market": "sz"},
+                        "root": {
+                            "type": "group",
+                            "op": "all",
+                            "children": [
+                                {
+                                    "type": "predicate",
+                                    "rule_key": "macdBullish",
+                                    "params": {"value": True},
+                                }
+                            ],
+                        },
+                    },
+                },
             )
             delete_response = await client.delete("/api/v1/selection/my-conditions/1")
             run_response = await client.post(
@@ -406,19 +441,55 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
             )
             screening_run_response = await client.post(
                 "/api/v1/screening/run",
-                json={"filters": {"changeMin": 1.5}, "scope": {"market": "sz", "limit": 50}},
+                json={
+                    "filters": {"changeMin": 999},
+                    "scope": {"limit": 50},
+                    "definition": {
+                        "kind": "saved_screener",
+                        "ast_version": 1,
+                        "registry_version": 1,
+                        "scope": {"market": "sz"},
+                        "root": {
+                            "type": "group",
+                            "op": "all",
+                            "children": [
+                                {
+                                    "type": "predicate",
+                                    "rule_key": "changeMin",
+                                    "params": {"value": 1.5},
+                                }
+                            ],
+                        },
+                    },
+                },
             )
             history_response = await client.get("/api/v1/selection/history")
             screening_history_response = await client.get("/api/v1/screening/history")
     finally:
         app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(get_provider, None)
 
     assert conditions.json()["markets"] == ["沪市", "深市", "创业板", "科创板"]
     assert screening_metadata.json()["data"]["filter_fields"][0]["key"] == "priceMin"
+    assert screening_templates.json()["data"][0]["id"] == "macd-golden-cross"
     assert my_conditions.json()[0]["name"] == "低回撤"
+    assert my_conditions.json()[0]["params"] == {"market": "sz", "rsiMax": 30}
+    assert my_conditions.json()[0]["definition"]["kind"] == "saved_screener"
+    assert my_conditions.json()[0]["schema_version"] == 1
+    assert my_conditions.json()[0]["definition_version"] == 1
+    assert my_conditions.json()[0]["definition_hash"]
+    assert my_conditions.json()[0]["updated_at"] is None
     assert create_response.status_code == 200
+    assert create_response.json()["params"] == {"market": "sz", "rsiMax": 30}
+    assert create_response.json()["definition"]["scope"]["market"] == "sz"
+    assert create_response.json()["schema_version"] == 1
+    assert create_response.json()["definition_version"] == 1
+    assert create_response.json()["definition_hash"]
     assert update_response.json()["name"] == "低回撤2"
+    assert update_response.json()["params"] == {"market": "sz", "macdBullish": True}
+    assert update_response.json()["definition"]["root"]["children"][0]["rule_key"] == "macdBullish"
+    assert update_response.json()["schema_version"] == 1
+    assert update_response.json()["definition_version"] == 2
+    assert update_response.json()["definition_hash"]
     assert delete_response.json()["status"] == "success"
     assert run_response.json()["success"] is True
     assert run_response.json()["data"][0]["code"] == "000001"
@@ -427,11 +498,18 @@ async def test_selection_endpoints_cover_crud_and_service_calls(client, current_
     assert screening_run_response.json()["success"] is True
     assert screening_run_response.json()["data"]["total"] == 1
     assert screening_run_response.json()["data"]["query"]["scope"]["limit"] == 50
+    assert screening_run_response.json()["data"]["query"]["scope"]["market"] == "sz"
+    assert screening_run_response.json()["data"]["query"]["filters"]["changeMin"] == 1.5
+    assert screening_run_response.json()["data"]["query"]["definition"]["kind"] == "saved_screener"
+    assert screening_run_response.json()["data"]["query"]["definition_hash"]
     assert screening_run_response.json()["data"]["items"][0]["evidence"][0]["key"] == "change_rate"
     assert (
         screening_run_response.json()["data"]["items"][0]["reason"]["evidence"][1]["condition"]
         == "sz"
     )
+    assert run_selection_mock.await_count == 2
+    assert run_selection_mock.await_args_list[1].kwargs["definition"]["scope"]["market"] == "sz"
+    assert run_selection_mock.await_args_list[1].args[0]["changeMin"] == 1.5
     assert history_response.json()["success"] is True
     assert history_response.json()["data"][0]["code"] == "000001"
     assert history_response.json()["data"][0]["signal"] == "hold"
@@ -455,14 +533,24 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
     list_result = SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [strategy]))
     missing_result = SimpleNamespace(scalar_one_or_none=lambda: None)
     existing_result = SimpleNamespace(scalar_one_or_none=lambda: strategy)
+    mutation_result = SimpleNamespace()
 
-    async def refresh_strategy(obj):
+    async def refresh_strategy(obj, attribute_names=None):
         if getattr(obj, "id", None) is None:
             obj.id = 1
 
     fake_db = SimpleNamespace(
         execute=AsyncMock(
-            side_effect=[list_result, missing_result, existing_result, existing_result]
+            side_effect=[
+                list_result,
+                missing_result,
+                existing_result,
+                missing_result,
+                existing_result,
+                mutation_result,
+                mutation_result,
+                mutation_result,
+            ]
         ),
         add=Mock(),
         commit=AsyncMock(),
@@ -541,7 +629,7 @@ async def test_strategy_endpoints_cover_crud_and_service_calls(client, current_u
 
 @pytest.mark.asyncio
 async def test_strategy_create_persists_params_payload(client, current_user_override):
-    async def refresh_strategy(obj):
+    async def refresh_strategy(obj, attribute_names=None):
         if getattr(obj, "id", None) is None:
             obj.id = 9
         if getattr(obj, "user_id", None) is None:
@@ -602,7 +690,7 @@ async def test_strategy_update_normalizes_flat_backtest_payload(client, current_
         is_active=True,
     )
 
-    async def refresh_strategy(obj):
+    async def refresh_strategy(obj, attribute_names=None):
         return obj
 
     fake_db = SimpleNamespace(

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_current_user, get_provider
+from app.core.dependencies import get_current_user
 from app.database import get_db
 from app.models.stock_model import SelectionCondition, User
 from app.schemas.selection_schema import (
@@ -24,10 +24,39 @@ from app.schemas.selection_schema import (
     SelectionRequest,
     SelectionResponse,
 )
+from app.services.alert_subscription_service import AlertSubscriptionService
+from app.services.screener_adapter import (
+    build_saved_screener_persistence,
+    get_saved_screener_schema_version,
+    normalize_saved_screener_payload,
+)
 from app.services.selection_service import SelectionService
-from core.providers.market_data_provider import MarketDataProvider
 
 router = APIRouter()
+
+
+def _serialize_selection_condition(condition: SelectionCondition) -> dict:
+    canonical_definition, compatible_params, derived_definition_hash = (
+        normalize_saved_screener_payload(
+            params=getattr(condition, "params", None),
+        )
+    )
+    return {
+        "id": condition.id,
+        "user_id": condition.user_id,
+        "name": condition.name,
+        "category": condition.category,
+        "description": condition.description,
+        "params": compatible_params,
+        "definition": canonical_definition,
+        "schema_version": getattr(condition, "schema_version", None)
+        or get_saved_screener_schema_version(),
+        "definition_version": getattr(condition, "definition_version", None) or 1,
+        "definition_hash": getattr(condition, "definition_hash", None) or derived_definition_hash,
+        "is_active": condition.is_active,
+        "updated_at": getattr(condition, "updated_at", None)
+        or getattr(condition, "created_at", None),
+    }
 
 
 @router.get("/selection/conditions", response_model=SelectionConditionsMetaResponse)
@@ -54,7 +83,12 @@ async def get_my_conditions(
 ):
     stmt = select(SelectionCondition).where(SelectionCondition.user_id == current_user.id)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    return [_serialize_selection_condition(item) for item in result.scalars().all()]
+
+
+@router.get("/screening/templates", response_model=ScreeningTemplateListResponse)
+async def get_screening_templates() -> ScreeningTemplateListResponse:
+    return ScreeningTemplateListResponse(data=SelectionService.get_templates())
 
 
 @router.post("/selection/my-conditions", response_model=SelectionConditionResponse)
@@ -63,6 +97,10 @@ async def create_condition(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    persistence = build_saved_screener_persistence(
+        params=condition.params,
+        definition=condition.definition,
+    )
     stmt = select(SelectionCondition).where(
         SelectionCondition.user_id == current_user.id, SelectionCondition.name == condition.name
     )
@@ -76,13 +114,16 @@ async def create_condition(
         name=condition.name,
         category=condition.category,
         description=condition.description,
-        params=condition.params,
+        params=persistence["definition"],
+        schema_version=persistence["schema_version"],
+        definition_version=persistence["definition_version"],
+        definition_hash=persistence["definition_hash"],
         is_active=condition.is_active,
     )
     db.add(new_condition)
     await db.commit()
     await db.refresh(new_condition)
-    return new_condition
+    return _serialize_selection_condition(new_condition)
 
 
 @router.put("/selection/my-conditions/{condition_id}", response_model=SelectionConditionResponse)
@@ -100,15 +141,42 @@ async def update_condition(
     if not existing:
         raise HTTPException(status_code=404, detail="条件不存在")
 
+    persistence = build_saved_screener_persistence(
+        params=condition.params,
+        definition=condition.definition,
+        existing_params=existing.params,
+        existing_definition_version=getattr(existing, "definition_version", None),
+    )
+    previous_definition_hash = getattr(existing, "definition_hash", None)
+    previous_definition_version = getattr(existing, "definition_version", None)
+
     existing.name = condition.name
     existing.category = condition.category
     existing.description = condition.description
-    existing.params = condition.params
+    existing.params = persistence["definition"]
+    existing.schema_version = persistence["schema_version"]
+    existing.definition_hash = persistence["definition_hash"]
+    existing.definition_version = persistence["definition_version"]
     existing.is_active = condition.is_active
 
     await db.commit()
+    if (hasattr(existing, "definition_version") or hasattr(existing, "definition_hash")) and (
+        previous_definition_hash != persistence["definition_hash"]
+        or previous_definition_version != persistence["definition_version"]
+        or not condition.is_active
+    ):
+        await AlertSubscriptionService.mark_subscriptions_stale_for_screener(
+            db,
+            selection_condition_id=existing.id,
+            reason=(
+                "筛选器已停用，需要重新确认订阅"
+                if not condition.is_active
+                else "筛选器定义已变化，需要重新创建订阅"
+            ),
+        )
+        await db.commit()
     await db.refresh(existing)
-    return existing
+    return _serialize_selection_condition(existing)
 
 
 @router.delete("/selection/my-conditions/{condition_id}")
@@ -125,6 +193,12 @@ async def delete_condition(
     if not existing:
         raise HTTPException(status_code=404, detail="条件不存在")
 
+    if hasattr(existing, "definition_version") or hasattr(existing, "definition_hash"):
+        await AlertSubscriptionService.mark_subscriptions_stale_for_screener(
+            db,
+            selection_condition_id=existing.id,
+            reason="筛选器已删除，需要重新创建订阅",
+        )
     await db.delete(existing)
     await db.commit()
     return {"status": "success", "message": "条件已删除"}
@@ -136,14 +210,20 @@ async def run_selection(
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    provider: MarketDataProvider = Depends(get_provider),
 ) -> SelectionResponse:
-    """Selection endpoint using provider-based service."""
-    service = SelectionService(db=db, provider=provider)
-    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
-    if request.scope.market and "market" not in conditions:
-        conditions["market"] = request.scope.market
-    items = await service.run_selection(conditions, date, limit=request.scope.limit)
+    """Run the canonical saved-screener adapter path."""
+    service = SelectionService(db=db)
+    canonical_definition, compatible_filters, _ = normalize_saved_screener_payload(
+        params=request.filters.model_dump(by_alias=True, exclude_none=True),
+        definition=request.definition,
+        scope=request.scope,
+    )
+    items = await service.run_selection(
+        compatible_filters,
+        date,
+        limit=request.scope.limit,
+        definition=canonical_definition,
+    )
     return SelectionResponse(data=items)
 
 
@@ -153,22 +233,32 @@ async def run_screening(
     date: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    provider: MarketDataProvider = Depends(get_provider),
 ) -> ScreeningRunResponse:
-    """Main screening endpoint with provider-based service."""
-    service = SelectionService(db=db, provider=provider)
-    conditions = request.filters.model_dump(by_alias=True, exclude_none=True)
-    if request.scope.market and "market" not in conditions:
-        conditions["market"] = request.scope.market
-    items = await service.run_selection(conditions, date, limit=request.scope.limit)
+    """Run the canonical saved-screener adapter path."""
+    service = SelectionService(db=db)
+    canonical_definition, compatible_filters, definition_hash = normalize_saved_screener_payload(
+        params=request.filters.model_dump(by_alias=True, exclude_none=True),
+        definition=request.definition,
+        scope=request.scope,
+    )
+    items = await service.run_selection(
+        compatible_filters,
+        date,
+        limit=request.scope.limit,
+        definition=canonical_definition,
+    )
     resolved_trade_date = (
         items[0]["trade_date"] if items else await service._resolve_trade_date(date)
     )
+    resolved_scope = dict(canonical_definition.get("scope") or {})
+    resolved_scope["limit"] = request.scope.limit
     return ScreeningRunResponse(
         data=ScreeningRunData(
             query=ScreeningQuery(
-                filters=request.filters,
-                scope=request.scope,
+                filters=compatible_filters,
+                scope=resolved_scope,
+                definition=canonical_definition,
+                definition_hash=definition_hash,
                 trade_date=resolved_trade_date,
             ),
             items=items,

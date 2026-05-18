@@ -71,8 +71,7 @@ provide('isAuthenticated', isAuthenticated)
 onMounted(async () => {
   if (authApi.isAuthenticated()) {
     try {
-      await authApi.getMe()
-      await loadUserPreferences(true)
+      await Promise.all([authApi.getMe(), loadUserPreferences(true)])
     } catch (e) {
       authApi.removeToken()
     }

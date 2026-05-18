@@ -11,18 +11,22 @@
 - [M1_RESTART_PLAN.md](./M1_RESTART_PLAN.md) - 当前 source of truth
 - [DATA_LAYER_REPORT.md](./DATA_LAYER_REPORT.md)
 - [M1_INITIATION_TASKS.md](./M1_INITIATION_TASKS.md)
-- [M1_READINESS_SUMMARY.md](./M1_READINESS_SUMMARY.md)
-- [M1_KICKOFF_CHECKLIST.md](./M1_KICKOFF_CHECKLIST.md)
 - [M1_TUSHARE_TOKEN_BLOCK.md](./M1_TUSHARE_TOKEN_BLOCK.md)
-- [M1_PROGRESS_TRACKER.md](./M1_PROGRESS_TRACKER.md)
 
 ## 任务与模板
 
 - [M1_TASK_BREAKDOWN.md](./M1_TASK_BREAKDOWN.md)
 - 当前只迁移 `origin/main` 已存在的 `M1` 文档；旧长分支上的额外 `M1_TASK_WS*.md` 任务包不纳入本次 rebaseline PR。
 
+## 已归档的旧启动资料
+
+- [M1_READINESS_SUMMARY.md](./M1_READINESS_SUMMARY.md) - 原文已归档到 `docs/archive/m1/`
+- [M1_KICKOFF_CHECKLIST.md](./M1_KICKOFF_CHECKLIST.md) - 原文已归档到 `docs/archive/m1/`
+- [M1_PROGRESS_TRACKER.md](./M1_PROGRESS_TRACKER.md) - 原文已归档到 `docs/archive/m1/`
+
 ## 当前使用约定
 
 - `M1_RESTART_PLAN.md` 是重启后的执行口径。
+- `M1_READINESS_SUMMARY.md`、`M1_KICKOFF_CHECKLIST.md`、`M1_PROGRESS_TRACKER.md` 的原始内容已归档；当前目录下保留的是跳转说明页。
 - 其他文档目前作为 `M1` 准备资产和历史分析保留，不代表 `M1` 已正式启动。
 - 如旧文档仍指向 `scripts/check_m1_readiness.py` 等已删除脚本，不要直接执行，需按 restart plan 重新做当前仓库的 readiness check。

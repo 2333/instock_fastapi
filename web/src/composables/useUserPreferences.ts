@@ -1,7 +1,8 @@
 import { computed, ref } from 'vue'
 import { authApi } from '@/api'
+import { applyLocaleFromSettings } from '@/composables/useLocale'
 
-export type HomeRoute = '/' | '/workspace'
+export type HomeRoute = '/'
 
 export interface UserPreferences {
   defaultHome: HomeRoute
@@ -13,8 +14,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   defaultHome: '/',
 }
 
-const normalizeHomeRoute = (value: unknown): HomeRoute => {
-  return value === '/workspace' ? '/workspace' : '/'
+const normalizeHomeRoute = (_value: unknown): HomeRoute => {
+  return '/'
 }
 
 const normalizePreferences = (value: unknown): UserPreferences => {
@@ -34,10 +35,12 @@ const readStoredPreferences = (): UserPreferences => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
     if (!raw) return DEFAULT_PREFERENCES
-    return {
+    const normalized = {
       ...DEFAULT_PREFERENCES,
       ...normalizePreferences(JSON.parse(raw)),
     }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized))
+    return normalized
   } catch {
     return DEFAULT_PREFERENCES
   }
@@ -84,6 +87,7 @@ export const loadUserPreferences = async (force = false) => {
 
   try {
     const settings = await authApi.getSettings()
+    applyLocaleFromSettings(settings)
     const next = normalizePreferences(settings?.extra)
     persistPreferences(next)
     return next

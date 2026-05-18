@@ -4,13 +4,42 @@ export type Locale = 'zh' | 'en'
 
 const STORAGE_KEY = 'instock_locale'
 
-const initial = (() => {
-  if (typeof window === 'undefined') return 'zh' as Locale
-  const saved = window.localStorage.getItem(STORAGE_KEY)
-  return saved === 'en' ? 'en' : 'zh'
-})()
+export const normalizeLocale = (value: unknown): Locale => {
+  if (typeof value === 'string' && value.toLowerCase().startsWith('en')) {
+    return 'en'
+  }
+  return 'zh'
+}
 
-const locale = ref<Locale>(initial)
+const readStoredLocale = (): Locale => {
+  if (typeof window === 'undefined') return 'zh'
+
+  try {
+    return normalizeLocale(window.localStorage.getItem(STORAGE_KEY))
+  } catch {
+    return 'zh'
+  }
+}
+
+const persistLocale = (value: Locale) => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(STORAGE_KEY, value)
+  } catch {
+    // Some browsers or privacy modes can block localStorage writes.
+  }
+}
+
+const syncDocumentLocale = (value: Locale) => {
+  if (typeof document === 'undefined') return
+
+  document.documentElement.lang = value === 'en' ? 'en' : 'zh-CN'
+  document.documentElement.setAttribute('data-locale', value)
+}
+
+const locale = ref<Locale>(readStoredLocale())
+syncDocumentLocale(locale.value)
 
 const messages: Record<Locale, Record<string, string>> = {
   zh: {
@@ -100,6 +129,40 @@ const messages: Record<Locale, Record<string, string>> = {
     tv_no_symbol: '当前股票暂未映射到 TradingView 代码，无法展示高级分析视图。',
     tv_data_level_a_share: '当前 A 股 widget 数据级别以日线为主，小时/分钟级别通常不可用。',
     tv_data_level_bj: '北交所符号在 TradingView widget 中的覆盖度需要逐个标的验证。',
+    login_tagline: '智能股票分析平台',
+    login_username: '用户名',
+    login_username_placeholder: '请输入用户名',
+    login_password: '密码',
+    login_password_placeholder: '请输入密码',
+    login_submit: '登录',
+    login_submitting: '登录中...',
+    login_error_default: '登录失败，请检查用户名和密码',
+    login_register_prompt: '还没有账号?',
+    login_register_link: '立即注册',
+    register_title: '注册新账号',
+    register_email: '邮箱',
+    register_email_placeholder: '请输入邮箱',
+    register_submit: '注册',
+    register_submitting: '注册中...',
+    register_cancel: '取消',
+    register_success: '注册成功，请登录',
+    register_error_default: '注册失败',
+    settings_page_title: '设置',
+    settings_page_subtitle: '仅展示当前已经接入并会生效的偏好设置',
+    settings_current_section: '当前可配置',
+    settings_language_label: '语言',
+    settings_language_help: '切换界面语言，并同步到账户设置。',
+    settings_default_home_label: '默认首页',
+    settings_default_home_help: '当前主线入口固定为首页工作台，`/workspace` 不再作为默认首页或主导航入口。',
+    settings_default_home_value: '首页工作台',
+    settings_unavailable_section: '当前未开放',
+    settings_unavailable_help: '数据刷新频率、通知提醒、图表默认指标等偏好尚未接入当前主线合同，因此这里不再提供可配置入口。',
+    settings_save: '保存更改',
+    settings_saving: '保存中...',
+    settings_reset: '恢复默认',
+    settings_load_fallback: '暂时无法读取服务器设置，页面将继续使用本地偏好。',
+    settings_saved: '已保存当前可用偏好设置。',
+    settings_save_failed: '保存失败，请稍后重试。',
   },
   en: {
     nav_home: 'Home',
@@ -188,15 +251,58 @@ const messages: Record<Locale, Record<string, string>> = {
     tv_no_symbol: 'This symbol is not mapped to TradingView yet, so the advanced chart cannot be displayed.',
     tv_data_level_a_share: 'For A-shares, widget data is mostly end-of-day only, so hourly and minute timeframes are usually unavailable.',
     tv_data_level_bj: 'Coverage for Beijing Exchange symbols in the TradingView widget should be validated ticker by ticker.',
+    login_tagline: 'Smart Stock Analysis Platform',
+    login_username: 'Username',
+    login_username_placeholder: 'Enter your username',
+    login_password: 'Password',
+    login_password_placeholder: 'Enter your password',
+    login_submit: 'Sign In',
+    login_submitting: 'Signing in...',
+    login_error_default: 'Login failed. Please check your username and password.',
+    login_register_prompt: "Don't have an account?",
+    login_register_link: 'Create one',
+    register_title: 'Create an Account',
+    register_email: 'Email',
+    register_email_placeholder: 'Enter your email',
+    register_submit: 'Register',
+    register_submitting: 'Registering...',
+    register_cancel: 'Cancel',
+    register_success: 'Registration succeeded. Please sign in.',
+    register_error_default: 'Registration failed.',
+    settings_page_title: 'Settings',
+    settings_page_subtitle: 'Only preferences that are already wired up and effective remain available here.',
+    settings_current_section: 'Available Now',
+    settings_language_label: 'Language',
+    settings_language_help: 'Change the interface language and sync it to your account settings.',
+    settings_default_home_label: 'Default Home',
+    settings_default_home_help: 'The current W3 path keeps the home workbench as the fixed entry. `/workspace` is no longer exposed as the default home or primary navigation target.',
+    settings_default_home_value: 'Home Workbench',
+    settings_unavailable_section: 'Not Available Yet',
+    settings_unavailable_help: 'Refresh cadence, alerts, and default chart indicators are not part of the active W3 contract yet, so they are intentionally not exposed here.',
+    settings_save: 'Save Changes',
+    settings_saving: 'Saving...',
+    settings_reset: 'Restore Default',
+    settings_load_fallback: 'Server settings are temporarily unavailable. The page will keep using your local preference.',
+    settings_saved: 'Available preferences have been saved.',
+    settings_save_failed: 'Save failed. Please try again later.',
   },
+}
+
+export const applyLocale = (value: unknown): Locale => {
+  const nextLocale = normalizeLocale(value)
+  locale.value = nextLocale
+  persistLocale(nextLocale)
+  syncDocumentLocale(nextLocale)
+  return nextLocale
+}
+
+export const applyLocaleFromSettings = (settings: { language?: unknown } | null | undefined): Locale => {
+  return applyLocale(settings?.language)
 }
 
 export function useLocale() {
   const setLocale = (value: Locale) => {
-    locale.value = value
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, value)
-    }
+    applyLocale(value)
   }
 
   const toggleLocale = () => {

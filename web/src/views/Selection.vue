@@ -2,29 +2,56 @@
   <div class="selection-page">
     <div class="page-header">
       <div class="header-left">
-        <h1>股票精选</h1>
-        <p class="subtitle">运行规范筛选并进入个股验证详情</p>
+        <span class="eyebrow">M3 参数化筛选</span>
+        <h1>选股扫描台</h1>
+        <p class="subtitle">先设置条件，再点击开始筛选；修改条件不会自动生效。</p>
       </div>
       <div class="header-right">
-        <button class="btn btn-secondary" @click="toggleCriteriaPanel">
-          {{ criteriaCollapsed ? '展开条件' : '收起条件' }}
-        </button>
-        <button class="btn btn-secondary" @click="saveCriteria">保存条件</button>
-        <button class="btn btn-secondary" @click="saveCurrentStrategy" :disabled="savingStrategy">
-          {{ savingStrategy ? '保存中...' : '保存为策略' }}
-        </button>
-        <button
-          class="btn btn-primary"
-          @click="saveStrategyAndGoBacktest"
-          :disabled="savingStrategy || !hasResults"
-        >
-          {{ savingStrategy ? '保存中...' : '保存并去回测' }}
-        </button>
-        <button class="btn btn-primary" @click="runSelection" :disabled="loading">
+        <button class="btn btn-primary btn-hero" @click="runSelection" :disabled="loading">
           {{ loading ? '运行中...' : '开始筛选' }}
         </button>
+        <div class="secondary-actions">
+          <button class="btn btn-secondary" @click="saveCriteria">保存筛选器</button>
+          <button class="btn btn-secondary" @click="saveCurrentStrategy" :disabled="savingStrategy">
+            {{ savingStrategy ? '保存中...' : '保存为策略' }}
+          </button>
+          <button
+            class="btn btn-secondary"
+            @click="saveStrategyAndGoBacktest"
+            :disabled="savingStrategy || !hasResults"
+          >
+            {{ savingStrategy ? '保存中...' : '保存并去回测' }}
+          </button>
+          <button class="btn btn-quiet" @click="toggleCriteriaPanel">
+            {{ criteriaCollapsed ? '展开条件' : '收起条件' }}
+          </button>
+        </div>
       </div>
     </div>
+
+    <section class="workflow-guide" aria-label="选股使用步骤">
+      <div class="workflow-step active">
+        <span class="step-index">1</span>
+        <div>
+          <strong>设置条件</strong>
+          <p>全部字段都是可选；不填写就是不限。</p>
+        </div>
+      </div>
+      <div class="workflow-step">
+        <span class="step-index">2</span>
+        <div>
+          <strong>开始筛选</strong>
+          <p>只有点击“开始筛选”才会执行扫描。</p>
+        </div>
+      </div>
+      <div class="workflow-step">
+        <span class="step-index">3</span>
+        <div>
+          <strong>保存与订阅</strong>
+          <p>满意后保存筛选器，再创建盘后订阅。</p>
+        </div>
+      </div>
+    </section>
 
     <div class="selection-layout">
       <aside
@@ -33,55 +60,31 @@
         class="criteria-panel"
         :style="{ width: `${criteriaPanelWidth}px` }"
       >
-        <div v-if="!templatesCollapsed" class="panel-section templates-section">
+        <div class="panel-section start-section">
           <div class="section-heading">
-            <h3>快捷模板</h3>
-            <p class="section-hint">一键应用常用筛选组合</p>
+            <h3>从这里开始</h3>
+            <p>建议先只设置 1-2 个条件，运行后再逐步增加。当前已启用 {{ activeFilterCount }} 个条件。</p>
           </div>
-          <div v-if="templatesLoading" class="templates-loading">加载中...</div>
-          <div v-else class="templates-grid">
-            <button
-              v-for="tpl in templates"
-              :key="tpl.id"
-              class="template-card"
-              @click="applyTemplate(tpl)"
-            >
-              <span class="template-icon">{{ tpl.icon }}</span>
-              <span class="template-name">{{ tpl.name }}</span>
-              <span class="template-desc">{{ tpl.description }}</span>
-            </button>
+          <div class="effect-note">
+            <span>不会自动扫描</span>
+            <strong>调整任意字段后，请点击右上角“开始筛选”。</strong>
           </div>
-          <button class="templates-toggle" @click="templatesCollapsed = true">收起模板</button>
-        </div>
-
-        <div v-if="recentTemplates.length && !templatesCollapsed" class="panel-section recent-templates-section">
-          <div class="section-heading">
-            <h3>最近使用</h3>
-            <p class="section-hint">快速重新应用最近使用的模板</p>
-          </div>
-          <div class="recent-templates-grid">
-            <button
-              v-for="tpl in recentTemplates"
-              :key="tpl.id"
-              class="template-card recent-template-card"
-              @click="applyTemplate(tpl)"
-            >
-              <span class="template-icon">{{ tpl.icon }}</span>
-              <span class="template-name">{{ tpl.name }}</span>
-            </button>
+          <div class="default-note">
+            <span>默认参数</span>
+            <strong>RSI 14 / MACD 12-26-9 / BOLL 20, 2.0</strong>
           </div>
         </div>
 
-        <div v-else class="templates-collapsed-bar">
-          <button class="btn btn-small" @click="templatesCollapsed = false">展开快捷模板</button>
-        </div>
         <div class="panel-section">
           <div class="section-heading">
-            <h3>当前可用筛选</h3>
-            <p>规范筛选接口当前支持价格、日涨跌幅和市场范围。</p>
+            <h3>1. 基础范围</h3>
+            <p>这些字段都不是必填；留空表示不限。</p>
           </div>
           <div class="criteria-group">
-            <label>市场范围</label>
+            <label>
+              <span>市场范围</span>
+              <em>可选 · 默认全部市场</em>
+            </label>
             <select v-model="criteria.market" class="filter-select criteria-select">
               <option value="">全部市场</option>
               <option
@@ -95,30 +98,16 @@
           </div>
         </div>
 
-        <div v-if="myConditions.length" class="panel-section saved-conditions-section">
-          <div class="section-heading">
-            <h3>已保存条件</h3>
-            <p class="section-hint">点击加载到面板</p>
-          </div>
-          <div class="saved-conditions-list">
-            <button
-              v-for="cond in myConditions"
-              :key="cond.id"
-              class="saved-condition-item"
-              @click="loadSavedCondition(cond)"
-            >
-              <span class="saved-condition-name">{{ cond.name }}</span>
-              <span :class="['saved-condition-category', categoryClass(cond.category)]">
-                {{ cond.category }}
-              </span>
-            </button>
-          </div>
-        </div>
-
         <div class="panel-section">
-          <h3>价格条件</h3>
+          <div class="section-heading">
+            <h3>2. 价格与涨跌幅</h3>
+            <p>填一个边界也可以，例如只填“最小价格”。</p>
+          </div>
           <div class="criteria-group">
-            <label>价格范围</label>
+            <label>
+              <span>价格范围</span>
+              <em>可选 · 不填不限</em>
+            </label>
             <div class="range-inputs">
               <input
                 type="number"
@@ -138,12 +127,12 @@
             </div>
             <div v-if="priceRangeError" class="criteria-hint error">{{ priceRangeError }}</div>
           </div>
-        </div>
 
-        <div class="panel-section">
-          <h3>涨跌幅条件</h3>
           <div class="criteria-group">
-            <label>日涨跌 (%)</label>
+            <label>
+              <span>日涨跌 (%)</span>
+              <em>可选 · -100 到 100</em>
+            </label>
             <div class="range-inputs">
               <input
                 type="number"
@@ -167,12 +156,15 @@
 
         <div class="panel-section">
           <div class="section-heading">
-            <h3>技术指标</h3>
-            <p>基于最新交易日的技术指标进行筛选。</p>
+            <h3>3. 技术指标参数</h3>
+            <p>默认参数已经填好。只有勾选信号或填写上下限后，对应指标才参与筛选。</p>
           </div>
 
           <div class="criteria-group">
-            <label>RSI 范围</label>
+            <label>
+              <span>RSI 范围</span>
+              <em>可选 · 默认周期 {{ getParamDefaultText('rsiMin', 'period', 14) }}</em>
+            </label>
             <div class="range-inputs">
               <input
                 type="number"
@@ -195,11 +187,27 @@
               >
             </div>
             <div v-if="rsiRangeError" class="criteria-hint error">{{ rsiRangeError }}</div>
+            <div class="param-grid single-column">
+              <label class="param-field">
+                <span>RSI 周期</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.rsiPeriod"
+                  class="input-small"
+                  :min="getParamBounds('rsiMin', 'period').min"
+                  :max="getParamBounds('rsiMin', 'period').max"
+                >
+              </label>
+            </div>
+            <div v-if="rsiPeriodError" class="criteria-hint error">{{ rsiPeriodError }}</div>
             <p class="field-hint">RSI 相对强弱指标，通常 0-100，超卖区域低于 30</p>
           </div>
 
           <div class="criteria-group">
-            <label>MACD 信号</label>
+            <label>
+              <span>MACD 信号</span>
+              <em>可选 · 默认 {{ getMacdDefaultText() }}</em>
+            </label>
             <div class="checkbox-group">
               <label class="checkbox-label">
                 <input type="checkbox" v-model="criteria.macdBullish">
@@ -210,17 +218,95 @@
                 只看 MACD 看跌（死叉倾向）
               </label>
             </div>
+            <div class="param-grid">
+              <label class="param-field">
+                <span>快线</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.macdFastPeriod"
+                  class="input-small"
+                  :min="getParamBounds('macdBullish', 'fast_period').min"
+                  :max="getParamBounds('macdBullish', 'fast_period').max"
+                >
+              </label>
+              <label class="param-field">
+                <span>慢线</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.macdSlowPeriod"
+                  class="input-small"
+                  :min="getParamBounds('macdBullish', 'slow_period').min"
+                  :max="getParamBounds('macdBullish', 'slow_period').max"
+                >
+              </label>
+              <label class="param-field">
+                <span>信号</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.macdSignalPeriod"
+                  class="input-small"
+                  :min="getParamBounds('macdBullish', 'signal_period').min"
+                  :max="getParamBounds('macdBullish', 'signal_period').max"
+                >
+              </label>
+            </div>
+            <div v-if="macdParameterError" class="criteria-hint error">{{ macdParameterError }}</div>
             <p class="field-hint">MACD 柱状图是否为正（看涨）或为负（看跌）</p>
+          </div>
+
+          <div class="criteria-group">
+            <label>
+              <span>BOLL 通道</span>
+              <em>可选 · 默认 {{ getBollDefaultText() }}</em>
+            </label>
+            <div class="checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="criteria.bollCloseAboveUpper">
+                收盘价突破上轨
+              </label>
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="criteria.bollCloseBelowLower">
+                收盘价跌破下轨
+              </label>
+            </div>
+            <div class="param-grid">
+              <label class="param-field">
+                <span>BOLL 周期</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.bollPeriod"
+                  class="input-small"
+                  :min="getParamBounds('bollCloseAboveUpper', 'period').min"
+                  :max="getParamBounds('bollCloseAboveUpper', 'period').max"
+                >
+              </label>
+              <label class="param-field">
+                <span>标准差</span>
+                <input
+                  type="number"
+                  v-model.number="indicatorParams.bollStddev"
+                  class="input-small"
+                  :min="getParamBounds('bollCloseAboveUpper', 'stddev').min"
+                  :max="getParamBounds('bollCloseAboveUpper', 'stddev').max"
+                  step="0.1"
+                >
+              </label>
+            </div>
+            <div v-if="bollParameterError" class="criteria-hint error">{{ bollParameterError }}</div>
+            <p class="field-hint">BOLL 默认使用 20 周期、2.0 倍标准差，可调整为更敏感或更保守的通道。</p>
           </div>
         </div>
 
         <div class="panel-section">
           <div class="section-heading">
-            <h3>形态条件</h3>
-            <p>把 K 线形态纳入筛选，和价格、涨跌幅、指标一起组合使用。</p>
+            <h3>4. 形态条件</h3>
+            <p>可与价格、涨跌幅、指标组合；不选则不限形态。</p>
           </div>
           <div class="criteria-group">
-            <label>形态</label>
+            <label>
+              <span>形态</span>
+              <em>可选 · 默认不限</em>
+            </label>
             <select v-model="criteria.pattern" class="filter-select criteria-select">
               <option value="">不限形态</option>
               <option v-for="pattern in patternOptions" :key="pattern.value" :value="pattern.value">
@@ -231,9 +317,97 @@
           </div>
         </div>
 
+        <div class="panel-section utility-section">
+          <div class="section-heading">
+            <h3>快捷入口</h3>
+            <p>模板和已保存筛选器只会填表，不会自动扫描。</p>
+          </div>
+
+          <div v-if="templatesCollapsed" class="templates-collapsed-bar">
+            <button class="btn btn-small" @click="setTemplatesCollapsed(false)">展开快捷模板</button>
+          </div>
+
+          <template v-else>
+            <div class="templates-section">
+              <div v-if="templatesLoading" class="templates-loading">加载中...</div>
+              <div v-else class="templates-grid">
+                <button
+                  v-for="tpl in templates"
+                  :key="tpl.id"
+                  class="template-card"
+                  @click="applyTemplate(tpl)"
+                >
+                  <span class="template-icon">{{ tpl.icon }}</span>
+                  <span class="template-name">{{ tpl.name }}</span>
+                  <span class="template-desc">{{ tpl.description }}</span>
+                </button>
+              </div>
+              <button class="templates-toggle" @click="setTemplatesCollapsed(true)">收起模板</button>
+            </div>
+
+            <div v-if="recentTemplates.length" class="recent-templates-section">
+              <h4>最近使用</h4>
+              <div class="recent-templates-grid">
+                <button
+                  v-for="tpl in recentTemplates"
+                  :key="tpl.id"
+                  class="template-card recent-template-card"
+                  @click="applyTemplate(tpl)"
+                >
+                  <span class="template-icon">{{ tpl.icon }}</span>
+                  <span class="template-name">{{ tpl.name }}</span>
+                </button>
+              </div>
+            </div>
+          </template>
+
+          <div v-if="myConditions.length" class="saved-conditions-section">
+            <div class="section-heading compact-heading">
+              <h4>已保存筛选器</h4>
+              <p>点击名称加载到表单；触发用于运行已订阅提醒。</p>
+            </div>
+            <div class="saved-conditions-list">
+              <div
+                v-for="cond in myConditions"
+                :key="cond.id"
+                class="saved-condition-item"
+              >
+                <button class="saved-condition-main" @click="loadSavedCondition(cond)">
+                  <span class="saved-condition-name">{{ cond.name }}</span>
+                  <span :class="['saved-condition-category', categoryClass(cond.category)]">
+                    {{ cond.category || 'custom' }}
+                  </span>
+                </button>
+                <div class="saved-condition-actions">
+                  <button
+                    class="btn btn-small"
+                    :disabled="subscriptionBusyId === cond.id"
+                    @click="ensureSubscription(cond)"
+                  >
+                    {{ getSubscriptionForCondition(cond.id) ? '已订阅' : '订阅' }}
+                  </button>
+                  <button
+                    class="btn btn-small btn-primary"
+                    :disabled="!getSubscriptionForCondition(cond.id) || subscriptionBusyId === cond.id"
+                    @click="triggerSubscription(cond)"
+                  >
+                    {{ subscriptionBusyId === cond.id ? '运行中' : '触发' }}
+                  </button>
+                </div>
+                <div v-if="getSubscriptionForCondition(cond.id)?.status === 'stale'" class="subscription-note warning">
+                  订阅已失效，请重新保存后订阅
+                </div>
+                <div v-else-if="lastSubscriptionRunByCondition[cond.id]" class="subscription-note">
+                  {{ lastSubscriptionRunByCondition[cond.id] }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="panel-section">
           <div class="section-heading">
-            <h3>其他条件</h3>
+            <h3>暂不可用条件</h3>
             <p>以下条件暂未接入，不会参与当前筛选。</p>
           </div>
           <div class="legacy-grid">
@@ -262,22 +436,51 @@
       ></div>
 
       <main class="results-panel">
+        <div
+          class="scan-status-card"
+          :class="{ dirty: criteriaDirty, complete: hasRunOnce && !criteriaDirty && !scanError, error: !!scanError }"
+        >
+          <div>
+            <strong>{{ scanStatusTitle }}</strong>
+            <p>{{ scanStatusDescription }}</p>
+          </div>
+          <button class="btn btn-primary" @click="runSelection" :disabled="loading">
+            {{ loading ? '运行中...' : '开始筛选' }}
+          </button>
+        </div>
+
         <div class="availability-note">
-          <strong>规范筛选说明</strong>
+          <strong>当前能力</strong>
           <span>{{ supportedFiltersDescription }}</span>
         </div>
 
         <div v-if="!hasResults" class="empty-state">
           <div class="empty-icon">🎯</div>
-          <h3>暂无匹配结果</h3>
-          <p>当前筛选条件未命中任何股票，可以尝试：</p>
-          <ul class="empty-suggestions">
+          <h3>{{ emptyStateTitle }}</h3>
+          <p>{{ emptyStateDescription }}</p>
+          <ul v-if="scanError" class="empty-suggestions">
+            <li>页面不会继续展示上一次结果，避免误判</li>
+            <li>可以直接重新执行，或稍后再试</li>
+            <li>如果持续失败，请检查后端接口或数据服务状态</li>
+          </ul>
+          <ul v-else-if="hasRunOnce" class="empty-suggestions">
             <li>放宽价格或涨跌幅范围</li>
             <li>减少条件数量（同时满足过多条件可能导致零命中）</li>
             <li>检查市场数据是否已更新（盘后运行）</li>
             <li>切换至"形态"或"指标"条件，增加命中机会</li>
           </ul>
-          <button class="btn btn-primary" @click="resetCriteria">重置条件</button>
+          <ul v-else class="empty-suggestions onboarding-suggestions">
+            <li>没有必填项；不填写表示不限</li>
+            <li>模板只负责填入条件，不会立即扫描</li>
+            <li>RSI/MACD/BOLL 参数只有在对应条件启用后参与计算</li>
+          </ul>
+          <button v-if="scanError" class="btn btn-primary" @click="runSelection" :disabled="loading">
+            {{ loading ? '运行中...' : '重新筛选' }}
+          </button>
+          <button v-else-if="hasRunOnce" class="btn btn-secondary" @click="resetCriteria">重置条件</button>
+          <button v-else class="btn btn-primary" @click="runSelection" :disabled="loading">
+            {{ loading ? '运行中...' : '开始筛选' }}
+          </button>
         </div>
 
         <template v-else>
@@ -461,7 +664,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { attentionApi, selectionApi, strategyApi } from '@/api'
+import { alertSubscriptionApi, attentionApi, selectionApi, strategyApi } from '@/api'
+import { useAnalytics } from '@/composables/useAnalytics'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
 interface ScreeningEvidenceItem {
@@ -491,16 +695,66 @@ interface FilterMetadataItem {
   label: string
   value_type: string
   operators: string[]
+  description?: string
+  param_schema?: Record<string, {
+    type?: string
+    required?: boolean
+    min?: number
+    max?: number
+    default?: number | string | boolean
+    enum?: string[]
+  }>
+  default_params?: Record<string, number | string | boolean>
+  supported_adapters?: string[]
+}
+
+interface SavedScreenerPredicate {
+  type: 'predicate'
+  rule_key: string
+  params: Record<string, unknown>
+}
+
+interface SavedScreenerDefinition {
+  kind: 'saved_screener'
+  ast_version: number
+  registry_version: number
+  scope?: Record<string, unknown>
+  root: {
+    type: 'group'
+    op: 'all'
+    children: SavedScreenerPredicate[]
+  }
+}
+
+interface SavedSelectionCondition {
+  id: number
+  name: string
+  category: string
+  params: Record<string, any>
+  definition?: SavedScreenerDefinition | null
+}
+
+interface AlertSubscriptionItem {
+  id: number
+  selection_condition_id: number
+  name?: string | null
+  status: 'active' | 'paused' | 'stale'
+  last_run_trade_date?: string | null
 }
 
 const router = useRouter()
 const loading = ref(false)
 const hasResults = ref(false)
+const hasRunOnce = ref(false)
+const criteriaDirty = ref(false)
+const formReady = ref(false)
+const scanError = ref('')
 const results = ref<StockResult[]>([])
 const sortBy = ref('score')
 const screeningMetadata = ref<{
   filter_fields?: FilterMetadataItem[]
   markets?: string[]
+  registry_version?: number
 } | null>(null)
 const screeningSummary = ref({
   total: 0,
@@ -508,10 +762,13 @@ const screeningSummary = ref({
 })
 const criteriaPanelRef = ref<HTMLElement | null>(null)
 const criteriaCollapsed = ref(false)
-const myConditions = ref<Array<{ id: number; name: string; category: string; params: Record<string, any> }>>([])
+const myConditions = ref<SavedSelectionCondition[]>([])
+const alertSubscriptions = ref<AlertSubscriptionItem[]>([])
+const subscriptionBusyId = ref<number | null>(null)
+const lastSubscriptionRunByCondition = reactive<Record<number, string>>({})
 const templates = ref<Array<{ id: string; name: string; description: string; icon: string; filters: Record<string, any> }>>([])
 const templatesLoading = ref(false)
-const templatesCollapsed = ref(false)
+const templatesCollapsed = ref(true)
 const recentTemplates = ref<Array<{ id: string; name: string; icon: string; filters: Record<string, any> }>>([])
 const savingStrategy = ref(false)
 // Comparison mode state
@@ -525,6 +782,7 @@ const comparisonResults = ref<Array<{
   avg_score: number | null
   top_stocks: StockResult[]
 }>>([])
+const { trackFilterRun } = useAnalytics()
 const CRITERIA_WIDTH_KEY = 'instock_selection_panel_width'
 const CRITERIA_COLLAPSED_KEY = 'instock_selection_panel_collapsed'
 const TEMPLATES_COLLAPSED_KEY = 'instock_templates_collapsed'
@@ -532,9 +790,9 @@ const showNotification = inject<(type: 'success' | 'error' | 'warning' | 'info',
 const { panelWidth: criteriaPanelWidth, hydrateWidth: hydrateCriteriaWidth, startResize: startCriteriaResize } = useResizablePanel({
   panelRef: criteriaPanelRef,
   storageKey: CRITERIA_WIDTH_KEY,
-  defaultWidth: 360,
-  minWidth: 300,
-  maxWidth: 520,
+  defaultWidth: 440,
+  minWidth: 360,
+  maxWidth: 640,
 })
 
 const criteria = reactive({
@@ -553,9 +811,20 @@ const criteria = reactive({
   rsiMax: null as number | null,
   macdBullish: false,
   macdBearish: false,
+  bollCloseAboveUpper: false,
+  bollCloseBelowLower: false,
   pattern: '' as string,
   volumeRatioMin: null as number | null,
   volumeRatioMax: null as number | null,
+})
+
+const indicatorParams = reactive({
+  rsiPeriod: 14,
+  macdFastPeriod: 12,
+  macdSlowPeriod: 26,
+  macdSignalPeriod: 9,
+  bollPeriod: 20,
+  bollStddev: 2.0,
 })
 
 const canonicalFilterKeys = [
@@ -564,9 +833,10 @@ const canonicalFilterKeys = [
   'market',
   'rsiMin', 'rsiMax',
   'macdBullish', 'macdBearish',
+  'bollCloseAboveUpper', 'bollCloseBelowLower',
   'pattern',
 ] as const
-const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围', 'RSI', 'MACD', '形态']
+const defaultSupportedFilterLabels = ['价格范围', '日涨跌幅', '市场范围', 'RSI', 'MACD', 'BOLL', '形态']
 const marketLabelMap: Record<string, string> = {
   sh: '沪市',
   sz: '深市',
@@ -589,9 +859,17 @@ const patternOptions = [
 const unavailableFilterGroups = [
   { title: '价格扩展', items: ['市值范围'] },
   { title: '涨跌扩展', items: ['周涨跌幅'] },
-  { title: '技术指标扩展', items: ['市盈率', 'KDJ', 'BOLL'] },
+  { title: '技术指标扩展', items: ['市盈率', 'KDJ'] },
   { title: '成交量', items: ['量比'] },
 ]
+
+const filterMetadataMap = computed(() => {
+  const fields = screeningMetadata.value?.filter_fields || []
+  return fields.reduce<Record<string, FilterMetadataItem>>((acc, item) => {
+    acc[item.key] = item
+    return acc
+  }, {})
+})
 
 const marketOptions = computed(() => {
   const metadataMarkets = screeningMetadata.value?.markets || []
@@ -620,6 +898,7 @@ const supportedFiltersDescription = computed(() => {
             if (item.key === 'market') return '市场范围'
             if (item.key.startsWith('rsi')) return 'RSI'
             if (item.key.startsWith('macd')) return 'MACD'
+            if (item.key.startsWith('boll')) return 'BOLL'
             if (item.key === 'pattern') return '形态'
             return item.label
           })
@@ -628,6 +907,48 @@ const supportedFiltersDescription = computed(() => {
     : defaultSupportedFilterLabels
 
   return `当前启用：${labels.join('、')}。其他条件暂未接入。`
+})
+
+const activeFilterCount = computed(() => getEnabledFilterKeys().length)
+
+const activeFilterSummary = computed(() => {
+  if (activeFilterCount.value === 0) {
+    return '未设置条件，将按默认全市场样本扫描。'
+  }
+  return `当前已设置 ${activeFilterCount.value} 个条件，点击开始筛选后生效。`
+})
+
+const scanStatusTitle = computed(() => {
+  if (loading.value) return '正在扫描'
+  if (scanError.value) return '执行筛选失败'
+  if (criteriaDirty.value) return '条件已更新，尚未执行'
+  if (hasRunOnce.value) return '已按当前条件完成扫描'
+  return '等待开始筛选'
+})
+
+const scanStatusDescription = computed(() => {
+  if (loading.value) return '正在按左侧条件计算结果，请稍候。'
+  if (scanError.value) return scanError.value
+  if (criteriaDirty.value) return `${activeFilterSummary.value} 修改不会自动扫描。`
+  if (hasRunOnce.value) {
+    const tradeDate = screeningSummary.value.tradeDate
+      ? `交易日 ${formatDisplayDate(screeningSummary.value.tradeDate)}，`
+      : ''
+    return `${tradeDate}共 ${screeningSummary.value.total} 只结果。`
+  }
+  return activeFilterSummary.value
+})
+
+const emptyStateTitle = computed(() => {
+  if (scanError.value) return '执行筛选失败'
+  if (hasRunOnce.value) return '暂无匹配结果'
+  return '先设置条件，再开始筛选'
+})
+
+const emptyStateDescription = computed(() => {
+  if (scanError.value) return '本次扫描没有成功，页面已清空旧结果，避免误判。'
+  if (hasRunOnce.value) return '当前筛选条件未命中任何股票，可以尝试：'
+  return '选择模板或填写左侧条件后，点击“开始筛选”才会扫描全市场。'
 })
 
 const sortedResults = computed(() => {
@@ -692,6 +1013,12 @@ const normalizeResult = (item: any): StockResult => ({
 const buildCanonicalFilters = () => {
   return canonicalFilterKeys.reduce<Record<string, unknown>>((acc, key) => {
     const value = criteria[key]
+    if (typeof value === 'boolean') {
+      if (value) {
+        acc[key] = value
+      }
+      return acc
+    }
     if (value !== null && value !== '') {
       acc[key] = value
     }
@@ -699,12 +1026,115 @@ const buildCanonicalFilters = () => {
   }, {})
 }
 
+const buildCanonicalScope = () => ({
+  market: criteria.market || undefined,
+  limit: 100,
+})
+
+const getParamBounds = (ruleKey: string, paramKey: string) => {
+  const schema = filterMetadataMap.value[ruleKey]?.param_schema?.[paramKey]
+  return {
+    min: typeof schema?.min === 'number' ? schema.min : undefined,
+    max: typeof schema?.max === 'number' ? schema.max : undefined,
+  }
+}
+
+const getParamDefaultText = (ruleKey: string, paramKey: string, fallback: number | string) => {
+  return String(filterMetadataMap.value[ruleKey]?.default_params?.[paramKey] ?? fallback)
+}
+
+const getMacdDefaultText = () => {
+  return [
+    getParamDefaultText('macdBullish', 'fast_period', 12),
+    getParamDefaultText('macdBullish', 'slow_period', 26),
+    getParamDefaultText('macdBullish', 'signal_period', 9),
+  ].join('-')
+}
+
+const getBollDefaultText = () => {
+  return `${getParamDefaultText('bollCloseAboveUpper', 'period', 20)}, ${getParamDefaultText('bollCloseAboveUpper', 'stddev', 2.0)}`
+}
+
+const syncIndicatorParamDefaults = () => {
+  indicatorParams.rsiPeriod = Number(filterMetadataMap.value.rsiMin?.default_params?.period ?? 14)
+  indicatorParams.macdFastPeriod = Number(filterMetadataMap.value.macdBullish?.default_params?.fast_period ?? 12)
+  indicatorParams.macdSlowPeriod = Number(filterMetadataMap.value.macdBullish?.default_params?.slow_period ?? 26)
+  indicatorParams.macdSignalPeriod = Number(filterMetadataMap.value.macdBullish?.default_params?.signal_period ?? 9)
+  indicatorParams.bollPeriod = Number(filterMetadataMap.value.bollCloseAboveUpper?.default_params?.period ?? 20)
+  indicatorParams.bollStddev = Number(filterMetadataMap.value.bollCloseAboveUpper?.default_params?.stddev ?? 2.0)
+}
+
+const getRuleDefaultParams = (ruleKey: string) => {
+  const metadataDefaults = filterMetadataMap.value[ruleKey]?.default_params || {}
+  if (ruleKey === 'rsiMin' || ruleKey === 'rsiMax') {
+    return {
+      ...metadataDefaults,
+      period: indicatorParams.rsiPeriod,
+    }
+  }
+  if (ruleKey === 'macdBullish' || ruleKey === 'macdBearish') {
+    return {
+      ...metadataDefaults,
+      fast_period: indicatorParams.macdFastPeriod,
+      slow_period: indicatorParams.macdSlowPeriod,
+      signal_period: indicatorParams.macdSignalPeriod,
+    }
+  }
+  if (ruleKey === 'bollCloseAboveUpper' || ruleKey === 'bollCloseBelowLower') {
+    return {
+      ...metadataDefaults,
+      period: indicatorParams.bollPeriod,
+      stddev: indicatorParams.bollStddev,
+    }
+  }
+  return metadataDefaults
+}
+
+const buildCanonicalDefinition = (): SavedScreenerDefinition => {
+  const children: SavedScreenerPredicate[] = []
+
+  canonicalFilterKeys.forEach((key) => {
+    if (key === 'market') return
+    const value = criteria[key]
+    if (value === undefined || value === null || value === '') return
+    if (typeof value === 'boolean' && !value) return
+    children.push({
+      type: 'predicate',
+      rule_key: key,
+      params: {
+        value,
+        ...getRuleDefaultParams(key),
+      },
+    })
+  })
+
+  return {
+    kind: 'saved_screener',
+    ast_version: 1,
+    registry_version: screeningMetadata.value?.registry_version || 1,
+    scope: buildCanonicalScope(),
+    root: {
+      type: 'group',
+      op: 'all',
+      children,
+    },
+  }
+}
+
+const getEnabledFilterKeys = () => {
+  return canonicalFilterKeys.filter((key) => {
+    const value = criteria[key]
+    if (typeof value === 'boolean') {
+      return value
+    }
+    return value !== null && value !== ''
+  })
+}
+
 const buildSelectionStrategyParams = () => {
   const selectionFilters = buildCanonicalFilters()
-  const selectionScope = {
-    market: criteria.market || undefined,
-    limit: 100,
-  }
+  const selectionDefinition = buildCanonicalDefinition()
+  const selectionScope = buildCanonicalScope()
 
   return {
     source: 'selection',
@@ -715,6 +1145,7 @@ const buildSelectionStrategyParams = () => {
       mode: 'screening_match',
       inherits: ['selection_filters', 'selection_scope'],
       filters: selectionFilters,
+      definition: selectionDefinition,
       scope: selectionScope,
     },
     exit_rules: {
@@ -756,26 +1187,6 @@ const addToWatchlist = async (code: string) => {
   }
 }
 
-const fetchResults = async () => {
-  loading.value = true
-  try {
-    const response = await selectionApi.getScreeningHistory({ limit: 100 })
-    const payload = response?.data || {}
-    results.value = (payload.items || []).map(normalizeResult)
-    screeningSummary.value = {
-      total: Number(payload.total || results.value.length),
-      tradeDate: payload.trade_date || results.value[0]?.trade_date || '',
-    }
-    hasResults.value = results.value.length > 0
-  } catch (e) {
-    console.error('Failed to fetch selection results:', e)
-    results.value = []
-    screeningSummary.value = { total: 0, tradeDate: '' }
-  } finally {
-    loading.value = false
-  }
-}
-
 const fetchScreeningMetadata = async () => {
   try {
     const response = await selectionApi.getScreeningMetadata()
@@ -783,18 +1194,25 @@ const fetchScreeningMetadata = async () => {
   } catch (e) {
     console.error('Failed to fetch screening metadata:', e)
     screeningMetadata.value = null
+  } finally {
+    syncIndicatorParamDefaults()
   }
 }
 
 const runSelection = async () => {
+  if (validationErrorMessage.value) {
+    showNotification?.('error', validationErrorMessage.value)
+    return
+  }
+
   loading.value = true
+  scanError.value = ''
   try {
+    const definition = buildCanonicalDefinition()
     const response = await selectionApi.runScreening({
       filters: buildCanonicalFilters(),
-      scope: {
-        limit: 100,
-        market: criteria.market || undefined,
-      },
+      definition: definition as unknown as Record<string, unknown>,
+      scope: buildCanonicalScope(),
     })
     const payload = response?.data || {}
     results.value = (payload.items || []).map(normalizeResult)
@@ -803,10 +1221,25 @@ const runSelection = async () => {
       tradeDate: payload.query?.trade_date || results.value[0]?.trade_date || '',
     }
     hasResults.value = results.value.length > 0
+    hasRunOnce.value = true
+    criteriaDirty.value = false
+
+    trackFilterRun({
+      filterKeys: getEnabledFilterKeys(),
+      market: criteria.market || null,
+      resultCount: screeningSummary.value.total,
+      tradeDate: screeningSummary.value.tradeDate || null,
+    })
 
     showNotification?.('success', `筛选完成，共 ${results.value.length} 只`)
   } catch (e) {
     console.error('Failed to run selection:', e)
+    results.value = []
+    screeningSummary.value = { total: 0, tradeDate: '' }
+    hasResults.value = false
+    hasRunOnce.value = true
+    criteriaDirty.value = false
+    scanError.value = '接口返回失败或网络不可用，请稍后重试。'
     showNotification?.('error', '执行筛选失败')
   } finally {
     loading.value = false
@@ -822,6 +1255,77 @@ const fetchMyConditions = async () => {
   }
 }
 
+const fetchAlertSubscriptions = async () => {
+  try {
+    const response = await alertSubscriptionApi.list()
+    alertSubscriptions.value = Array.isArray(response?.data) ? response.data : []
+  } catch (e) {
+    alertSubscriptions.value = []
+  }
+}
+
+const getSubscriptionForCondition = (conditionId: number) => {
+  return alertSubscriptions.value.find((item) => item.selection_condition_id === conditionId)
+}
+
+const ensureSubscription = async (cond: SavedSelectionCondition) => {
+  const existing = getSubscriptionForCondition(cond.id)
+  if (existing && existing.status !== 'stale') {
+    showNotification?.('info', '该筛选器已经订阅')
+    return existing
+  }
+
+  subscriptionBusyId.value = cond.id
+  try {
+    const response = await alertSubscriptionApi.create({
+      selection_condition_id: cond.id,
+      name: cond.name,
+      cooldown_trade_days: 1,
+    })
+    await fetchAlertSubscriptions()
+    showNotification?.('success', '订阅已创建')
+    return response?.data as AlertSubscriptionItem | undefined
+  } catch (e) {
+    console.error('Failed to create alert subscription:', e)
+    showNotification?.('error', '创建订阅失败')
+    return undefined
+  } finally {
+    subscriptionBusyId.value = null
+  }
+}
+
+const triggerSubscription = async (cond: SavedSelectionCondition) => {
+  const existing = getSubscriptionForCondition(cond.id) || await ensureSubscription(cond)
+  if (!existing || existing.status === 'stale') return
+
+  subscriptionBusyId.value = cond.id
+  try {
+    const response = await alertSubscriptionApi.run(existing.id)
+    const run = response?.data?.run || {}
+    const notification = response?.data?.notification
+    const summary = run.summary || {}
+    const text = notification
+      ? `新增 ${Number(run.new_match_count || 0)} 只，已生成通知`
+      : summary.notification_suppressed
+        ? `新增 ${Number(run.new_match_count || 0)} 只，冷却中未通知`
+        : `命中 ${Number(run.match_count || 0)} 只，无新增通知`
+    lastSubscriptionRunByCondition[cond.id] = `${run.trade_date || ''} ${text}`.trim()
+    await fetchAlertSubscriptions()
+    showNotification?.('success', text)
+  } catch (e: any) {
+    console.error('Failed to trigger alert subscription:', e)
+    const status = e?.response?.status
+    if (status === 409) {
+      await fetchAlertSubscriptions()
+      showNotification?.('warning', '订阅已失效，请重新创建')
+    } else {
+      showNotification?.('error', '触发订阅失败')
+    }
+  } finally {
+    subscriptionBusyId.value = null
+  }
+}
+
 const fetchTemplates = async () => {
   templatesLoading.value = true
   try {
@@ -830,7 +1334,6 @@ const fetchTemplates = async () => {
       ...tpl,
       filters: tpl.filters || {},
     }))
-    // Load recent templates from localStorage
     const recentKey = 'selection_recent_templates'
     try {
       const stored = localStorage.getItem(recentKey)
@@ -850,10 +1353,9 @@ const fetchTemplates = async () => {
 }
 
 const applyTemplate = (tpl: { id: string; name: string; filters: Record<string, any> }) => {
-  // Merge template filters into criteria, overriding existing values
+  resetCriteria()
   Object.assign(criteria, tpl.filters)
   showNotification?.('info', `已应用模板：${tpl.name}`)
-  // Record to recent templates
   const recentKey = 'selection_recent_templates'
   try {
     const stored = localStorage.getItem(recentKey)
@@ -861,7 +1363,6 @@ const applyTemplate = (tpl: { id: string; name: string; filters: Record<string, 
     const filtered = recentIds.filter((id) => id !== tpl.id)
     const updated = [tpl.id, ...filtered].slice(0, 5)
     localStorage.setItem(recentKey, JSON.stringify(updated))
-    // Update local recentTemplates
     const tplData = templates.value.find((t: any) => t.id === tpl.id)
     if (tplData && !recentTemplates.value.find((t: any) => t.id === tpl.id)) {
       recentTemplates.value = [tplData, ...recentTemplates.value].slice(0, 5)
@@ -871,23 +1372,56 @@ const applyTemplate = (tpl: { id: string; name: string; filters: Record<string, 
   }
 }
 
-const loadSavedCondition = (cond: { id: number; name: string; params: Record<string, any> }) => {
-  // 加载参数到criteria
-  const canonical = canonicalFilterKeys.reduce<Record<string, any>>((acc, key) => {
-    if (cond.params && cond.params[key] !== undefined) {
-      acc[key] = cond.params[key]
-    } else {
-      acc[key] = criteria[key] // keep current
+const applyDefinitionToForm = (definition?: SavedScreenerDefinition | null, params?: Record<string, any>) => {
+  resetCriteria()
+  if (params) {
+    const canonical = canonicalFilterKeys.reduce<Record<string, any>>((acc, key) => {
+      if (params[key] !== undefined) {
+        acc[key] = params[key]
+      }
+      return acc
+    }, {})
+    Object.assign(criteria, canonical)
+  }
+
+  if (definition?.scope?.market && typeof definition.scope.market === 'string') {
+    criteria.market = definition.scope.market as '' | 'sh' | 'sz'
+  }
+
+  const predicates = definition?.root?.children || []
+  predicates.forEach((predicate) => {
+    const ruleKey = predicate.rule_key as keyof typeof criteria
+    const value = predicate.params?.value
+    if (ruleKey in criteria && value !== undefined) {
+      ;(criteria[ruleKey] as unknown) = value as never
     }
-    return acc
-  }, {})
-  Object.assign(criteria, canonical)
+    if ((predicate.rule_key === 'rsiMin' || predicate.rule_key === 'rsiMax') && typeof predicate.params?.period === 'number') {
+      indicatorParams.rsiPeriod = Number(predicate.params.period)
+    }
+    if (predicate.rule_key === 'macdBullish' || predicate.rule_key === 'macdBearish') {
+      if (typeof predicate.params?.fast_period === 'number') indicatorParams.macdFastPeriod = Number(predicate.params.fast_period)
+      if (typeof predicate.params?.slow_period === 'number') indicatorParams.macdSlowPeriod = Number(predicate.params.slow_period)
+      if (typeof predicate.params?.signal_period === 'number') indicatorParams.macdSignalPeriod = Number(predicate.params.signal_period)
+    }
+    if (predicate.rule_key === 'bollCloseAboveUpper' || predicate.rule_key === 'bollCloseBelowLower') {
+      if (typeof predicate.params?.period === 'number') indicatorParams.bollPeriod = Number(predicate.params.period)
+      if (typeof predicate.params?.stddev === 'number') indicatorParams.bollStddev = Number(predicate.params.stddev)
+    }
+  })
+}
+
+const loadSavedCondition = (cond: SavedSelectionCondition) => {
+  applyDefinitionToForm(cond.definition, cond.params)
   showNotification?.('info', `已加载条件：${cond.name}`)
 }
 
 const saveCriteria = async () => {
   const name = prompt("为筛选条件命名：", `自定义筛选 ${new Date().toLocaleDateString()}`)
   if (!name?.trim()) return
+  if (validationErrorMessage.value) {
+    showNotification?.('error', validationErrorMessage.value)
+    return
+  }
 
   try {
     await selectionApi.createCondition({
@@ -895,10 +1429,12 @@ const saveCriteria = async () => {
       category: "custom",
       description: "从筛选页面保存的条件",
       params: buildCanonicalFilters(),
+      definition: buildCanonicalDefinition() as unknown as Record<string, unknown>,
       is_active: true,
     })
     showNotification?.('success', '筛选条件已保存')
     await fetchMyConditions()
+    await fetchAlertSubscriptions()
   } catch (e) {
     showNotification?.('error', '保存失败')
   }
@@ -1058,9 +1594,58 @@ const rsiRangeError = computed(() => {
   return ''
 })
 
+const rsiPeriodError = computed(() => {
+  const { min, max } = getParamBounds('rsiMin', 'period')
+  if (typeof min === 'number' && indicatorParams.rsiPeriod < min) return `RSI 周期需 >= ${min}`
+  if (typeof max === 'number' && indicatorParams.rsiPeriod > max) return `RSI 周期需 <= ${max}`
+  return ''
+})
+
+const macdParameterError = computed(() => {
+  const fast = getParamBounds('macdBullish', 'fast_period')
+  const slow = getParamBounds('macdBullish', 'slow_period')
+  const signal = getParamBounds('macdBullish', 'signal_period')
+
+  if (typeof fast.min === 'number' && indicatorParams.macdFastPeriod < fast.min) return `MACD 快线需 >= ${fast.min}`
+  if (typeof fast.max === 'number' && indicatorParams.macdFastPeriod > fast.max) return `MACD 快线需 <= ${fast.max}`
+  if (typeof slow.min === 'number' && indicatorParams.macdSlowPeriod < slow.min) return `MACD 慢线需 >= ${slow.min}`
+  if (typeof slow.max === 'number' && indicatorParams.macdSlowPeriod > slow.max) return `MACD 慢线需 <= ${slow.max}`
+  if (typeof signal.min === 'number' && indicatorParams.macdSignalPeriod < signal.min) return `MACD 信号需 >= ${signal.min}`
+  if (typeof signal.max === 'number' && indicatorParams.macdSignalPeriod > signal.max) return `MACD 信号需 <= ${signal.max}`
+  if (indicatorParams.macdFastPeriod >= indicatorParams.macdSlowPeriod) return 'MACD 快线必须小于慢线'
+  return ''
+})
+
+const bollParameterError = computed(() => {
+  const period = getParamBounds('bollCloseAboveUpper', 'period')
+  const stddev = getParamBounds('bollCloseAboveUpper', 'stddev')
+
+  if (typeof period.min === 'number' && indicatorParams.bollPeriod < period.min) return `BOLL 周期需 >= ${period.min}`
+  if (typeof period.max === 'number' && indicatorParams.bollPeriod > period.max) return `BOLL 周期需 <= ${period.max}`
+  if (typeof stddev.min === 'number' && indicatorParams.bollStddev < stddev.min) return `BOLL 标准差需 >= ${stddev.min}`
+  if (typeof stddev.max === 'number' && indicatorParams.bollStddev > stddev.max) return `BOLL 标准差需 <= ${stddev.max}`
+  return ''
+})
+
+const validationErrorMessage = computed(() => {
+  return [
+    priceRangeError.value,
+    changeRangeError.value,
+    rsiRangeError.value,
+    rsiPeriodError.value,
+    macdParameterError.value,
+    bollParameterError.value,
+  ].find(Boolean) || ''
+})
+
 const toggleCriteriaPanel = () => {
   criteriaCollapsed.value = !criteriaCollapsed.value
   window.localStorage.setItem(CRITERIA_COLLAPSED_KEY, criteriaCollapsed.value ? '1' : '0')
+}
+
+const setTemplatesCollapsed = (collapsed: boolean) => {
+  templatesCollapsed.value = collapsed
+  window.localStorage.setItem(TEMPLATES_COLLAPSED_KEY, collapsed ? '1' : '0')
 }
 
 const categoryClass = (category: string | null | undefined): string => {
@@ -1090,21 +1675,33 @@ const resetCriteria = () => {
   criteria.rsiMax = null
   criteria.macdBullish = false
   criteria.macdBearish = false
+  criteria.bollCloseAboveUpper = false
+  criteria.bollCloseBelowLower = false
   criteria.pattern = ''
   criteria.volumeRatioMin = null
   criteria.volumeRatioMax = null
+  syncIndicatorParamDefaults()
 }
+
+watch([criteria, indicatorParams], () => {
+  if (formReady.value) {
+    scanError.value = ''
+    criteriaDirty.value = true
+  }
+}, { deep: true })
 
 onMounted(async () => {
   await Promise.all([
     fetchMyConditions(),
+    fetchAlertSubscriptions(),
     fetchScreeningMetadata(),
-    fetchResults(),
     fetchTemplates(),
   ])
   hydrateCriteriaWidth()
   criteriaCollapsed.value = window.localStorage.getItem(CRITERIA_COLLAPSED_KEY) === '1'
-  templatesCollapsed.value = window.localStorage.getItem(TEMPLATES_COLLAPSED_KEY) === '1'
+  const storedTemplateState = window.localStorage.getItem(TEMPLATES_COLLAPSED_KEY)
+  templatesCollapsed.value = storedTemplateState === null ? true : storedTemplateState === '1'
+  formReady.value = true
 })
 
 </script>
@@ -1112,18 +1709,37 @@ onMounted(async () => {
 <style scoped lang="scss">
 .selection-page {
   padding: 24px;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(41, 98, 255, 0.12), transparent 34rem),
+    radial-gradient(circle at top right, rgba(0, 200, 83, 0.08), transparent 28rem),
+    #0d0d0d;
 }
 
 .page-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 24px;
+  gap: 24px;
+  margin-bottom: 18px;
+
+  .eyebrow {
+    display: inline-flex;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border: 1px solid rgba(41, 98, 255, 0.28);
+    border-radius: 999px;
+    background: rgba(41, 98, 255, 0.08);
+    color: #9ab7ff;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
 
   h1 {
     margin: 0;
-    font-size: 28px;
-    font-weight: 600;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
   }
 
   .subtitle {
@@ -1135,7 +1751,18 @@ onMounted(async () => {
 
 .header-right {
   display: flex;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 560px;
+}
+
+.secondary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .btn {
@@ -1161,10 +1788,71 @@ onMounted(async () => {
     color: rgba(255, 255, 255, 0.8);
   }
 
+  &.btn-quiet {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  &.btn-hero {
+    padding: 12px 22px;
+    box-shadow: 0 12px 30px rgba(41, 98, 255, 0.26);
+  }
+
   &.btn-small {
     padding: 6px 12px;
     font-size: 12px;
   }
+}
+
+.workflow-guide {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.workflow-step {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(26, 26, 26, 0.54);
+
+  &.active {
+    border-color: rgba(41, 98, 255, 0.28);
+    background: rgba(41, 98, 255, 0.08);
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 4px;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+}
+
+.step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .selection-layout {
@@ -1173,8 +1861,8 @@ onMounted(async () => {
 }
 
 .criteria-panel {
-  min-width: 280px;
-  max-width: 600px;
+  min-width: 360px;
+  max-width: 640px;
   flex-shrink: 0;
   background: rgba(26, 26, 26, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1184,6 +1872,38 @@ onMounted(async () => {
   overflow-y: auto;
   overflow-x: hidden;
   position: relative;
+}
+
+.start-section {
+  padding: 16px;
+  border: 1px solid rgba(41, 98, 255, 0.18);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(41, 98, 255, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+.effect-note,
+.default-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+
+  span {
+    color: rgba(255, 255, 255, 0.48);
+  }
+
+  strong {
+    color: rgba(255, 255, 255, 0.84);
+    text-align: right;
+  }
+}
+
+.default-note {
+  margin-top: 8px;
 }
 
 .panel-resizer {
@@ -1230,6 +1950,10 @@ onMounted(async () => {
     font-weight: 600;
     color: rgba(255, 255, 255, 0.8);
   }
+}
+
+.utility-section {
+  padding-top: 4px;
 }
 
 .templates-section {
@@ -1328,6 +2052,12 @@ onMounted(async () => {
     gap: 8px;
   }
 
+  h4 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
   .recent-template-card {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1336,6 +2066,16 @@ onMounted(async () => {
       background: rgba(255, 152, 0, 0.12);
       border-color: rgba(255, 152, 0, 0.3);
     }
+  }
+}
+
+.compact-heading {
+  margin-top: 16px;
+
+  h4 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.76);
   }
 }
 
@@ -1362,13 +2102,13 @@ onMounted(async () => {
 
 .saved-condition-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
 
   &:hover {
@@ -1376,9 +2116,25 @@ onMounted(async () => {
     border-color: rgba(255, 255, 255, 0.12);
   }
 
-  .saved-condition-name {
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
+  .saved-condition-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1 1 160px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+
+    .saved-condition-name {
+      overflow: hidden;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   }
 
   .saved-condition-category {
@@ -1394,6 +2150,24 @@ onMounted(async () => {
     &.category-pattern { background: rgba(156, 39, 176, 0.15); color: #BA68C8; border: 1px solid rgba(156, 39, 176, 0.3); }
     &.category-fund { background: rgba(0, 188, 212, 0.15); color: #4DD0E1; border: 1px solid rgba(0, 188, 212, 0.3); }
     &.category-default { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6); border: 1px solid rgba(255, 255, 255, 0.2); }
+  }
+}
+
+.saved-condition-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.subscription-note {
+  flex: 0 0 100%;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+
+  &.warning {
+    color: #FFB74D;
   }
 }
 
@@ -1421,6 +2195,28 @@ onMounted(async () => {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
+}
+
+.param-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+
+  &.single-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  span {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.56);
+  }
 }
 
 .input-small {
@@ -1491,6 +2287,25 @@ onMounted(async () => {
   gap: 8px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.76);
+
+  input {
+    accent-color: #2962FF;
+  }
+}
+
+.field-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.48);
+}
+
 .checkbox-item {
   display: flex;
   align-items: center;
@@ -1512,6 +2327,47 @@ onMounted(async () => {
 .results-panel {
   flex: 1;
   min-width: 0;
+}
+
+.scan-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(26, 26, 26, 0.72);
+
+  &.dirty {
+    border-color: rgba(255, 183, 77, 0.3);
+    background: rgba(255, 183, 77, 0.08);
+  }
+
+  &.complete {
+    border-color: rgba(105, 240, 174, 0.26);
+    background: rgba(0, 200, 83, 0.08);
+  }
+
+  &.error {
+    border-color: rgba(255, 82, 82, 0.32);
+    background: rgba(255, 82, 82, 0.08);
+  }
+
+  strong {
+    display: block;
+    margin-bottom: 5px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 16px;
+  }
+
+  p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 13px;
+    line-height: 1.45;
+  }
 }
 
 .availability-note {
@@ -1544,8 +2400,38 @@ onMounted(async () => {
     max-height: 50vh;
   }
 
+  .workflow-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .page-header {
+    flex-direction: column;
+  }
+
+  .header-right,
+  .secondary-actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+
   .panel-resizer {
     display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .selection-page {
+    padding: 16px;
+  }
+
+  .scan-status-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .range-inputs,
+  .param-grid {
+    grid-template-columns: 1fr;
   }
 }
 

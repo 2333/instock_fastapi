@@ -9,15 +9,53 @@ from app.jobs import market_calendar
 from app.jobs.tasks import fetch_daily_task, fetch_fund_flow_task
 from app.jobs.tasks.fetch_daily_task import (
     _ensure_backfill_state_table,
+    build_baostock_code,
     fetch_and_save_stock_classifications,
     fetch_and_save_stock_universe,
     run_daily_bars_backfill_window,
+    save_daily_bars,
+    save_daily_bars_batch,
     save_stock_classifications,
     save_stocks,
 )
 from app.jobs.tasks.fetch_market_reference_task import summarize_block_trades, summarize_top_list
 from app.models.stock_model import Base, DailyBar, Stock
+from scripts import check_april_baostock_completeness
 from tests.conftest import async_engine_test, async_session_factory_test
+
+
+def _mock_eastmoney_calendar(calendar: list[dict[str, object]]) -> AsyncMock:
+    crawler = AsyncMock()
+    crawler.fetch_trade_calendar = AsyncMock(return_value=calendar)
+    crawler.fetch = AsyncMock()
+    crawler.close = AsyncMock()
+    return crawler
+
+
+class _FakeExcluded:
+    def __getattr__(self, name: str) -> str:
+        return f"excluded.{name}"
+
+
+class _FakeDailyBarInsert:
+    def __init__(self) -> None:
+        self.excluded = _FakeExcluded()
+        self.values_payload = None
+        self.constraint = None
+        self.set_payload = None
+
+    def values(self, payload):
+        self.values_payload = payload
+        return self
+
+    def on_conflict_do_update(self, *, constraint, set_):
+        self.constraint = constraint
+        self.set_payload = set_
+        return {
+            "constraint": constraint,
+            "rows": self.values_payload,
+            "set_": set_,
+        }
 
 
 @pytest.mark.asyncio
@@ -42,6 +80,53 @@ async def test_fetch_sector_data_uses_fallback_chain(monkeypatch):
     assert used_source == "fallback"
     fetch_by_source.assert_not_awaited()
     fetch_with_fallback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_save_daily_bars_raises_without_compatibility_downgrade(monkeypatch):
+    fake_insert = _FakeDailyBarInsert()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=fetch_daily_task.SQLAlchemyError("missing constraint"))
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    monkeypatch.setattr(fetch_daily_task, "insert", lambda _model: fake_insert)
+
+    with pytest.raises(fetch_daily_task.SQLAlchemyError, match="missing constraint"):
+        await save_daily_bars(
+            session,
+            "000001.SZ",
+            [{"date": "2026-03-13", "close": 10.5}],
+            source="baostock",
+        )
+
+    assert fake_insert.constraint == fetch_daily_task.DAILY_BAR_UPSERT_CONSTRAINT
+    assert session.execute.await_count == 1
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_save_daily_bars_batch_raises_without_compatibility_downgrade(monkeypatch):
+    fake_insert = _FakeDailyBarInsert()
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=fetch_daily_task.SQLAlchemyError("missing constraint"))
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+
+    monkeypatch.setattr(fetch_daily_task, "insert", lambda _model: fake_insert)
+
+    with pytest.raises(fetch_daily_task.SQLAlchemyError, match="missing constraint"):
+        await save_daily_bars_batch(
+            session,
+            {"000001.SZ": [{"date": "2026-03-13", "close": 10.5}]},
+            source="baostock",
+        )
+
+    assert fake_insert.constraint == fetch_daily_task.DAILY_BAR_UPSERT_CONSTRAINT
+    assert session.execute.await_count == 1
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -134,7 +219,7 @@ async def test_fetch_daily_bars_uses_explicit_baostock_source():
     assert status == "done"
     assert note == ""
     baostock.fetch_kline.assert_awaited_once_with(
-        code="000001",
+        code="sz.000001",
         start_date="2026-03-10",
         end_date="2026-03-13",
         adjust=fetch_daily_task.AdjustType.NO_ADJUST,
@@ -354,6 +439,43 @@ async def test_save_stocks_migrates_legacy_ts_code_without_duplicates():
     assert stocks[0].ts_code == "000001.SZ"
     assert stocks[0].exchange == "SZ"
     assert bars == ["000001.SZ"]
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_raises_on_empty_trading_calendar():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    eastmoney = _mock_eastmoney_calendar([])
+
+    with pytest.raises(RuntimeError, match="无法解析交易日历"):
+        await run_daily_bars_backfill_window(
+            start_date="2024-01-08",
+            end_date="2024-01-12",
+            code_limit=1,
+            source="baostock",
+            execute=False,
+            eastmoney_crawler=eastmoney,
+            session_factory=async_session_factory_test,
+        )
 
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -735,6 +857,14 @@ async def test_daily_bars_backfill_window_dry_run_is_bounded(monkeypatch):
         raise AssertionError("dry-run must not create or commit backfill state")
 
     monkeypatch.setattr(fetch_daily_task, "_ensure_backfill_state_table", fail_if_called)
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-02", "is_trading": True},
+            {"trade_date": "2024-01-03", "is_trading": True},
+            {"trade_date": "2024-01-04", "is_trading": True},
+            {"trade_date": "2024-01-05", "is_trading": True},
+        ]
+    )
 
     result = await run_daily_bars_backfill_window(
         start_date="2024-01-02",
@@ -742,6 +872,7 @@ async def test_daily_bars_backfill_window_dry_run_is_bounded(monkeypatch):
         code_limit=1,
         source="eastmoney",
         execute=False,
+        eastmoney_crawler=eastmoney,
         session_factory=async_session_factory_test,
     )
 
@@ -749,6 +880,539 @@ async def test_daily_bars_backfill_window_dry_run_is_bounded(monkeypatch):
     assert result["source"] == "eastmoney"
     assert result["target_count"] == 1
     assert set(result["targets"]) <= {"000001.SZ", "000002.SZ"}
+    assert result["saved_rows"] == 0
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_dry_run_partial_gap_no_state_write(monkeypatch):
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        session.add(
+            DailyBar(
+                ts_code="000001.SZ",
+                trade_date="20240108",
+                trade_date_dt=date(2024, 1, 8),
+                open=Decimal("10"),
+                high=Decimal("11"),
+                low=Decimal("9"),
+                close=Decimal("10.5"),
+                pre_close=Decimal("10"),
+                change=Decimal("0.5"),
+                pct_chg=Decimal("1.0"),
+                vol=Decimal("1000"),
+                amount=Decimal("1000"),
+            )
+        )
+        await session.commit()
+
+    async def fail_if_called(session):
+        raise AssertionError("dry-run should not create or commit backfill state")
+
+    monkeypatch.setattr(fetch_daily_task, "_ensure_backfill_state_table", fail_if_called)
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="eastmoney",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["dry_run"] is True
+    assert result["targets"] == ["000001.SZ"]
+    assert result["target_count"] == 1
+    assert result["saved_rows"] == 0
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_selects_partial_and_full_gap_targets():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add_all(
+            [
+                Stock(
+                    ts_code="000001.SZ",
+                    symbol="000001",
+                    name="平安银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="000002.SZ",
+                    symbol="000002",
+                    name="招商银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="000003.SZ",
+                    symbol="000003",
+                    name="建设银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240108",
+                    trade_date_dt=date(2024, 1, 8),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    pre_close=Decimal("10"),
+                    change=Decimal("0.5"),
+                    pct_chg=Decimal("1.0"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240109",
+                    trade_date_dt=date(2024, 1, 9),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.6"),
+                    pre_close=Decimal("10.5"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000003.SZ",
+                    trade_date="20240108",
+                    trade_date_dt=date(2024, 1, 8),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    pre_close=Decimal("10"),
+                    change=Decimal("0.5"),
+                    pct_chg=Decimal("1.0"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000003.SZ",
+                    trade_date="20240109",
+                    trade_date_dt=date(2024, 1, 9),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.6"),
+                    pre_close=Decimal("10.5"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000003.SZ",
+                    trade_date="20240110",
+                    trade_date_dt=date(2024, 1, 10),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.7"),
+                    pre_close=Decimal("10.6"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000003.SZ",
+                    trade_date="20240111",
+                    trade_date_dt=date(2024, 1, 11),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.8"),
+                    pre_close=Decimal("10.7"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000003.SZ",
+                    trade_date="20240112",
+                    trade_date_dt=date(2024, 1, 12),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.9"),
+                    pre_close=Decimal("10.8"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+            ]
+        )
+        await session.commit()
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=10,
+        source="baostock",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert set(result["targets"]) == {"000001.SZ", "000002.SZ"}
+    assert result["target_count"] == 2
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_expected_days_ignores_non_trading_days():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        session.add_all(
+            [
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240108",
+                    trade_date_dt=date(2024, 1, 8),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    pre_close=Decimal("10"),
+                    change=Decimal("0.5"),
+                    pct_chg=Decimal("1.0"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240109",
+                    trade_date_dt=date(2024, 1, 9),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.6"),
+                    pre_close=Decimal("10.5"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240111",
+                    trade_date_dt=date(2024, 1, 11),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.8"),
+                    pre_close=Decimal("10.7"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="2024-01-12",
+                    trade_date_dt=date(2024, 1, 12),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.9"),
+                    pre_close=Decimal("10.8"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+            ]
+        )
+        await session.commit()
+
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": False},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="baostock",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["target_count"] == 0
+    assert result["targets"] == []
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_counts_mixed_trade_date_formats():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        session.add_all(
+            [
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="2024-01-08",
+                    trade_date_dt=date(2024, 1, 8),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    pre_close=Decimal("10"),
+                    change=Decimal("0.5"),
+                    pct_chg=Decimal("1.0"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240109",
+                    trade_date_dt=date(2024, 1, 9),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.6"),
+                    pre_close=Decimal("10.5"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="2024-01-10",
+                    trade_date_dt=date(2024, 1, 10),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.7"),
+                    pre_close=Decimal("10.6"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240111",
+                    trade_date_dt=date(2024, 1, 11),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.8"),
+                    pre_close=Decimal("10.7"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="2024-01-12",
+                    trade_date_dt=date(2024, 1, 12),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.9"),
+                    pre_close=Decimal("10.8"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+            ]
+        )
+        await session.commit()
+
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="baostock",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["target_count"] == 0
+    assert result["targets"] == []
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_normalizes_stock_dates_in_filters():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add_all(
+            [
+                Stock(
+                    ts_code="000001.SZ",
+                    symbol="000001",
+                    name="平安银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                    list_date="2024-01-10",
+                    delist_date="2024-12-31",
+                ),
+                Stock(
+                    ts_code="000002.SZ",
+                    symbol="000002",
+                    name="招商银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                    list_date="2024-02-01",
+                    delist_date="20240131",
+                ),
+                Stock(
+                    ts_code="000003.SZ",
+                    symbol="000003",
+                    name="建设银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                    list_date="20231231",
+                    delist_date="2024-01-09",
+                ),
+            ]
+        )
+        await session.commit()
+
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-10",
+        end_date="2024-01-12",
+        code_limit=10,
+        source="baostock",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["target_count"] == 1
+    assert result["targets"] == ["000001.SZ"]
     assert result["saved_rows"] == 0
 
     async with async_engine_test.begin() as conn:
@@ -796,6 +1460,15 @@ async def test_daily_bars_backfill_window_uses_explicit_baostock_source():
     tushare.fetch_pro_bar = AsyncMock()
     eastmoney = AsyncMock()
     eastmoney.fetch = AsyncMock()
+    eastmoney.fetch_trade_calendar = AsyncMock(
+        return_value=[
+            {"trade_date": "2024-01-02", "is_trading": True},
+            {"trade_date": "2024-01-03", "is_trading": True},
+            {"trade_date": "2024-01-04", "is_trading": True},
+            {"trade_date": "2024-01-05", "is_trading": True},
+        ]
+    )
+    eastmoney.close = AsyncMock()
 
     result = await run_daily_bars_backfill_window(
         start_date="2024-01-02",
@@ -817,7 +1490,7 @@ async def test_daily_bars_backfill_window_uses_explicit_baostock_source():
     assert result["items"] == [
         {
             "ts_code": "000001.SZ",
-            "status": "done",
+            "status": "partial",
             "source": "baostock",
             "source_policy": "baostock",
             "saved_rows": 1,
@@ -825,7 +1498,7 @@ async def test_daily_bars_backfill_window_uses_explicit_baostock_source():
         }
     ]
     baostock.fetch_kline.assert_awaited_once_with(
-        code="000001",
+        code="sz.000001",
         start_date="2024-01-02",
         end_date="2024-01-05",
         adjust=fetch_daily_task.AdjustType.NO_ADJUST,
@@ -835,6 +1508,461 @@ async def test_daily_bars_backfill_window_uses_explicit_baostock_source():
     eastmoney.fetch.assert_not_awaited()
     assert len(rows) == 1
     assert rows[0].ts_code == "000001.SZ"
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_partial_gap_execute_uses_explicit_source_only():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        session.add_all(
+            [
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240108",
+                    trade_date_dt=date(2024, 1, 8),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    pre_close=Decimal("10"),
+                    change=Decimal("0.5"),
+                    pct_chg=Decimal("1.0"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+                DailyBar(
+                    ts_code="000001.SZ",
+                    trade_date="20240109",
+                    trade_date_dt=date(2024, 1, 9),
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.6"),
+                    pre_close=Decimal("10.5"),
+                    change=Decimal("0.1"),
+                    pct_chg=Decimal("0.1"),
+                    vol=Decimal("1000"),
+                    amount=Decimal("1000"),
+                ),
+            ]
+        )
+        await session.commit()
+
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock(
+        return_value=[
+            {
+                "date": "2024-01-08",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "pre_close": 10,
+                "change": 0.5,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-09",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.6,
+                "pre_close": 10.5,
+                "change": 0.1,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-10",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.7,
+                "pre_close": 10.6,
+                "change": 0.1,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-11",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.8,
+                "pre_close": 10.7,
+                "change": 0.1,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-12",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.9,
+                "pre_close": 10.8,
+                "change": 0.1,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+        ]
+    )
+    tushare = AsyncMock()
+    tushare.fetch_pro_bar = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock()
+    eastmoney.fetch_trade_calendar = AsyncMock(
+        return_value=[
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+    eastmoney.close = AsyncMock()
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="baostock",
+        execute=True,
+        provider=tushare,
+        baostock_provider=baostock,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["source"] == "baostock"
+    assert result["saved_rows"] == 5
+    assert result["target_count"] == 1
+    assert result["items"] == [
+        {
+            "ts_code": "000001.SZ",
+            "status": "done",
+            "source": "baostock",
+            "source_policy": "baostock",
+            "saved_rows": 5,
+            "attempts": [{"source": "baostock", "rows": 5}],
+        }
+    ]
+    baostock.fetch_kline.assert_awaited_once_with(
+        code="sz.000001",
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        period="daily",
+    )
+    tushare.fetch_pro_bar.assert_not_awaited()
+    eastmoney.fetch.assert_not_awaited()
+
+    async with async_session_factory_test() as session:
+        rows = (await session.execute(select(DailyBar))).scalars().all()
+    assert len(rows) == 5
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_partial_gap_stays_partial_when_window_not_closed():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock(
+        return_value=[
+            {
+                "date": "2024-01-08",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "pre_close": 10,
+                "change": 0.5,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-09",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.6,
+                "pre_close": 10.5,
+                "change": 0.1,
+                "change_pct": 1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+        ]
+    )
+    tushare = AsyncMock()
+    tushare.fetch_pro_bar = AsyncMock()
+    eastmoney = AsyncMock()
+    eastmoney.fetch = AsyncMock()
+    eastmoney.fetch_trade_calendar = AsyncMock(
+        return_value=[
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+            {"trade_date": "2024-01-12", "is_trading": True},
+        ]
+    )
+    eastmoney.close = AsyncMock()
+
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="baostock",
+        execute=True,
+        provider=tushare,
+        baostock_provider=baostock,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["source"] == "baostock"
+    assert result["target_count"] == 1
+    assert result["saved_rows"] == 2
+    assert result["items"] == [
+        {
+            "ts_code": "000001.SZ",
+            "status": "partial",
+            "source": "baostock",
+            "source_policy": "baostock",
+            "saved_rows": 2,
+            "attempts": [{"source": "baostock", "rows": 2}],
+        }
+    ]
+
+    dry_result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-12",
+        code_limit=1,
+        source="baostock",
+        execute=False,
+        provider=tushare,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+    assert dry_result["target_count"] == 1
+    assert dry_result["targets"] == ["000001.SZ"]
+
+    async with async_session_factory_test() as session:
+        state_rows = (
+            await session.execute(
+                text("SELECT status FROM backfill_daily_state WHERE ts_code = :ts_code"),
+                {"ts_code": "000001.SZ"},
+            )
+        ).all()
+    assert state_rows == [("partial",)]
+
+    baostock.fetch_kline.assert_awaited_once()
+    tushare.fetch_pro_bar.assert_not_awaited()
+    eastmoney.fetch.assert_not_awaited()
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_state_scopes_to_current_window_on_target_selection():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add(
+            Stock(
+                ts_code="000001.SZ",
+                symbol="000001",
+                name="平安银行",
+                exchange="SZ",
+                list_status="L",
+                is_etf=False,
+            )
+        )
+        await session.commit()
+
+    baostock = AsyncMock()
+    baostock.fetch_kline = AsyncMock(
+        return_value=[
+            {
+                "date": "2024-01-08",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.5,
+                "pre_close": 10,
+                "change": 0.5,
+                "change_pct": 0.5,
+                "volume": 1000,
+                "amount": 1000,
+            },
+            {
+                "date": "2024-01-09",
+                "open": 10,
+                "high": 11,
+                "low": 9,
+                "close": 10.6,
+                "pre_close": 10.5,
+                "change": 0.1,
+                "change_pct": 0.1,
+                "volume": 1000,
+                "amount": 1000,
+            },
+        ]
+    )
+    eastmoney_window_a = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+        ]
+    )
+
+    await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-09",
+        code_limit=1,
+        source="baostock",
+        execute=True,
+        baostock_provider=baostock,
+        eastmoney_crawler=eastmoney_window_a,
+        session_factory=async_session_factory_test,
+    )
+
+    eastmoney_window_b = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-10", "is_trading": True},
+            {"trade_date": "2024-01-11", "is_trading": True},
+        ]
+    )
+    dry_result = await run_daily_bars_backfill_window(
+        start_date="2024-01-10",
+        end_date="2024-01-11",
+        code_limit=1,
+        source="eastmoney",
+        execute=False,
+        eastmoney_crawler=eastmoney_window_b,
+        session_factory=async_session_factory_test,
+    )
+
+    assert dry_result["target_count"] == 1
+    assert dry_result["targets"] == ["000001.SZ"]
+
+    async with async_session_factory_test() as session:
+        state_rows = (
+            await session.execute(
+                text(
+                    "SELECT ts_code, status, note FROM backfill_daily_state WHERE ts_code = :ts_code"
+                ),
+                {"ts_code": "000001.SZ"},
+            )
+        ).all()
+    assert state_rows == [
+        (
+            "000001.SZ",
+            "done",
+            "window=20240108:20240109|rows=2,source=baostock,source_policy=baostock,attempts=baostock:2",
+        )
+    ]
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest.mark.asyncio
+async def test_daily_bars_backfill_window_skips_baostock_unsupported_targets():
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP TABLE IF EXISTS backfill_daily_state"))
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add_all(
+            [
+                Stock(
+                    ts_code="830001.BJ",
+                    symbol="830001",
+                    name="北交所样本",
+                    exchange="BJ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="510300.SH",
+                    symbol="510300",
+                    name="沪深300ETF",
+                    exchange="SH",
+                    list_status="L",
+                    is_etf=True,
+                ),
+            ]
+        )
+        await session.commit()
+
+    eastmoney = _mock_eastmoney_calendar(
+        [
+            {"trade_date": "2024-01-08", "is_trading": True},
+            {"trade_date": "2024-01-09", "is_trading": True},
+        ]
+    )
+    result = await run_daily_bars_backfill_window(
+        start_date="2024-01-08",
+        end_date="2024-01-09",
+        code_limit=10,
+        source="baostock",
+        execute=False,
+        eastmoney_crawler=eastmoney,
+        session_factory=async_session_factory_test,
+    )
+
+    assert result["target_count"] == 0
+    assert result["targets"] == []
 
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -851,9 +1979,9 @@ async def test_daily_bars_backfill_window_does_not_fallback_from_baostock():
         session.add(
             Stock(
                 ts_code="000001.SZ",
-                symbol="000001",
+                symbol="600000",
                 name="平安银行",
-                exchange="SZ",
+                exchange="SH",
                 list_status="L",
                 is_etf=False,
             )
@@ -881,6 +2009,15 @@ async def test_daily_bars_backfill_window_does_not_fallback_from_baostock():
     baostock.fetch_kline = AsyncMock(return_value=[])
     eastmoney = AsyncMock()
     eastmoney.fetch = AsyncMock()
+    eastmoney.fetch_trade_calendar = AsyncMock(
+        return_value=[
+            {"trade_date": "2024-01-02", "is_trading": True},
+            {"trade_date": "2024-01-03", "is_trading": True},
+            {"trade_date": "2024-01-04", "is_trading": True},
+            {"trade_date": "2024-01-05", "is_trading": True},
+        ]
+    )
+    eastmoney.close = AsyncMock()
 
     result = await run_daily_bars_backfill_window(
         start_date="2024-01-02",
@@ -906,9 +2043,164 @@ async def test_daily_bars_backfill_window_does_not_fallback_from_baostock():
             "attempts": [{"source": "baostock", "rows": 0}],
         }
     ]
+    baostock.fetch_kline.assert_awaited_once_with(
+        code="sz.000001",
+        start_date="2024-01-02",
+        end_date="2024-01-05",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        period="daily",
+    )
     tushare.fetch_pro_bar.assert_not_awaited()
-    baostock.fetch_kline.assert_awaited_once()
     eastmoney.fetch.assert_not_awaited()
+
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+def test_build_baostock_code_uses_exchange_qualified_sh_sz_and_rejects_bj():
+    assert build_baostock_code(ts_code="000001.SZ") == "sz.000001"
+    assert build_baostock_code(ts_code="600000.SH") == "sh.600000"
+    assert build_baostock_code(ts_code="sz.000001") == "sz.000001"
+    assert build_baostock_code(symbol="000001", exchange="SZ") == "sz.000001"
+    assert build_baostock_code(ts_code="830001.BJ") is None
+
+
+def test_build_baostock_code_prefers_canonical_ts_code_over_conflicting_fields():
+    assert build_baostock_code(ts_code="000001.SZ", symbol="600000", exchange="SH") == "sz.000001"
+    assert build_baostock_code(ts_code="sz.000001", symbol="600000", exchange="SH") == "sz.000001"
+    assert build_baostock_code(ts_code="830001.BJ", symbol="000001", exchange="SZ") is None
+
+
+@pytest.mark.asyncio
+async def test_baostock_completeness_script_separates_unsupported_universe_from_contract_anomalies(
+    monkeypatch,
+    tmp_path,
+):
+    async with async_engine_test.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with async_session_factory_test() as session:
+        session.add_all(
+            [
+                Stock(
+                    ts_code="000001.SZ",
+                    symbol="000001",
+                    name="平安银行",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="102268.SZ",
+                    symbol="102268",
+                    name="异常样本",
+                    exchange="SZ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+                Stock(
+                    ts_code="830001.BJ",
+                    symbol="830001",
+                    name="北交所样本",
+                    exchange="BJ",
+                    list_status="L",
+                    is_etf=False,
+                ),
+            ]
+        )
+        session.add(
+            DailyBar(
+                ts_code="102268.SZ",
+                trade_date="20260401",
+                trade_date_dt=None,
+                open=Decimal("10"),
+                high=Decimal("11"),
+                low=Decimal("9"),
+                close=Decimal("10"),
+                pre_close=Decimal("10"),
+                change=Decimal("0"),
+                pct_chg=Decimal("0"),
+                vol=Decimal("1"),
+                amount=Decimal("1"),
+            )
+        )
+        await session.commit()
+
+    provider = AsyncMock()
+    provider.fetch_kline = AsyncMock(
+        side_effect=[
+            [
+                {
+                    "date": "2026-04-01",
+                    "open": 10,
+                    "high": 11,
+                    "low": 9,
+                    "close": 10.5,
+                    "pre_close": 10,
+                    "change": 0.5,
+                    "change_pct": 5,
+                    "volume": 1000,
+                    "amount": 10000,
+                }
+            ],
+            [],
+        ]
+    )
+
+    monkeypatch.setattr(
+        check_april_baostock_completeness,
+        "async_session_factory",
+        async_session_factory_test,
+    )
+    monkeypatch.setattr(
+        check_april_baostock_completeness,
+        "BaoStockProvider",
+        lambda: provider,
+    )
+
+    report = await check_april_baostock_completeness.run_monthly_completeness_check(
+        start_date="20260401",
+        end_date="20260401",
+        execute=False,
+        report_path=tmp_path / "baostock_completeness.json",
+    )
+
+    assert report["baostock_supported_stock_count"] == 2
+    assert report["unsupported_universe_count"] == 1
+    assert report["unsupported_universe_examples"] == [
+        {
+            "ts_code": "830001.BJ",
+            "exchange": "BJ",
+            "reason": "unsupported_bj_exchange",
+        }
+    ]
+    assert report["contract_anomaly_count"] == 1
+    assert report["contract_anomalies"] == [
+        {
+            "ts_code": "102268.SZ",
+            "exchange": "SZ",
+            "status": "no_source_but_db_present",
+            "baseline_rows": 0,
+            "db_rows": 1,
+            "extra_db_dates": ["20260401"],
+        }
+    ]
+    assert all(item["status"] != "no_source_but_db_present" for item in report["details"])
+    provider.fetch_kline.assert_any_await(
+        code="sz.000001",
+        start_date="2026-04-01",
+        end_date="2026-04-01",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        period="daily",
+    )
+    provider.fetch_kline.assert_any_await(
+        code="sz.102268",
+        start_date="2026-04-01",
+        end_date="2026-04-01",
+        adjust=fetch_daily_task.AdjustType.NO_ADJUST,
+        period="daily",
+    )
 
     async with async_engine_test.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

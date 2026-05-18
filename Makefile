@@ -149,13 +149,33 @@ prod-smoke:
 	chmod +x scripts/docker_smoke.sh
 	BACKEND_URL=http://localhost:8000 FRONTEND_URL=http://localhost:3001 ./scripts/docker_smoke.sh
 
+prod-schema-onboarding-audit:
+	@args=""; \
+	if [ -n "$(SCHEMA_ONBOARDING_EVIDENCE_FILE)" ]; then args="$$args --evidence-file $(SCHEMA_ONBOARDING_EVIDENCE_FILE)"; fi; \
+	PYTHON_BIN=$${PYTHON_BIN:-.venv/bin/python}; \
+	$$PYTHON_BIN scripts/release_schema_onboarding.py $$args --env-file "$(ENV_FILE)"
+
+prod-schema-onboarding-stamp:
+	@args="--apply-stamp"; \
+	if [ -n "$(SCHEMA_ONBOARDING_EVIDENCE_FILE)" ]; then args="$$args --evidence-file $(SCHEMA_ONBOARDING_EVIDENCE_FILE)"; fi; \
+	PYTHON_BIN=$${PYTHON_BIN:-.venv/bin/python}; \
+	$$PYTHON_BIN scripts/release_schema_onboarding.py $$args --env-file "$(ENV_FILE)"
+
+prod-release-precheck:
+	@test -n "$(PRE_M3_RELEASE_CLASS)" || (echo "Usage: make prod-release-precheck PRE_M3_RELEASE_CLASS=non_schema|schema_contract [PRE_M3_APPLY_DB_UPGRADE=1]" && exit 1)
+	@args="--release-class $(PRE_M3_RELEASE_CLASS)"; \
+	if [ "$(PRE_M3_APPLY_DB_UPGRADE)" = "1" ]; then args="$$args --apply-db-upgrade"; fi; \
+	PYTHON_BIN=$${PYTHON_BIN:-.venv/bin/python}; \
+	$$PYTHON_BIN scripts/release_precheck.py $$args --env-file "$(ENV_FILE)"
+
 prod-build-version:
 	@test -n "$(VERSION)" || (echo "Usage: make prod-build-version VERSION=x.y.z" && exit 1)
-	VERSION=$(VERSION) sh scripts/build_release_images.sh
+	VERSION=$(VERSION) PYTHON_BIN=$(PYTHON_BIN) sh scripts/build_release_images.sh
 
 prod-deploy-version:
 	@test -n "$(VERSION)" || (echo "Usage: make prod-deploy-version VERSION=x.y.z" && exit 1)
-	VERSION=$(VERSION) ENV_FILE=$(ENV_FILE) sh scripts/deploy_release.sh
+	@test -n "$(PRE_M3_RELEASE_CLASS)" || (echo "Usage: make prod-deploy-version VERSION=x.y.z PRE_M3_RELEASE_CLASS=non_schema|schema_contract [PRE_M3_APPLY_DB_UPGRADE=1]" && exit 1)
+	VERSION=$(VERSION) ENV_FILE=$(ENV_FILE) PYTHON_BIN=$(PYTHON_BIN) PRE_M3_RELEASE_CLASS=$(PRE_M3_RELEASE_CLASS) PRE_M3_APPLY_DB_UPGRADE=$(PRE_M3_APPLY_DB_UPGRADE) POSTDEPLOY_SMOKE=$(POSTDEPLOY_SMOKE) sh scripts/deploy_release.sh
 
 prod-down:
 	$(PROD_COMPOSE) down --remove-orphans
