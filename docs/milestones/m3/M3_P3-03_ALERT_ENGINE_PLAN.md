@@ -229,6 +229,19 @@ In Scope：
 - merge gate：`make merge-check` 通过，覆盖 version sync、backend CI、frontend `npm ci/typecheck/build` 和 deploy/dev/staging compose config validation。
 - 数据 readiness：真实 scheduler 的正确行为取决于 `daily_bars` coverage；使用 pattern rule 的订阅还取决于 `pattern_recognition` 完成审计。如 `daily_bars` partial gap 或缺少 pattern 评估完成审计，应按当前设计 skip，不能用交互式日期回退或不完整数据生成误报/假阴性。
 
+`2026-05-20` post-merge staging closure：
+
+- release artifact staging：新增 `docker-compose.staging.release.yml` 与 `make staging-release-*`，使用 `instock/instock-app:0.4.1`、`instock/instock-frontend:0.4.1` 验证生产同 tag 镜像，不再用 `:staging + bind mount` 作为 M3 收尾证据。
+- snapshot source：`make backup-prod-db` 生成 `backups/postgres/instock_20260520_102137.dump`；`STAGING_POSTGRES_PORT=5544 make restore-staging-db BACKUP=...` 恢复到隔离 staging DB。
+- staging env：`STAGING_POSTGRES_PORT=5544`、backend `8002`、frontend `3003`、`STAGING_SCHEDULER_ENABLED=true`；`/health` 与 `/api/v1/info` 均返回 `version=0.4.1`。
+- schema drift closure：0.4.0 release-image staging 首次暴露生产快照缺少 `alert_runs.definition_snapshot`、`notifications.alert_condition_id / notification_type / dedupe_key / ts_code`，且 legacy `notifications.type` 仍为 `NOT NULL`。已通过 `m3_alert_run_definition_snapshot`、`m3_notification_schema_reconcile`、`m3_notification_legacy_type_nullable` 三个 idempotent 迁移修复。
+- runtime closure：`AlertSubscriptionService.run_subscription()` 的 `IntegrityError` recovery 先缓存 subscription identity，避免 rollback 后访问 expired async ORM 属性触发 `MissingGreenlet`。
+- automated checks：M3 focused tests `31 passed`；`make merge-check` 通过，覆盖 version sync、backend CI、frontend `npm ci/typecheck/build` 与 deploy/dev/staging compose config；全量后端为 `294 passed, 1 skipped`，覆盖率 `73.22%`。
+- API contract：`python3 scripts/smoke_api_contracts.py --base-url http://localhost:8002` 通过，`59 API contract checks passed`。
+- authenticated M3 smoke：新增 `scripts/smoke_m3_alert_flow.py`；staging 上完成注册/登录、metadata、RSI 非默认参数筛选、pattern=DOJI 筛选、两条订阅、手动触发、通知摘要、同日 dedupe、编辑后 stale。证据：`trade_date=20260514`、`rsi_match_count=5`、`pattern_match_count=5`、`deduped_run_id=3`、`stale_status=stale`。
+- scheduler/readiness：服务日志确认 `Scheduler started`；直接调用 scheduler 注册同源入口 `app.jobs.tasks.alert_subscription_task.run(date="20260514")` 返回 `status=skipped`、`reason=trade_date_partial_gap`、`coverage.expected_count=5524`、`covered_count=5203`，没有回退旧交易日，也没有生成误报通知。
+- final status：`M3 / P3-03` 最小闭环已完成 post-merge staging 收尾；`M3-C` 快捷入口、铃铛、邮件与 Attention 快捷入口继续作为验收后增强项，不阻塞主线进入 `M5 / P3-05`。
+
 ### M3 验收 / PR 成功标准
 
 - `Saved Screener` 仍是唯一 authored truth source，`Alert Subscription` 只 pin `selection_condition_id + definition_version + definition_hash`，不得复制筛选 clauses。

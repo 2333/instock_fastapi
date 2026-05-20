@@ -8,6 +8,7 @@
         dev-up dev-down dev-rebuild dev-status dev-logs dev-smoke \
         dev-local frontend-dev-local \
         staging-up staging-down staging-rebuild staging-status staging-logs staging-smoke \
+        staging-release-up staging-release-rebuild staging-release-status staging-release-smoke \
         staging-local frontend-staging-local backup-prod-db restore-staging-db
 
 UV ?= uv
@@ -72,6 +73,8 @@ help:
 	@echo "  make staging-status   - 查看预发布容器状态"
 	@echo "  make staging-logs     - 查看预发布容器日志"
 	@echo "  make staging-smoke    - 预发布容器健康检查"
+	@echo "  make staging-release-up VERSION=x.y.z - 使用已发布镜像启动预发布验证环境"
+	@echo "  make staging-release-smoke - 已发布镜像预发布健康检查"
 	@echo "  make staging-local    - 本地启动后端 (:$(STAGING_APP_PORT), 连预发布 DB)"
 	@echo "  make frontend-staging-local - 本地启动前端 (:$(STAGING_FRONTEND_PORT))"
 	@echo "  make restore-staging-db BACKUP=path/to/file.dump - 用快照恢复预发布 DB"
@@ -235,6 +238,7 @@ DEV_COMPOSE = docker compose -p instock_dev -f docker-compose.dev.yml
 STAGING_APP_PORT ?= 8002
 STAGING_FRONTEND_PORT ?= 3003
 STAGING_POSTGRES_PORT ?= 5434
+STAGING_SCHEDULER_ENABLED ?= false
 
 dev-up:
 	@echo "Building and starting dev environment..."
@@ -304,7 +308,12 @@ frontend-dev-local:
 
 # ============ 临时预发布环境 (按需启动) ============
 
-STAGING_COMPOSE = STAGING_POSTGRES_PORT=$(STAGING_POSTGRES_PORT) docker compose -p instock_staging -f docker-compose.staging.yml
+STAGING_ENV_VARS = STAGING_POSTGRES_PORT=$(STAGING_POSTGRES_PORT) \
+                   STAGING_APP_PORT=$(STAGING_APP_PORT) \
+                   STAGING_FRONTEND_PORT=$(STAGING_FRONTEND_PORT) \
+                   STAGING_SCHEDULER_ENABLED=$(STAGING_SCHEDULER_ENABLED)
+STAGING_COMPOSE = $(STAGING_ENV_VARS) docker compose -p instock_staging -f docker-compose.staging.yml
+STAGING_RELEASE_COMPOSE = $(STAGING_ENV_VARS) VERSION=$(VERSION) APP_GIT_SHA=$(APP_GIT_SHA) docker compose -p instock_staging -f docker-compose.staging.release.yml
 
 staging-up:
 	@echo "Building and starting temporary staging environment (isolated DB)..."
@@ -356,6 +365,35 @@ staging-smoke:
 	@echo "=== Staging Health Check ==="
 	@curl -s http://localhost:$(STAGING_APP_PORT)/health | python3 -m json.tool && echo "Backend: ✅" || echo "Backend: ❌"
 	@curl -s -o /dev/null -w "Frontend: HTTP %{http_code}\n" http://localhost:$(STAGING_FRONTEND_PORT)/ && echo "Frontend: ✅" || echo "Frontend: ❌"
+
+staging-release-up:
+	@test -n "$(VERSION)" || (echo "Usage: make staging-release-up VERSION=x.y.z [APP_GIT_SHA=sha]" && exit 1)
+	@echo "Starting temporary staging environment from release images ($(VERSION))..."
+	$(STAGING_RELEASE_COMPOSE) up -d
+	@echo ""
+	@echo "Waiting for services..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		sleep 2; \
+		if curl -s http://localhost:$(STAGING_APP_PORT)/health > /dev/null 2>&1; then \
+			echo "Backend:  http://localhost:$(STAGING_APP_PORT) ✅"; \
+			echo "Docs:     http://localhost:$(STAGING_APP_PORT)/docs"; \
+			echo "Frontend: http://localhost:$(STAGING_FRONTEND_PORT)"; \
+			echo "DB:       localhost:$(STAGING_POSTGRES_PORT) (staging)"; \
+			break; \
+		fi; \
+		echo "  waiting... ($$i/10)"; \
+	done
+
+staging-release-rebuild:
+	@test -n "$(VERSION)" || (echo "Usage: make staging-release-rebuild VERSION=x.y.z [APP_GIT_SHA=sha]" && exit 1)
+	@echo "Recreating release-image staging environment ($(VERSION))..."
+	$(STAGING_RELEASE_COMPOSE) up -d --force-recreate
+
+staging-release-status:
+	@$(MAKE) staging-status
+
+staging-release-smoke:
+	@$(MAKE) staging-smoke
 
 # 本地热重载 + 预发布 DB
 STAGING_ENV = DATABASE_URL=postgresql+asyncpg://instock:instock_pass@localhost:$(STAGING_POSTGRES_PORT)/instock \

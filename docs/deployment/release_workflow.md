@@ -163,3 +163,20 @@ precheck or deploy.
 
 If the release changes data shape, scheduler behavior, or backfill logic, bring
 up staging before production deployment and validate there first.
+
+For post-merge or release-candidate staging, prefer release-image staging over
+local rebuild staging:
+
+```bash
+make backup-prod-db
+make STAGING_POSTGRES_PORT=5544 restore-staging-db BACKUP=backups/postgres/instock_YYYYmmdd_HHMMSS.dump
+make VERSION=x.y.z APP_GIT_SHA=<sha> STAGING_POSTGRES_PORT=5544 STAGING_SCHEDULER_ENABLED=true staging-release-up
+docker compose -p instock_staging -f docker-compose.staging.release.yml exec -T app sh -lc 'uv run alembic upgrade head && uv run alembic current'
+make STAGING_POSTGRES_PORT=5544 staging-smoke
+python3 scripts/smoke_api_contracts.py --base-url http://localhost:8002
+python3 scripts/smoke_m3_alert_flow.py --base-url http://localhost:8002
+```
+
+Record the backup source, image version, Alembic head, API contract result,
+business smoke result, and scheduler/readiness result. A healthy container alone
+does not prove scheduler/data-shape changes are ready.

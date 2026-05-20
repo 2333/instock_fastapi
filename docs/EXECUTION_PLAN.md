@@ -1,10 +1,10 @@
 # InStock 执行计划(Execution Plan)
 
-> 版本:v2.3 | 更新日期:2026-04-23
+> 版本:v2.4 | 更新日期:2026-05-20
 > 基于 PRD v2.0 / ROADMAP v2.0 + 代码实际进度重写
 > v1.0 归档:[EXECUTION_PLAN_v1_archive.md](./archive/EXECUTION_PLAN_v1_archive.md)
 >
-> **当前状态**: `M0 rebaseline`、`M1` 当前阶段、`M2` 与 `Pre-M3` 均已完成验收；当前主路线是 `M3 / P3-03` 最小验收候选，等待 PR 收口与合并
+> **当前状态**: `M0 rebaseline`、`M1` 当前阶段、`M2`、`Pre-M3` 与 `M3 / P3-03` 均已完成验收；下一条 active 主路线是 `M5 / P3-05` 参数优化
 
 ---
 
@@ -13,9 +13,9 @@
 - 本文件是唯一 `plan-of-record`。如果你只想知道“当前在哪、下一步做什么、哪个执行包是 active”，先看这里。
 - `M*` 表示实际推进/验收里程碑；完成状态、当前阻塞、下一步顺序只在 `M*` 体系里写。
 - `Phase*` 表示能力设计编号或历史规划资产，不单独代表“现在应启动”或“已经完成”。
-- 当前 active 路线是 `M3 / P3-03` 最小验收候选；`Pre-M3` 已作为 closed baseline 保留在 `docs/milestones/m3/`。
+- 当前 active 路线从 `M3 / P3-03` 收尾切换到 `M5 / P3-05`；`Pre-M3` 与 `M3` 均作为 closed baseline 保留在 `docs/milestones/m3/`。
 - 当前日常执行只认 3 份 route docs：`EXECUTION_PLAN.md`、`docs/milestones/m3/README.md`、`docs/milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md`。
-- `docs/milestones/m3/PRE_M3_DECISION.md` 只用于 `gate / go-no-go` 裁决，wave artifact 只用于留痕和中断恢复。
+- `docs/milestones/m3/PRE_M3_DECISION.md` 只用于 `gate / go-no-go` 裁决回看，wave artifact 只用于留痕和中断恢复。
 
 ## 如何使用本文档
 
@@ -65,17 +65,17 @@
 - `M0` rebaseline 已完成,当前仅作为治理背景保留。
 - `M1` 当前阶段已完成验收；`daily_basic` / `stock_st` follow-up 保留在 backlog 中,但默认不阻塞主线推进。
 - `M2` 与 `Pre-M3` 已完成验收；当前最高优先级是收口 `M3 / P3-03` 最小验收，并按 `Saved Screener + Alert Subscription + Registry + Adapter` 的 canonical model 审核 PR 边界。
-- `M3` 已通过 `Pre-M3` reviewer gate，并已完成 `M3-A / M3-B` 最小闭环实现；当前不再是 kickoff，而是验收候选。
+- `M3` 已通过 post-merge staging 验证并以 `0.4.1` 收尾；`M3-C` 快捷入口、铃铛、邮件与 Attention 快捷入口转入后续增强，不阻塞主线。
 - 旧 `M4 / P3-04 策略社交` 与 `PRD v2.0` 的硬边界冲突,不再属于 active runtime scope 或未来默认里程碑入口。
 - `M7` 最后做,因为推荐依赖至少 2 周行为数据积累,不应阻塞报告等可先交付能力。
 
-### 当前路线位置（2026-05-18）
+### 当前路线位置（2026-05-20）
 
-- 已完成并收口: `M0`、`M1` 当前阶段、`M2`、`Pre-M3`
-- 当前所在位置: `M3 / P3-03` 最小验收候选，等待远端 PR 状态确认、提交 PR 与合并
+- 已完成并收口: `M0`、`M1` 当前阶段、`M2`、`Pre-M3`、`M3 / P3-03`
+- 当前所在位置: `M3 / P3-03` post-merge staging 验证完成；下一步进入 `M5 / P3-05` 参数优化
 - 当前非阻塞 backlog: `daily_basic` / `stock_st` live gate、backfill rehearsal、质量留痕与相关筛选接入
-- 当前 blocker cluster: 无 `Pre-M3` 遗留 blocker；M3 发布前仍需完成远端 PR 状态确认、提交 PR 与合并
-- 下一阶段目标: 收口 `M3 / P3-03` 验收包并提交 PR；`M3-C` 快捷入口、铃铛、邮件与 Attention 快捷入口不阻塞本次最小验收
+- 当前 blocker cluster: 无 M3 收尾 blocker；staging 验证中暴露的生产快照 schema drift 已由 `0.4.1` 迁移修复
+- 下一阶段目标: 启动 `M5 / P3-05`，先定义参数优化服务的最小闭环、数据依赖与回滚边界
 
 ### 当前阅读顺序
 

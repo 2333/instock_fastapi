@@ -363,6 +363,8 @@ class AlertSubscriptionService:
             subscription.id,
             trade_date=trade_date,
         )
+        subscription_id = subscription.id
+        subscription_definition_hash = subscription.definition_hash
         current_codes = [str(item["ts_code"]) for item in items if item.get("ts_code")]
         new_codes = [code for code in current_codes if code not in previous_hit_codes]
         notification_in_cooldown = self._is_notification_in_cooldown(
@@ -461,12 +463,12 @@ class AlertSubscriptionService:
             await self.db.rollback()
             recovered_subscription = await self.get_subscription(
                 user_id=user_id,
-                subscription_id=subscription.id,
+                subscription_id=subscription_id,
             )
             recovered_run = await self._find_existing_run_by_trade_date(
-                subscription_id=subscription.id,
+                subscription_id=subscription_id,
                 trade_date=trade_date,
-                definition_hash=subscription.definition_hash,
+                definition_hash=subscription_definition_hash,
             )
             if recovered_run is not None:
                 return await self._build_run_response(recovered_run, recovered_subscription)

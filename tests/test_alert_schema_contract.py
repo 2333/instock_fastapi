@@ -27,6 +27,15 @@ SCREENER_CONDITION_VERSIONING_MIGRATION_PATH = Path(
 ALERT_SUBSCRIPTION_MIGRATION_PATH = Path(
     "alembic/versions/2026_04_24_0007_m3_alert_subscription_baseline.py"
 )
+ALERT_RUN_DEFINITION_SNAPSHOT_MIGRATION_PATH = Path(
+    "alembic/versions/2026_05_20_0008_m3_alert_run_definition_snapshot.py"
+)
+NOTIFICATION_SCHEMA_RECONCILE_MIGRATION_PATH = Path(
+    "alembic/versions/2026_05_20_0009_m3_notification_schema_reconcile.py"
+)
+NOTIFICATION_LEGACY_TYPE_MIGRATION_PATH = Path(
+    "alembic/versions/2026_05_20_0010_m3_notification_legacy_type_nullable.py"
+)
 
 
 def _constraint_names(model) -> set[str]:
@@ -170,6 +179,41 @@ def test_alert_subscription_migration_extends_notifications_without_alert_condit
     assert '"alert_conditions"' not in migration
     subscription_block = migration.split('op.create_table(\n            "alert_runs"')[0]
     assert '"definition_snapshot", postgresql.JSONB' not in subscription_block
+
+
+def test_alert_run_definition_snapshot_reconcile_migration_is_idempotent():
+    migration = ALERT_RUN_DEFINITION_SNAPSHOT_MIGRATION_PATH.read_text()
+
+    assert 'down_revision = "m3_alert_subscription_baseline"' in migration
+    assert (
+        'if _table_exists(bind, "alert_runs") and "definition_snapshot" not in _column_names'
+        in migration
+    )
+    assert 'op.add_column(\n            "alert_runs"' in migration
+    assert '"definition_snapshot", postgresql.JSONB' in migration
+    assert 'op.drop_column("alert_runs", "definition_snapshot")' in migration
+
+
+def test_notification_schema_reconcile_migration_is_idempotent():
+    migration = NOTIFICATION_SCHEMA_RECONCILE_MIGRATION_PATH.read_text()
+
+    assert 'down_revision = "m3_alert_run_definition_snapshot"' in migration
+    assert 'if "alert_condition_id" not in columns:' in migration
+    assert 'if "notification_type" not in columns:' in migration
+    assert 'if "dedupe_key" not in columns:' in migration
+    assert 'if "ts_code" not in columns:' in migration
+    assert 'server_default=""' in migration
+    assert '"uq_notifications_dedupe_key"' in migration
+
+
+def test_notification_legacy_type_nullable_migration_is_idempotent():
+    migration = NOTIFICATION_LEGACY_TYPE_MIGRATION_PATH.read_text()
+
+    assert 'down_revision = "m3_notification_schema_reconcile"' in migration
+    assert 'if "type" in columns and not columns["type"].get("nullable", True):' in migration
+    assert 'op.alter_column(\n            "notifications",' in migration
+    assert '"type",' in migration
+    assert "nullable=True" in migration
 
 
 def test_saved_screener_condition_versioning_migration_hash_matches_runtime_for_boll():

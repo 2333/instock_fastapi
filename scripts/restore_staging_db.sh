@@ -27,12 +27,12 @@ $compose_cmd stop app frontend >/dev/null 2>&1 || true
 
 echo "Dropping and recreating staging database: $STAGING_POSTGRES_DB"
 $compose_cmd exec -T "$STAGING_DB_SERVICE" sh -lc \
-  'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB"'
+  'dropdb -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB"'
 $compose_cmd exec -T "$STAGING_DB_SERVICE" sh -lc \
-  'createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+  'createdb -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" "$POSTGRES_DB"'
 
 echo "Restoring backup into staging database..."
 $compose_cmd exec -T "$STAGING_DB_SERVICE" sh -lc \
-  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-acl' < "$BACKUP_FILE"
+  'pg_restore -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-acl' < "$BACKUP_FILE"
 
 echo "Restore complete. Start staging with: make staging-up"

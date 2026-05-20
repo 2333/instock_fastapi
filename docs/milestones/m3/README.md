@@ -3,7 +3,7 @@
 `m3/` 目录现在承接两类内容：
 
 - 已关闭的 `Pre-M3` baseline：作为进入 `M3` 前的 release/runtime/doc 对齐证据保留
-- 当前 active 的 `M3 / P3-03` 验收候选：从已经通过 gate 的基线收口“参数化指标筛选 + 订阅提醒”最小闭环、PR 与合并
+- 已关闭的 `M3 / P3-03` baseline：保留“参数化指标筛选 + 订阅提醒”最小闭环、post-merge staging 与 release 证据
 
 ## 当前执行入口
 
@@ -43,4 +43,4 @@
 - 当前 `M3` 的唯一锚点是：`Saved Screener` 为 authored truth source，`Alert Subscription` 为提醒绑定，`Registry` 为字段目录，`Adapter` 为可替换执行层
 - 当前 `M3-A` 已完成到参数化 `RSI / MACD / BOLL` runtime + `Selection` 最小前端接线 + live smoke
 - 当前 `M3-B/S1-S4` 已完成后端订阅、最小用户入口、手动触发、run/hit、站内摘要通知、盘后 scheduler/checker 与 reviewer closure
-- 当前状态是 `M3` 最小验收候选，验收证据与 reviewer gate 已补齐，下一步是远端 PR 状态确认、提交 PR 与合并；`M3-C` 快捷入口收敛为验收后增强项，暂不扩散到铃铛、邮件或 Attention 快捷入口
+- 当前状态是 `M3` 已完成 post-merge staging 收尾；`M3-C` 快捷入口收敛为验收后增强项，暂不扩散到铃铛、邮件或 Attention 快捷入口
