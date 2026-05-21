@@ -88,11 +88,12 @@ Parameter application:
 
 - Maximum parameters per job: 8.
 - Maximum trials per job: 50.
+- No single-user `running` job hard cap is implemented in `M5 v1`; do not describe concurrency limiting as delivered. A release/ops slice may add it later with a separate contract and tests.
 - v1 supports `random_search` only.
 - v1 uses in-process `asyncio` task scheduling with a fresh DB session per optimization task.
 - v1 does not attempt restart recovery after process death; persisted `pending` / `running` rows remain inspectable and can be cancelled or retried by a later enhancement.
 
-## Smoke Path
+## Local Automated Smoke Path
 
 1. Create a job with `auto_start=false` and a small finite parameter space.
 2. Confirm the job is visible through list and detail APIs.
@@ -100,6 +101,8 @@ Parameter application:
 4. Poll the detail endpoint until `status` is terminal.
 5. Fetch trials and best.
 6. Use `data.backtest_params` as the Backtest config for a normal `/api/v1/backtest` call.
+
+This local API smoke path is complete for `M5 v1` code acceptance. It does not replace live browser / staging manual smoke, which remains release activity.
 
 ## Rollback
 

@@ -2,6 +2,26 @@
 
 更新时间：2026-05-21
 
+## 当前状态裁决
+
+Decision：`M5 v1` 本地代码验收完成；release/staging/backup/schema-contract gate 未完成。
+
+当前状态：
+
+- 后端 schema/service/API/task runtime、Backtest 页面最小入口、best 参数回填、本地自动化 API smoke、frontend typecheck/build 与 backend pytest 已作为本地验收证据。
+- live browser / staging 手工 smoke 仍需 release activity 覆盖，不能被本地 API smoke 完全替代。
+- 生产 backup、发布前 schema-contract gate 与 release smoke 尚未完成，不能写成已发布或已过生产 gate。
+
+## 并发限制 residue
+
+Decision：`M5 v1` 不实现单用户 `running` job hard cap。
+
+当前状态：
+
+- v1 已冻结参数数量上限和 `trial_count` 上限。
+- 当前代码没有单用户 `running` job hard cap，不得在执行包内写成“并发限制已实现”。
+- 如 release/ops 需要该限制，应另开 alignment note，补 API/service contract、测试和 release evidence。
+
 ## `app/optimization/algorithms.py`
 
 Decision：保留但隔离。

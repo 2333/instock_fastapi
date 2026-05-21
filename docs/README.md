@@ -4,7 +4,8 @@
 
 1. [EXECUTION_PLAN.md](./EXECUTION_PLAN.md)
 2. [milestones/m5/README.md](./milestones/m5/README.md)
-3. [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)
+3. [milestones/m5/artifacts/W2-frontend-v1-alignment.md](./milestones/m5/artifacts/W2-frontend-v1-alignment.md)
+4. [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)（冻结 kickoff 基线/历史启动计划）
 
 ## 文档分层
 
@@ -14,9 +15,10 @@
 
 ### 2. 当前执行包文档
 
-- [milestones/m5/README.md](./milestones/m5/README.md)：当前 active 执行包入口，负责说明 `M5 / P3-05` 参数优化的启动边界、依赖顺序和停机点。
-- [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)：当前 `M5` 的 kickoff 计划、并行任务拆分、验收和回滚边界。
-- [milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md](./milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md)：`M5` 启动前与实现前的 reviewer 检查清单。
+- [milestones/m5/README.md](./milestones/m5/README.md)：当前 active 执行包入口，负责说明 `M5 / P3-05 v1` 的本地验收状态、release activity、residue 决策和停机点。
+- [milestones/m5/artifacts/W2-frontend-v1-alignment.md](./milestones/m5/artifacts/W2-frontend-v1-alignment.md)：当前 `M5 v1` 本地代码验收与剩余 release activity 的主要证据入口。
+- [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)：冻结 kickoff 基线/历史启动计划，用于回看原始 scope、并行任务拆分、验收和回滚边界，不再代表当前唯一执行状态。
+- [milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md](./milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md)：`M5` reviewer 检查清单；未勾选的 live staging、生产 backup、schema-contract gate 与 release smoke 是 release activity。
 
 ### 3. 工作内容与留痕文档
 
@@ -38,8 +40,9 @@
 
 - `M*` 表示实际推进/验收里程碑，当前状态和完成度只在 `M*` 体系里写。
 - `Phase*` 表示能力设计编号或历史规划资产，不单独代表当前执行状态。
-- 当前 active 路线是 `M5 / P3-05` 参数优化 kickoff；`Pre-M3` 与 `M3` 已作为 closed baseline 保留在 `docs/milestones/m3/`。
-- 当前 `M5` 的启动锚点是：复用现有 `BacktestService` 与异步回测任务模式，先交付参数优化最小闭环；不默认引入 Celery/RQ，也不把孤立算法原型视为 runtime-ready 能力。
+- 当前 active 路线是 `M5 / P3-05` PR/release closure；`M5 v1` 已完成本地代码验收并已提交 PR，但尚未写成生产完成。
+- 当前 `M5` 的 release activity 是：live staging smoke、生产 backup、发布前 schema-contract gate 与 release smoke；这些完成并合并/发布后，`M6 / P3-06` 才接棒为 active。
+- `M5` 的 kickoff plan 只作为冻结基线/历史启动计划；当前状态以 `EXECUTION_PLAN.md`、`milestones/m5/README.md` 和 `milestones/m5/artifacts/` 的验收/证据记录为准。
 
 ## 代码结构对应关系
 

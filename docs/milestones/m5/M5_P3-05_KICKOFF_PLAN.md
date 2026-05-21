@@ -2,6 +2,8 @@
 
 更新时间：2026-05-20
 
+Status note（2026-05-21）：本文件是 `M5 / P3-05` 的冻结基线与历史启动计划，不是当前完成状态裁决。当前真实状态是 `M5 v1` 本地代码验收完成；live browser / staging smoke、production backup、schema-contract gate 与 release smoke 仍是未完成的 release activity。
+
 ## 目标
 
 启动 `M5 / P3-05` 参数优化服务，在不引入不必要新基础设施的前提下，交付一个可验收、可回滚、可扩展的最小闭环：
@@ -31,9 +33,9 @@ Backtest 配置
 - Runtime 决策：首轮复用 `BacktestService` 与当前 async task 模式。
 - Schema contract：`parameter_optimization_jobs`、`parameter_optimization_trials` 的字段、索引、状态机和回滚策略。
 - API contract：创建、列表、详情、取消、trial 列表、best 参数。
-- Trial 限制：参数数量、trial 数量、单用户并发、任务取消语义。
+- Trial 限制：参数数量、trial 数量、任务取消语义；单用户 `running` job hard cap 不纳入 `M5 v1`，后续 release/ops 可另开。
 - Residue disposition：`app/optimization/algorithms.py` 与历史前端入口假设只作为未接入资产，不代表现行 runtime。
-- 手工 smoke：至少一条从创建 job 到 best 参数回填的可复现路径。
+- Smoke 边界：本地自动化 API smoke 覆盖从创建 job 到 best 参数回填；live browser / staging 手工 smoke 不能被 API smoke 替代，属于 release activity。
 
 Gate 0 未通过，不进入并行实现。
 
@@ -128,7 +130,7 @@ Owner：frontend worker
 
 - `npm run typecheck` 通过。
 - `npm run build` 通过。
-- 手工路径可跑通。
+- 本地最小路径由自动化 API smoke、typecheck 和 build 支撑；live browser / staging 手工路径留作 release activity。
 
 ### WS-5 Tests / Ops / Review
 
@@ -138,13 +140,14 @@ Owner：controller + reviewer
 
 - focused backend tests。
 - frontend typecheck/build。
-- API smoke。
-- release/staging 验证脚本或手工步骤。
+- 本地自动化 API smoke。
+- live browser / staging 验证脚本或手工步骤。
 - reviewer artifact。
 
 验收：
 
-- 所有 schema-changing 变更走 `schema_contract` gate。
+- 本地代码验收要求 Alembic head/current、focused smoke、frontend typecheck/build 与 backend tests 通过。
+- release activity 仍需 live browser / staging smoke、production backup、schema-contract gate 与 release smoke。
 - 文档、API、代码状态一致。
 - M5 可以独立验收、独立回滚。
 

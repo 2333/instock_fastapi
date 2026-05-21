@@ -104,4 +104,4 @@ GET    /api/v1/optimization/jobs/{job_id}/best
 - progress 和 best 参数可查询。
 - 至少支持 `random` 方法完成有限 trial。
 - 可把 best 参数应用到现有回测配置。
-- 后端 focused tests、前端 typecheck/build、至少 1 条手工 smoke 路径通过。
+- 后端 focused tests、前端 typecheck/build、本地自动化 API smoke 通过；live browser / staging 手工 smoke 属于 release activity。

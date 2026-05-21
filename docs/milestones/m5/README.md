@@ -5,9 +5,10 @@
 ## 当前执行入口
 
 - [docs/EXECUTION_PLAN.md](../../EXECUTION_PLAN.md) - 先确认当前里程碑位置、主路线状态和高层 stop condition
-- [M5_P3-05_KICKOFF_PLAN.md](./M5_P3-05_KICKOFF_PLAN.md) - `M5` 的启动边界、并行任务拆分、依赖顺序、验收与回滚边界
-- [M5_P3-05_REVIEW_CHECKLIST.md](./M5_P3-05_REVIEW_CHECKLIST.md) - 启动前与执行期 reviewer gate 清单
+- [artifacts/](./artifacts/) - `M5 v1` 本地代码验收、review 结论、命令证据和剩余 release activity
+- [M5_P3-05_REVIEW_CHECKLIST.md](./M5_P3-05_REVIEW_CHECKLIST.md) - reviewer gate 清单；未勾选项是 release activity
 - [M5_P3-05_RESIDUE_DECISIONS.md](./M5_P3-05_RESIDUE_DECISIONS.md) - 参数优化残片与旧假设处理结论
+- [M5_P3-05_KICKOFF_PLAN.md](./M5_P3-05_KICKOFF_PLAN.md) - 冻结 kickoff 基线和历史启动计划，仅用于回看原始 scope、依赖顺序和回滚边界
 
 ## 设计输入
 
@@ -35,21 +36,23 @@ planner alignment -> implementation -> reviewer gate
 
 ## 当前完成结论
 
-- `M3 / P3-03` 已关闭，`M5 / P3-05` 可以作为下一条 active 主线启动。
+- `M3 / P3-03` 已关闭，`M5 / P3-05 v1` 已完成本地代码验收并进入 PR/release closure。
 - `M5` 首轮不直接引入 Celery/RQ；先复用现有 `BacktestService` 与当前 async task 模式。
 - `app/optimization/algorithms.py` 是 isolated prototype，不视为 runtime-ready 能力。
 - 首轮最小闭环是：创建优化任务 -> 执行有限 trial -> 记录进度和结果 -> 提取最优参数 -> 应用到回测配置。
 - `M5 v1` 已完成上述最小闭环：后端 schema/service/API/task runtime、Backtest 页面最小入口、best 参数回填、focused smoke、frontend typecheck/build 与 backend full pytest 均已通过。
-- live staging smoke、生产 backup 与发布前 schema-contract gate 属于 release activity，不阻塞本地 `M5 v1` 代码验收。
+- `M5 v1` 冻结的是参数数量上限与 `trial_count` 上限；当前代码没有单用户 `running` job hard cap，不应声称已实现并发限制。该限制可在后续 release/ops 中另开。
+- 本地自动化 API smoke 已完成；它不替代 live browser / staging 手工 smoke。
+- live browser / staging smoke、生产 backup、发布前 schema-contract gate 与 release smoke 属于未完成的 release activity，不阻塞本地 `M5 v1` 代码验收。
 
 ## 使用顺序
 
 1. 先读 `docs/EXECUTION_PLAN.md`。
 2. 再读本文件。
-3. 进入 [M5_P3-05_KICKOFF_PLAN.md](./M5_P3-05_KICKOFF_PLAN.md)。
-4. 每个 work stream 先补 planner alignment note，再进入 implementation。
-5. implementation 后按 [M5_P3-05_REVIEW_CHECKLIST.md](./M5_P3-05_REVIEW_CHECKLIST.md) 过 reviewer gate。
-6. 需要恢复执行证据时，再进入 [artifacts/](./artifacts/)。
+3. 进入 [artifacts/](./artifacts/) 复核本地验收证据、review 结论和剩余 release activity。
+4. 按 [M5_P3-05_REVIEW_CHECKLIST.md](./M5_P3-05_REVIEW_CHECKLIST.md) 确认哪些 gate 已完成、哪些仍是 release activity。
+5. 需要理解 residue 或扩 scope 边界时，再看 [M5_P3-05_RESIDUE_DECISIONS.md](./M5_P3-05_RESIDUE_DECISIONS.md)。
+6. 只有需要回看原始启动范围、并行任务拆分和回滚边界时，才进入 [M5_P3-05_KICKOFF_PLAN.md](./M5_P3-05_KICKOFF_PLAN.md)。
 
 ## 与历史执行包的关系
 

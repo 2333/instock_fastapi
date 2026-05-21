@@ -40,6 +40,7 @@ This slice exists to close the `M5 v1` user-facing loop without restoring the re
 - No standalone optimization page.
 - No new frontend store, router branch, dashboard, or background-job framework.
 - No Bayesian optimization UI.
+- No single-user `running` job hard cap in `M5 v1`; v1 only relies on the frozen parameter count and `trial_count` limits.
 - No live staging or production release execution in this local code gate.
 
 ## Acceptance
@@ -49,10 +50,11 @@ This slice exists to close the `M5 v1` user-facing loop without restoring the re
 - UI shows job progress, completed/failed counters, recent trials, and best score.
 - UI can cancel pending/running jobs through the frozen API contract.
 - UI can apply best parameters back to `strategyParams`.
-- API smoke covers create -> run -> job/trials/best -> best backtest replay.
+- Local automated API smoke covers create -> run -> job/trials/best -> best backtest replay.
 - Frontend `typecheck` and production `build` pass.
 - Backend focused tests and full pytest pass.
 - Alembic `current` equals `head` locally.
+- Live browser / staging manual smoke remains release activity and is not replaced by API smoke.
 
 ## Rollback Boundary
 
@@ -106,5 +108,5 @@ Cross-review corrections:
 
 Residual release activity:
 
-- live staging smoke covering real job creation, progress, trial results, best parameters, and cancellation.
-- production backup, schema-contract gate, and release smoke plan.
+- live browser / staging smoke covering real job creation, progress, trial results, best parameters, and cancellation.
+- production backup, schema-contract gate, and release smoke execution.

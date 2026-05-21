@@ -23,7 +23,8 @@
 - [x] Schema/model 字段已冻结。
 - [x] API contract 已冻结。
 - [x] 任务状态机和取消语义已冻结。
-- [x] trial 上限、并发限制、参数空间限制已冻结。
+- [x] 参数数量上限、`trial_count` 上限和参数空间限制已冻结。
+- [x] 单用户 `running` job hard cap 明确不纳入 `M5 v1` 当前代码，后续 release/ops 可另开；不得声称 v1 已实现并发限制。
 - [x] 回滚边界已明确。
 - [x] 最小 smoke 路径已明确。
 
@@ -35,6 +36,6 @@
 - [x] 后端 focused tests 通过。
 - [x] 前端 `typecheck` / `build` 通过。
 - [x] Alembic head/current 一致。
-- [x] API smoke 覆盖 job 创建、执行、trial 结果、best 参数和 best 回测回放。
-- [ ] live staging 验证覆盖 job 创建、progress、trial 结果、best 参数和取消；这是 release activity，不阻塞本地 `M5 v1` 代码验收。
-- [ ] 生产发布前有 backup、schema-contract gate 和 smoke 计划；这是 release activity，不阻塞本地 `M5 v1` 代码验收。
+- [x] 本地自动化 API smoke 覆盖 job 创建、执行、trial 结果、best 参数和 best 回测回放。
+- [ ] live browser / staging 手工 smoke 覆盖 job 创建、progress、trial 结果、best 参数和取消；API smoke 不替代该项，这是 release activity，不阻塞本地 `M5 v1` 代码验收。
+- [ ] 生产发布前 backup、schema-contract gate 和 release smoke 尚未完成；这是 release activity，不阻塞本地 `M5 v1` 代码验收。
