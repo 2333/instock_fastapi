@@ -20,6 +20,7 @@ from app.api.routers import (
     fund_flow_router,
     indicator_router,
     market_router,
+    optimization_router,
     pattern_router,
     selection_router,
     stock_router,
@@ -118,6 +119,7 @@ app.include_router(attention_router.router, prefix="/api/v1")
 app.include_router(auth_router.router, prefix="/api/v1")
 app.include_router(events_router.router, prefix="/api/v1")
 app.include_router(market_router.router, prefix="/api/v1")
+app.include_router(optimization_router.router, prefix="/api/v1")
 
 
 @app.get("/", response_class=HTMLResponse)

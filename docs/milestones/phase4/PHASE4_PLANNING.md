@@ -7,4 +7,4 @@
 当前使用约定：
 
 - 该规划文档保留的是 2026-04-04 的一版提前假设，不再作为当前阶段启动依据。
-- 当前主路线以 [EXECUTION_PLAN.md](../../EXECUTION_PLAN.md) 为准；当前 active 路线是 `Pre-M3 主线对齐修复`，不是从 `M2 / P3-01` 重新开始。
+- 当前主路线以 [EXECUTION_PLAN.md](../../EXECUTION_PLAN.md) 为准；本文不再声明 active 路线，也不是从 `M2 / P3-01` 重新开始。

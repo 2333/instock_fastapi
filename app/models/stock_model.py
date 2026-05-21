@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -696,3 +697,89 @@ class BacktestTask(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ParameterOptimizationJob(Base):
+    __tablename__ = "parameter_optimization_jobs"
+    __table_args__ = (
+        Index("ix_parameter_optimization_jobs_user_created", "user_id", "created_at"),
+        Index("ix_parameter_optimization_jobs_status", "status"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_parameter_optimization_jobs_status",
+        ),
+        CheckConstraint(
+            "method IN ('random_search')",
+            name="ck_parameter_optimization_jobs_method",
+        ),
+        CheckConstraint(
+            "objective_direction IN ('maximize', 'minimize')",
+            name="ck_parameter_optimization_jobs_objective_direction",
+        ),
+        CheckConstraint(
+            "objective_metric IN ('sharpe_ratio', 'total_return', 'max_drawdown')",
+            name="ck_parameter_optimization_jobs_objective_metric",
+        ),
+        CheckConstraint("trial_count >= 1 AND trial_count <= 50", name="ck_parameter_optimization_jobs_trial_count"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    method: Mapped[str] = mapped_column(String(30), nullable=False, default="random_search")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    base_params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    parameter_space: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    objective_metric: Mapped[str] = mapped_column(String(40), nullable=False)
+    objective_direction: Mapped[str] = mapped_column(String(10), nullable=False, default="maximize")
+    trial_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_trials: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_trials: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    random_seed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    best_trial_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    best_parameters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    best_metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    best_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    trials: Mapped[list["ParameterOptimizationTrial"]] = relationship(
+        "ParameterOptimizationTrial",
+        back_populates="job",
+        cascade="all, delete-orphan",
+    )
+
+
+class ParameterOptimizationTrial(Base):
+    __tablename__ = "parameter_optimization_trials"
+    __table_args__ = (
+        UniqueConstraint("job_id", "trial_index", name="uq_parameter_optimization_trials_job_index"),
+        Index("ix_parameter_optimization_trials_job_id", "job_id"),
+        Index("ix_parameter_optimization_trials_status", "status"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_parameter_optimization_trials_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("parameter_optimization_jobs.id"), nullable=False)
+    trial_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    params: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    backtest_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    job: Mapped["ParameterOptimizationJob"] = relationship(
+        "ParameterOptimizationJob",
+        back_populates="trials",
+    )

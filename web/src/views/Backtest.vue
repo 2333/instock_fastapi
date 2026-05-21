@@ -344,6 +344,109 @@
             </div>
           </div>
         </div>
+
+        <div class="config-section optimization-section">
+          <h4>参数优化</h4>
+          <div class="config-row">
+            <div class="config-item">
+              <label>优化目标</label>
+              <select v-model="optimizationConfig.objectiveMetric" class="select-full">
+                <option value="sharpe_ratio">夏普比率</option>
+                <option value="total_return">总收益率</option>
+                <option value="max_drawdown">最大回撤</option>
+              </select>
+            </div>
+            <div class="config-item">
+              <label>Trial 数量</label>
+              <input v-model.number="optimizationConfig.trialCount" type="number" class="input-number" min="1" max="20">
+            </div>
+          </div>
+          <div v-if="optimizableParams.length" class="optimization-param-list">
+            <label
+              v-for="param in optimizableParams"
+              :key="param.name"
+              class="optimization-param"
+            >
+              <input type="checkbox" v-model="optimizationParamState[param.name].enabled">
+              <span>{{ param.label }}</span>
+              <input
+                v-model.number="optimizationParamState[param.name].min"
+                type="number"
+                class="input-number optimization-param__input"
+                :step="param.step || 1"
+                :disabled="!optimizationParamState[param.name].enabled"
+              >
+              <input
+                v-model.number="optimizationParamState[param.name].max"
+                type="number"
+                class="input-number optimization-param__input"
+                :step="param.step || 1"
+                :disabled="!optimizationParamState[param.name].enabled"
+              >
+              <input
+                v-model.number="optimizationParamState[param.name].step"
+                type="number"
+                class="input-number optimization-param__step"
+                min="1"
+                :step="param.step || 1"
+                :disabled="!optimizationParamState[param.name].enabled"
+              >
+            </label>
+          </div>
+          <p v-else class="strategy-hint strategy-hint--info">
+            当前模板没有可优化的数值参数。
+          </p>
+          <div class="optimization-actions">
+            <button class="btn btn-secondary btn-full" @click="createOptimizationJob" :disabled="optimizationLoading || !canCreateOptimizationJob">
+              <span v-if="optimizationLoading" class="spinner-small"></span>
+              {{ optimizationLoading ? '优化中...' : '开始优化' }}
+            </button>
+            <button class="btn btn-secondary" @click="refreshOptimizationJobs" :disabled="optimizationLoading">
+              刷新
+            </button>
+          </div>
+          <div v-if="selectedOptimizationJob" class="optimization-status">
+            <div class="optimization-status__head">
+              <strong>#{{ selectedOptimizationJob.id }} {{ optimizationStatusLabel(selectedOptimizationJob.status) }}</strong>
+              <span>{{ selectedOptimizationJob.progress }}%</span>
+            </div>
+            <div class="optimization-progress">
+              <span :style="{ width: `${selectedOptimizationJob.progress}%` }"></span>
+            </div>
+            <div class="optimization-status__meta">
+              <span>完成 {{ selectedOptimizationJob.completedTrials }}/{{ selectedOptimizationJob.trialCount }}</span>
+              <span>失败 {{ selectedOptimizationJob.failedTrials }}</span>
+              <span>Best {{ formatOptimizationScore(selectedOptimizationJob.bestScore) }}</span>
+            </div>
+            <div class="optimization-actions">
+              <button
+                class="btn btn-secondary btn-small"
+                @click="applyBestOptimizationParams"
+                :disabled="!optimizationBest?.backtestParams"
+              >
+                回填最优参数
+              </button>
+              <button
+                class="btn btn-secondary btn-small"
+                @click="cancelOptimizationJob"
+                :disabled="!canCancelSelectedOptimizationJob"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+          <div v-if="optimizationTrials.length" class="optimization-trials">
+            <div
+              v-for="trial in optimizationTrials.slice(0, 5)"
+              :key="trial.id"
+              class="optimization-trial"
+            >
+              <span>#{{ trial.trialIndex }}</span>
+              <strong>{{ optimizationStatusLabel(trial.status) }}</strong>
+              <span>{{ formatOptimizationScore(trial.score) }}</span>
+            </div>
+          </div>
+        </div>
       </aside>
 
       <div
@@ -577,7 +680,7 @@ import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import { backtestApi, strategyApi } from '@/api'
+import { backtestApi, optimizationApi, strategyApi } from '@/api'
 import { useAnalytics } from '@/composables/useAnalytics'
 import { useResizablePanel } from '@/composables/useResizablePanel'
 
@@ -659,7 +762,43 @@ interface BacktestSnapshot {
   trades: Trade[]
 }
 
+interface OptimizationJob {
+  id: number
+  status: string
+  progress: number
+  objectiveMetric: string
+  trialCount: number
+  completedTrials: number
+  failedTrials: number
+  bestScore: number | null
+  bestParameters: Record<string, unknown> | null
+}
+
+interface OptimizationTrial {
+  id: number
+  trialIndex: number
+  status: string
+  params: Record<string, unknown>
+  score: number | null
+}
+
+interface OptimizationBest {
+  jobId: number
+  status: string
+  bestParameters: Record<string, unknown> | null
+  bestScore: number | null
+  backtestParams: Record<string, any> | null
+}
+
+interface OptimizationParamState {
+  enabled: boolean
+  min: number
+  max: number
+  step: number
+}
+
 const RUNNABLE_STRATEGY_NAMES = new Set(['ma_crossover', 'rsi_oversold'])
+const OPTIMIZATION_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 const loading = ref(false)
 const hasResults = ref(false)
@@ -715,9 +854,42 @@ const config = reactive({
 })
 
 const strategyParams = reactive<Record<string, string | number>>({})
+const optimizationConfig = reactive({
+  objectiveMetric: 'sharpe_ratio' as 'sharpe_ratio' | 'total_return' | 'max_drawdown',
+  trialCount: 6,
+})
+const optimizationParamState = reactive<Record<string, OptimizationParamState>>({})
+const optimizationJobs = ref<OptimizationJob[]>([])
+const selectedOptimizationJobId = ref<number | null>(null)
+const selectedOptimizationJob = ref<OptimizationJob | null>(null)
+const optimizationTrials = ref<OptimizationTrial[]>([])
+const optimizationBest = ref<OptimizationBest | null>(null)
+const optimizationLoading = ref(false)
+const optimizationPollTimer = ref<number | null>(null)
 
 const selectedStrategyTemplate = computed(() =>
   strategyTemplates.value.find((template) => template.name === config.strategyType) || null
+)
+const optimizableParams = computed(() =>
+  (selectedStrategyTemplate.value?.parameters || []).filter((param) => param.type === 'number')
+)
+const selectedOptimizationJobFromList = computed(() =>
+  selectedOptimizationJobId.value == null
+    ? null
+    : optimizationJobs.value.find((job) => job.id === selectedOptimizationJobId.value) || null
+)
+const canCreateOptimizationJob = computed(() =>
+  isRunnableStrategyTemplate(config.strategyType) &&
+  Boolean(config.stockCode.trim()) &&
+  Object.values(optimizationParamState).some((state) => state.enabled) &&
+  optimizationConfig.trialCount >= 1 &&
+  optimizationConfig.trialCount <= 20
+)
+const canCancelSelectedOptimizationJob = computed(() =>
+  Boolean(
+    selectedOptimizationJob.value &&
+      !OPTIMIZATION_TERMINAL_STATUSES.has(selectedOptimizationJob.value.status)
+  )
 )
 const selectedSavedStrategy = computed(() =>
   savedStrategies.value.find((strategy) => String(strategy.id) === selectedSavedStrategyId.value) || null
@@ -1364,6 +1536,49 @@ const normalizeBacktestHistoryItem = (item: any): BacktestHistoryItem => ({
   createdAt: item?.created_at ? String(item.created_at) : undefined,
 })
 
+const normalizeOptimizationJob = (item: any): OptimizationJob => ({
+  id: Number(item?.id || 0),
+  status: String(item?.status || 'pending'),
+  progress: Number(item?.progress || 0),
+  objectiveMetric: String(item?.objective_metric || item?.objectiveMetric || 'sharpe_ratio'),
+  trialCount: Number(item?.trial_count ?? item?.trialCount ?? 0),
+  completedTrials: Number(item?.completed_trials ?? item?.completedTrials ?? 0),
+  failedTrials: Number(item?.failed_trials ?? item?.failedTrials ?? 0),
+  bestScore:
+    item?.best_score === null || item?.best_score === undefined
+      ? null
+      : Number(item.best_score),
+  bestParameters:
+    item?.best_parameters && typeof item.best_parameters === 'object'
+      ? item.best_parameters
+      : null,
+})
+
+const normalizeOptimizationTrial = (item: any): OptimizationTrial => ({
+  id: Number(item?.id || 0),
+  trialIndex: Number(item?.trial_index ?? item?.trialIndex ?? 0),
+  status: String(item?.status || 'pending'),
+  params: item?.params && typeof item.params === 'object' ? item.params : {},
+  score: item?.score === null || item?.score === undefined ? null : Number(item.score),
+})
+
+const normalizeOptimizationBest = (item: any): OptimizationBest => ({
+  jobId: Number(item?.job_id ?? item?.jobId ?? 0),
+  status: String(item?.status || 'pending'),
+  bestParameters:
+    item?.best_parameters && typeof item.best_parameters === 'object'
+      ? item.best_parameters
+      : null,
+  bestScore:
+    item?.best_score === null || item?.best_score === undefined
+      ? null
+      : Number(item.best_score),
+  backtestParams:
+    item?.backtest_params && typeof item.backtest_params === 'object'
+      ? item.backtest_params
+      : null,
+})
+
 const applyTemplateDefaults = (template: StrategyTemplate | null) => {
   Object.keys(strategyParams).forEach((key) => {
     delete strategyParams[key]
@@ -1382,6 +1597,31 @@ const assignStrategyParams = (params: Record<string, unknown> | null | undefined
   Object.entries(params || {}).forEach(([key, value]) => {
     if (typeof value === 'number' || typeof value === 'string') {
       strategyParams[key] = value
+    }
+  })
+}
+
+const syncOptimizationParamState = () => {
+  const names = new Set(optimizableParams.value.map((param) => param.name))
+  Object.keys(optimizationParamState).forEach((key) => {
+    if (!names.has(key)) delete optimizationParamState[key]
+  })
+  optimizableParams.value.forEach((param, index) => {
+    const current = Number(strategyParams[param.name] ?? param.default ?? 0)
+    const step = Number(param.step || 1)
+    const min = typeof param.min === 'number'
+      ? Math.max(param.min, current - step * 2)
+      : current - step * 2
+    const max = typeof param.max === 'number'
+      ? Math.min(param.max, current + step * 2)
+      : current + step * 2
+    if (!optimizationParamState[param.name]) {
+      optimizationParamState[param.name] = {
+        enabled: index < 2,
+        min,
+        max: max <= min ? min + step : max,
+        step,
+      }
     }
   })
 }
@@ -1599,6 +1839,7 @@ const loadStrategyTemplates = async () => {
     } else {
       applyTemplateDefaults(selectedStrategyTemplate.value)
     }
+    syncOptimizationParamState()
   } catch (error) {
     showNotification?.('warning', '策略模板加载失败，使用默认配置')
   }
@@ -1772,10 +2013,170 @@ const runBacktest = async () => {
   }
 }
 
+const buildOptimizationBaseParams = () => {
+  const range = resolveDateRange()
+  return {
+    strategy: config.strategyType,
+    strategy_params: { ...strategyParams },
+    start_date: range.start,
+    end_date: range.end,
+    initial_capital: config.initialCapital,
+    stock_code: config.stockCode,
+  }
+}
+
+const buildOptimizationParameterSpace = () => {
+  const entries: Array<[string, { type: 'int'; min: number; max: number; step: number }]> = []
+  Object.entries(optimizationParamState)
+    .filter(([, state]) => state.enabled)
+    .forEach(([name, state]) => {
+      const spec = {
+        type: 'int' as const,
+        min: Math.round(Number(state.min)),
+        max: Math.round(Number(state.max)),
+        step: Math.max(1, Math.round(Number(state.step || 1))),
+      }
+      if (spec.min <= spec.max) {
+        entries.push([name, spec])
+      }
+    })
+  return Object.fromEntries(entries)
+}
+
+const optimizationStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    pending: '等待中',
+    running: '运行中',
+    completed: '已完成',
+    failed: '失败',
+    cancelled: '已取消',
+  }
+  return labels[status] || status
+}
+
+const formatOptimizationScore = (value: number | null | undefined) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return '--'
+  return value.toFixed(4)
+}
+
+const stopOptimizationPolling = () => {
+  if (optimizationPollTimer.value === null) return
+  window.clearInterval(optimizationPollTimer.value)
+  optimizationPollTimer.value = null
+}
+
+const loadOptimizationTrialsAndBest = async (jobId: number) => {
+  const [trialResponse, bestResponse] = await Promise.all([
+    optimizationApi.listTrials(jobId),
+    optimizationApi.getBest(jobId),
+  ])
+  optimizationTrials.value = Array.isArray(trialResponse?.data)
+    ? trialResponse.data.map(normalizeOptimizationTrial)
+    : []
+  optimizationBest.value = bestResponse?.data ? normalizeOptimizationBest(bestResponse.data) : null
+}
+
+const loadOptimizationJob = async (jobId: number) => {
+  const response = await optimizationApi.getJob(jobId)
+  const job = normalizeOptimizationJob(response?.data)
+  selectedOptimizationJob.value = job
+  selectedOptimizationJobId.value = job.id
+  optimizationJobs.value = [job, ...optimizationJobs.value.filter((item) => item.id !== job.id)]
+  await loadOptimizationTrialsAndBest(job.id)
+  if (OPTIMIZATION_TERMINAL_STATUSES.has(job.status)) {
+    stopOptimizationPolling()
+    optimizationLoading.value = false
+  }
+  return job
+}
+
+const startOptimizationPolling = (jobId: number) => {
+  stopOptimizationPolling()
+  optimizationPollTimer.value = window.setInterval(() => {
+    void loadOptimizationJob(jobId).catch(() => {
+      stopOptimizationPolling()
+      optimizationLoading.value = false
+    })
+  }, 1500)
+}
+
+const refreshOptimizationJobs = async () => {
+  try {
+    const response = await optimizationApi.listJobs(8)
+    optimizationJobs.value = Array.isArray(response?.data)
+      ? response.data.map(normalizeOptimizationJob)
+      : []
+    const nextJob = selectedOptimizationJobFromList.value || optimizationJobs.value[0] || null
+    if (!nextJob) return
+    await loadOptimizationJob(nextJob.id)
+  } catch (error) {
+    showNotification?.('warning', '优化任务加载失败')
+  }
+}
+
+const createOptimizationJob = async () => {
+  if (!canCreateOptimizationJob.value) {
+    showNotification?.('warning', '请选择可优化参数，并确认股票代码与 trial 数量')
+    return
+  }
+
+  optimizationLoading.value = true
+  try {
+    const response = await optimizationApi.createJob({
+      name: `${config.stockCode} ${config.strategyType} 参数优化`,
+      base_params: buildOptimizationBaseParams(),
+      parameter_space: buildOptimizationParameterSpace(),
+      method: 'random_search',
+      objective_metric: optimizationConfig.objectiveMetric,
+      trial_count: optimizationConfig.trialCount,
+      random_seed: Date.now() % 100000,
+    })
+    const job = normalizeOptimizationJob(response?.data)
+    selectedOptimizationJob.value = job
+    selectedOptimizationJobId.value = job.id
+    optimizationJobs.value = [job, ...optimizationJobs.value.filter((item) => item.id !== job.id)]
+    optimizationTrials.value = []
+    optimizationBest.value = null
+    startOptimizationPolling(job.id)
+    showNotification?.('success', `已创建优化任务 #${job.id}`)
+  } catch (error) {
+    optimizationLoading.value = false
+    showNotification?.('error', '创建优化任务失败')
+  }
+}
+
+const applyBestOptimizationParams = () => {
+  const backtestParams = optimizationBest.value?.backtestParams
+  if (!backtestParams) return
+  if (backtestParams.stock_code) config.stockCode = String(backtestParams.stock_code)
+  if (backtestParams.initial_capital) config.initialCapital = Number(backtestParams.initial_capital)
+  if (backtestParams.strategy && isRunnableStrategyTemplate(String(backtestParams.strategy))) {
+    config.strategyType = String(backtestParams.strategy)
+  }
+  assignStrategyParams(toRecord(backtestParams.strategy_params))
+  syncOptimizationParamState()
+  showNotification?.('success', '已回填最优参数，可直接运行回测验证')
+}
+
+const cancelOptimizationJob = async () => {
+  if (!selectedOptimizationJob.value) return
+  try {
+    const response = await optimizationApi.cancelJob(selectedOptimizationJob.value.id)
+    selectedOptimizationJob.value = normalizeOptimizationJob(response?.data)
+    stopOptimizationPolling()
+    optimizationLoading.value = false
+    await loadOptimizationTrialsAndBest(selectedOptimizationJob.value.id)
+    showNotification?.('info', '优化任务已取消')
+  } catch (error) {
+    showNotification?.('warning', '取消优化任务失败')
+  }
+}
+
 watch(
   () => config.strategyType,
   () => {
     applyTemplateDefaults(selectedStrategyTemplate.value)
+    syncOptimizationParamState()
     syncQueryFromState()
   }
 )
@@ -1800,6 +2201,7 @@ watch(
     JSON.stringify(strategyParams),
   ],
   () => {
+    syncOptimizationParamState()
     syncQueryFromState()
   },
   { deep: true }
@@ -1966,6 +2368,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopOptimizationPolling()
   equityChartInstance.value?.dispose()
   compareChartInstance.value?.dispose()
 })
@@ -2415,6 +2818,103 @@ onBeforeUnmount(() => {
   }
 }
 
+.optimization-section {
+  .optimization-param-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .optimization-param {
+    display: grid;
+    grid-template-columns: 18px minmax(70px, 1fr) 64px 64px 54px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 12px;
+
+    input[type='checkbox'] {
+      margin: 0;
+    }
+  }
+
+  .optimization-param__input,
+  .optimization-param__step {
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .optimization-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .optimization-status {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid rgba(41, 98, 255, 0.24);
+    border-radius: 10px;
+    background: rgba(41, 98, 255, 0.08);
+  }
+
+  .optimization-status__head,
+  .optimization-status__meta,
+  .optimization-trial {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .optimization-status__head {
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 13px;
+  }
+
+  .optimization-progress {
+    height: 6px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1);
+
+    span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: #2962FF;
+    }
+  }
+
+  .optimization-status__meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  .optimization-trials {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 10px;
+  }
+
+  .optimization-trial {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.66);
+  }
+}
+
 .results-panel {
   flex: 1;
   min-width: 0;
@@ -2818,68 +3318,4 @@ onBeforeUnmount(() => {
   }
 }
 
-// 参数优化标签页
-.optimization-tab {
-  .optimization-jobs {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    margin-top: 16px;
-  }
-
-  .optimization-job-card {
-    background: var(--color-bg-secondary);
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    padding: 16px;
-    transition: all 0.2s;
-
-    &.running {
-      border-left: 3px solid #00C853;
-    }
-
-    &.completed {
-      border-left: 3px solid #2196F3;
-    }
-
-    &.failed {
-      border-left: 3px solid #FF1744;
-    }
-  }
-
-  .optimization-job-card .job-header,
-  .optimization-job-card .job-meta {
-    // 复用 .job-card 样式
-  }
-
-  .best-params-mini {
-    margin-top: 12px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 13px;
-
-    .best-label {
-      color: var(--color-text-secondary);
-    }
-
-    .best-value {
-      font-weight: 600;
-      color: var(--color-accent);
-    }
-  }
-
-  .loading-state,
-  .empty-state {
-    text-align: center;
-    padding: 40px;
-    color: var(--color-text-secondary);
-    background: var(--color-bg-secondary);
-    border-radius: 8px;
-
-    .btn {
-      margin-top: 12px;
-    }
-  }
-}
 </style>

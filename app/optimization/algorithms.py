@@ -1,14 +1,13 @@
-import asyncio
-import random
 import logging
+import random
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
-from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
 from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
 
 logger = logging.getLogger(__name__)
 
@@ -16,29 +15,29 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Trial:
     """优化试验记录"""
-    parameters: Dict[str, Any]
-    score: Optional[float] = None
-    metrics: Optional[Dict[str, Any]] = None
-    backtest_result_id: Optional[int] = None
+    parameters: dict[str, Any]
+    score: float | None = None
+    metrics: dict[str, Any] | None = None
+    backtest_result_id: int | None = None
     status: str = "running"
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class BaseOptimizer(ABC):
     """优化器基类"""
 
-    def __init__(self, param_space: Dict[str, Dict[str, Any]], objective: str = "sharpe_ratio"):
+    def __init__(self, param_space: dict[str, dict[str, Any]], objective: str = "sharpe_ratio"):
         self.param_space = param_space
         self.objective = objective
-        self.trials: List[Trial] = []
-        self.best_trial: Optional[Trial] = None
+        self.trials: list[Trial] = []
+        self.best_trial: Trial | None = None
 
     @abstractmethod
-    async def suggest(self, n: int = 1) -> List[Dict[str, Any]]:
+    async def suggest(self, n: int = 1) -> list[dict[str, Any]]:
         """生成下一组参数建议"""
         pass
 
-    def record_trial(self, parameters: Dict[str, Any], score: Optional[float], **kwargs):
+    def record_trial(self, parameters: dict[str, Any], score: float | None, **kwargs):
         """记录试验结果"""
         trial = Trial(parameters=parameters, score=score, **kwargs)
         self.trials.append(trial)
@@ -51,11 +50,11 @@ class BaseOptimizer(ABC):
         """检查是否达到终止条件"""
         pass
 
-    def get_best_parameters(self) -> Optional[Dict[str, Any]]:
+    def get_best_parameters(self) -> dict[str, Any] | None:
         """获取最优参数"""
         return self.best_trial.parameters if self.best_trial else None
 
-    def get_best_score(self) -> Optional[float]:
+    def get_best_score(self) -> float | None:
         """获取最优得分"""
         return self.best_trial.score if self.best_trial else None
 
@@ -63,12 +62,12 @@ class BaseOptimizer(ABC):
 class RandomSearchOptimizer(BaseOptimizer):
     """随机搜索优化器"""
 
-    def __init__(self, param_space: Dict[str, Dict[str, Any]], objective: str = "sharpe_ratio", n_trials: int = 100):
+    def __init__(self, param_space: dict[str, dict[str, Any]], objective: str = "sharpe_ratio", n_trials: int = 100):
         super().__init__(param_space, objective)
         self.n_trials = n_trials
-        self.tried: List[Tuple] = []
+        self.tried: list[tuple] = []
 
-    def _sample_parameters(self) -> Dict[str, Any]:
+    def _sample_parameters(self) -> dict[str, Any]:
         """从参数空间随机采样"""
         params = {}
         for name, spec in self.param_space.items():
@@ -90,7 +89,7 @@ class RandomSearchOptimizer(BaseOptimizer):
 
         return params
 
-    async def suggest(self, n: int = 1) -> List[Dict[str, Any]]:
+    async def suggest(self, n: int = 1) -> list[dict[str, Any]]:
         """生成随机参数（不重复）"""
         suggestions = []
         for _ in range(n):
@@ -116,15 +115,15 @@ class BayesianOptimizer(BaseOptimizer):
 
     def __init__(
         self,
-        param_space: Dict[str, Dict[str, Any]],
+        param_space: dict[str, dict[str, Any]],
         objective: str = "sharpe_ratio",
         n_initial: int = 5,
         kernel=None,
     ):
         super().__init__(param_space, objective)
         self.n_initial = n_initial
-        self.X: List[List[float]] = []  # 参数向量（归一化后）
-        self.y: List[float] = []  # 得分
+        self.X: list[list[float]] = []  # 参数向量（归一化后）
+        self.y: list[float] = []  # 得分
         self.param_names = list(param_space.keys())
         self.bounds = np.array([[spec["low"], spec["high"]] for spec in param_space.values()])
 
@@ -133,7 +132,7 @@ class BayesianOptimizer(BaseOptimizer):
             kernel = Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e3), nu=2.5)
         self.gp = GaussianProcessRegressor(kernel=kernel, alpha=1e-6, normalize_y=True, n_restarts_optimizer=5)
 
-    def _normalize(self, params: Dict[str, Any]) -> List[float]:
+    def _normalize(self, params: dict[str, Any]) -> list[float]:
         """将参数归一化到 [0,1]"""
         vec = []
         for i, name in enumerate(self.param_names):
@@ -143,7 +142,7 @@ class BayesianOptimizer(BaseOptimizer):
             vec.append(normalized)
         return vec
 
-    def _denormalize(self, vec: List[float]) -> Dict[str, Any]:
+    def _denormalize(self, vec: list[float]) -> dict[str, Any]:
         """从归一化向量还原参数"""
         params = {}
         for i, name in enumerate(self.param_names):
@@ -164,7 +163,7 @@ class BayesianOptimizer(BaseOptimizer):
 
         return params
 
-    async def suggest(self, n: int = 1) -> List[Dict[str, Any]]:
+    async def suggest(self, n: int = 1) -> list[dict[str, Any]]:
         """使用 EI 采集函数建议下一组参数"""
         if len(self.X) < self.n_initial:
             # 初始阶段：拉丁超立方采样（简化：随机）
@@ -217,7 +216,7 @@ class BayesianOptimizer(BaseOptimizer):
 
         return [self._denormalize(best_vec.tolist())]
 
-    def record_trial(self, parameters: Dict[str, Any], score: Optional[float], **kwargs):
+    def record_trial(self, parameters: dict[str, Any], score: float | None, **kwargs):
         """记录试验并更新 GP"""
         super().record_trial(parameters, score, **kwargs)
         self.X.append(self._normalize(parameters))
@@ -231,7 +230,7 @@ class BayesianOptimizer(BaseOptimizer):
         return len(self.trials) >= self.n_initial + 100  # 初始 + 100 轮优化
 
 
-def create_optimizer(method: str, param_space: Dict[str, Dict[str, Any]], **kwargs) -> BaseOptimizer:
+def create_optimizer(method: str, param_space: dict[str, dict[str, Any]], **kwargs) -> BaseOptimizer:
     """工厂函数：创建优化器"""
     if method == "random":
         return RandomSearchOptimizer(param_space, **kwargs)

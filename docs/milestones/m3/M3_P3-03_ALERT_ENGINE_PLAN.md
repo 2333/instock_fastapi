@@ -1,11 +1,11 @@
 # M3 P3-03 参数化指标筛选与订阅提醒 Plan
 
-> Status: active
+> Status: closed baseline
 > Last updated: 2026-04-24
 > Owner: controller
 > Source of truth: [docs/EXECUTION_PLAN.md](../../EXECUTION_PLAN.md)
 
-> Current active slice: `M3 acceptance candidate / pending user acceptance`
+> Historical slice: `M3 / P3-03 accepted and post-merge staging closed`
 
 ## 目标
 
