@@ -3,8 +3,9 @@
 如果你只想知道“项目当前做到哪、下一步做什么、我该从哪里开始看”，先按这个顺序读：
 
 1. [EXECUTION_PLAN.md](./EXECUTION_PLAN.md)
-2. [milestones/m3/README.md](./milestones/m3/README.md)
-3. [milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md](./milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md)
+2. [milestones/m5/README.md](./milestones/m5/README.md)
+3. [milestones/m5/artifacts/W2-frontend-v1-alignment.md](./milestones/m5/artifacts/W2-frontend-v1-alignment.md)
+4. [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)（冻结 kickoff 基线/历史启动计划）
 
 ## 文档分层
 
@@ -14,15 +15,16 @@
 
 ### 2. 当前执行包文档
 
-- [milestones/m3/README.md](./milestones/m3/README.md)：当前 active 执行包入口，负责说明 `M3` 的锚定目标、进入顺序与 `Pre-M3` baseline 的关系。
-- [milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md](./milestones/m3/M3_P3-03_ALERT_ENGINE_PLAN.md)：当前 `M3` 的锚定目标、canonical model、分步交付与 stop condition。
-- [milestones/m3/PRE_M3_DECISION.md](./milestones/m3/PRE_M3_DECISION.md)：只在需要确认为什么当前可进入 `M3` 时再看，不作为日常推进入口。
+- [milestones/m5/README.md](./milestones/m5/README.md)：当前 active 执行包入口，负责说明 `M5 / P3-05 v1` 的本地验收状态、release activity、residue 决策和停机点。
+- [milestones/m5/artifacts/W2-frontend-v1-alignment.md](./milestones/m5/artifacts/W2-frontend-v1-alignment.md)：当前 `M5 v1` 本地代码验收与剩余 release activity 的主要证据入口。
+- [milestones/m5/M5_P3-05_KICKOFF_PLAN.md](./milestones/m5/M5_P3-05_KICKOFF_PLAN.md)：冻结 kickoff 基线/历史启动计划，用于回看原始 scope、并行任务拆分、验收和回滚边界，不再代表当前唯一执行状态。
+- [milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md](./milestones/m5/M5_P3-05_REVIEW_CHECKLIST.md)：`M5` reviewer 检查清单；未勾选的 live staging、生产 backup、schema-contract gate 与 release smoke 是 release activity。
 
 ### 3. 工作内容与留痕文档
 
-- [milestones/README.md](./milestones/README.md)：执行包总索引，包含 `m0/`、`m1/`、`m2/`、`m3/` 和设计资产目录的定位说明。
-- [milestones/m0/](./milestones/m0/)、[milestones/m1/README.md](./milestones/m1/README.md)、[milestones/m2/README.md](./milestones/m2/README.md)：历史执行包与验收材料入口。
-- [milestones/m3/artifacts/README.md](./milestones/m3/artifacts/README.md)：当前执行包的 wave artifact 记录规范。
+- [milestones/README.md](./milestones/README.md)：执行包总索引，包含 `m0/`、`m1/`、`m2/`、`m3/`、`m5/` 和设计资产目录的定位说明。
+- [milestones/m0/](./milestones/m0/)、[milestones/m1/README.md](./milestones/m1/README.md)、[milestones/m2/README.md](./milestones/m2/README.md)、[milestones/m3/README.md](./milestones/m3/README.md)：历史执行包与验收材料入口。
+- [milestones/m5/artifacts/README.md](./milestones/m5/artifacts/README.md)：当前执行包的 artifact 记录规范。
 - [REBASELINE_M0_PLAN.md](./REBASELINE_M0_PLAN.md)、[REBASELINE_M0_TRACKER.md](./REBASELINE_M0_TRACKER.md)：`M0 rebaseline` 的历史治理记录。
 - [PROJECT_MAINLINE_AUDIT_2026-04-20.md](./PROJECT_MAINLINE_AUDIT_2026-04-20.md)、[RESIDUE_REMOVAL_CANDIDATES_2026-04-20.md](./RESIDUE_REMOVAL_CANDIDATES_2026-04-20.md)：分析、审计和残留清单，不是当前主推进入口。
 
@@ -38,8 +40,9 @@
 
 - `M*` 表示实际推进/验收里程碑，当前状态和完成度只在 `M*` 体系里写。
 - `Phase*` 表示能力设计编号或历史规划资产，不单独代表当前执行状态。
-- 当前 active 路线是 `M3 / P3-03 kickoff`；`Pre-M3` 已作为 closed baseline 保留在 `docs/milestones/m3/`。
-- 当前 `M3` 的锚点是：`Saved Screener` 为 authored truth source，`Alert Subscription` 为提醒绑定，`Registry` 为字段目录，`Adapter` 为可替换执行层。
+- 当前 active 路线是 `M5 / P3-05` PR/release closure；`M5 v1` 已完成本地代码验收并已提交 PR，但尚未写成生产完成。
+- 当前 `M5` 的 release activity 是：live staging smoke、生产 backup、发布前 schema-contract gate 与 release smoke；这些完成并合并/发布后，`M6 / P3-06` 才接棒为 active。
+- `M5` 的 kickoff plan 只作为冻结基线/历史启动计划；当前状态以 `EXECUTION_PLAN.md`、`milestones/m5/README.md` 和 `milestones/m5/artifacts/` 的验收/证据记录为准。
 
 ## 代码结构对应关系
 

@@ -208,6 +208,35 @@ export const backtestApi = {
   getBacktest: (id: string) => api.get(`/backtest/${id}`) as Promise<any>,
 }
 
+export const optimizationApi = {
+  createJob: (payload: {
+    name?: string
+    base_params: Record<string, any>
+    parameter_space: Record<string, any>
+    method?: 'random_search'
+    objective_metric?: 'sharpe_ratio' | 'total_return' | 'max_drawdown'
+    objective_direction?: 'maximize' | 'minimize'
+    trial_count?: number
+    random_seed?: number | null
+  }, autoStart = true) =>
+    api.post('/optimization/jobs', payload, { params: { auto_start: autoStart } }) as Promise<any>,
+
+  listJobs: (limit = 20) =>
+    api.get('/optimization/jobs', { params: { limit } }) as Promise<any>,
+
+  getJob: (jobId: number) =>
+    api.get(`/optimization/jobs/${jobId}`) as Promise<any>,
+
+  cancelJob: (jobId: number) =>
+    api.delete(`/optimization/jobs/${jobId}`) as Promise<any>,
+
+  listTrials: (jobId: number) =>
+    api.get(`/optimization/jobs/${jobId}/trials`) as Promise<any>,
+
+  getBest: (jobId: number) =>
+    api.get(`/optimization/jobs/${jobId}/best`) as Promise<any>,
+}
+
 export const selectionApi = {
   getConditions: () => api.get('/selection/conditions') as Promise<any>,
 

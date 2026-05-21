@@ -1,7 +1,7 @@
 # Pre-M3 Mainline Alignment Plan
 
-> Status: active recovery source of truth
-> Gate: must pass before `M3 / P3-03`
+> Status: closed baseline recovery record
+> Gate: passed before `M3 / P3-03`
 > Last updated: 2026-04-22
 > Controller: Codex
 
@@ -9,7 +9,7 @@
 
 ## 目标
 
-在不引入兜底代码的前提下，先把当前主线重新收拢到可验收、可恢复、可发布的状态，再允许项目继续进入 `M3`。
+在不引入兜底代码的前提下，当时先把主线重新收拢到可验收、可恢复、可发布的状态，再允许项目继续进入 `M3`。
 
 这次修复的目标不是“顺手多做一点”，而是收口四类已经确认的漂移：
 
@@ -48,7 +48,7 @@
 
 ## 路线文档收敛原则
 
-当前主路线只使用 3 份 route docs：
+`Pre-M3` 执行时主路线只使用 3 份 route docs：
 
 1. `docs/EXECUTION_PLAN.md`
 2. `docs/milestones/m3/PRE_M3_MAINLINE_ALIGNMENT_PLAN.md`

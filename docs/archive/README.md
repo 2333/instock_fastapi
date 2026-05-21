@@ -20,6 +20,6 @@
 
 ## 使用建议
 
-- 当前执行与节奏控制优先参考根目录下的 `EXECUTION_PLAN.md`，以及当前 active 执行包 `docs/milestones/m3/` 下的 `PLAN/TRACKER`。
+- 当前执行与节奏控制优先参考根目录下的 `EXECUTION_PLAN.md`，以及 `docs/milestones/` 下由 plan-of-record 指定的 active 执行包。
 - `REBASELINE_M0_PLAN.md` 与 `REBASELINE_M0_TRACKER.md` 现主要用于回看治理背景与验收留痕，不是当前迭代入口。
 - 只有在需要对比 v1/v2 差异时，再查阅这里的历史文档。

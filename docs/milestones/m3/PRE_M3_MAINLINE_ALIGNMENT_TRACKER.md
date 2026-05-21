@@ -13,10 +13,10 @@
 ## 当前状态
 
 - `M0` / `M1` / `M2`：已完成收口
-- 当前 active 路线：`M3 / P3-03 kickoff`
-- 当前禁止事项：启动 `M3` 前不得绕过 `schema_contract` release gate
+- 现行路线：已移交给 [docs/EXECUTION_PLAN.md](../../EXECUTION_PLAN.md) 指向的里程碑；本 tracker 仅保留 `Pre-M3` closed baseline
+- 历史禁止事项：启动 `M3` 前不得绕过 `schema_contract` release gate
 - `PRE_M3_DECISION.md` 是 `W0` / `W5` 的唯一 live gate record
-- 当前主路线只看 3 份 route docs：`docs/EXECUTION_PLAN.md`、`PRE_M3_MAINLINE_ALIGNMENT_PLAN.md`、`PRE_M3_MAINLINE_ALIGNMENT_TRACKER.md`
+- `Pre-M3` 执行期主路线只看 3 份 route docs：`docs/EXECUTION_PLAN.md`、`PRE_M3_MAINLINE_ALIGNMENT_PLAN.md`、`PRE_M3_MAINLINE_ALIGNMENT_TRACKER.md`
 - `PRE_M3_DECISION.md` 仅作为 gate file 使用，不承担日常路线导航
 - `Pre-M3` 已作为 closed baseline 保留；当前执行可从 `M3 / P3-03` kickoff 继续
 - `2026-04-21` review reopen 的 `W1` / `W2a` findings 已修复并通过 `reviewer + code-review-expert` double review
@@ -58,7 +58,7 @@
 | `W2a` | API contract sweep 与生产接口对齐 | completed | controller + `worker-runtime` | `W1`, `W2` | [W2a-api-contract-alignment.md](./artifacts/W2a-api-contract-alignment.md) | 2026-04-21 | 作为当前接口基线继续生效，等待 `W4` 文档终扫收口 | real PostgreSQL legacy-row integration coverage still desirable |
 | `W2b` | 数据完整性对齐与故障模式治理 | completed | controller + `worker-runtime` | `W1`, `W2a` | [W2b-data-completeness-alignment.md](./artifacts/W2b-data-completeness-alignment.md) | 2026-04-22 | 以当前 active-path baseline 进入 `W4` 文档终扫；historical backfill 后续若需要，改走外部临时能力 | - |
 | `W3` | 残留清理与导航降级 | completed | `worker-runtime` | `W2`, `W2a` | [W3-residue-cleanup.md](./artifacts/W3-residue-cleanup.md) | 2026-04-21 | 等待 `W4` 把当前 residue cleanup 证据并入主线文档 | - |
-| `W4` | 主线文档终扫 | completed | controller | `W1`, `W2`, `W2a`, `W2b`, `W3` | [W4-doc-mainline-alignment.md](./artifacts/W4-doc-mainline-alignment.md) | 2026-04-22 | 文档入口、当前执行包与设计资产分层已收敛；`W5` 已完成并将主线切换到 `M3 / P3-03 kickoff` | - |
+| `W4` | 主线文档终扫 | completed | controller | `W1`, `W2`, `W2a`, `W2b`, `W3` | [W4-doc-mainline-alignment.md](./artifacts/W4-doc-mainline-alignment.md) | 2026-04-22 | 文档入口、当时执行包与设计资产分层已收敛；`W5` 已完成并在当时将主线切换到 `M3 / P3-03` | - |
 | `W5` | reviewer 最终决策 | completed | `reviewer` | `W1` ~ `W4` | [PRE_M3_DECISION.md](./PRE_M3_DECISION.md) | 2026-04-22 | 结论：`GO to start M3`；`Pre-M3` 已关闭，下一步切换到 `M3 / P3-03` kickoff | - |
 
 ## 使用规则
@@ -70,7 +70,7 @@
 
 ## 中断接手清单
 
-1. 先按顶部“恢复顺序”读完 `EXECUTION_PLAN -> PRE_M3 plan -> 本 tracker`，确认当前 active wave、owner 与 blocker。
+1. 先按顶部“恢复顺序”读完 `EXECUTION_PLAN -> PRE_M3 plan -> 本 tracker`，确认当时 wave、owner 与 blocker。
 2. 如果恢复的工作涉及 release restriction、close condition 或 `go / no-go` 判断，再补读 `PRE_M3_DECISION.md`。
 3. 只进入该 lane 的 artifact 与 write set；不要顺手改另一个 lane 的文件。
 4. 开工前先确认上一次记录的 `Next step` 仍然有效；如果不再有效，先把原因写回 artifact，再继续。

@@ -24,6 +24,6 @@
 ## 当前使用约定
 
 - 这些文档用于保留 Phase 3 设计资产，不表示这些能力应继续直接挂载到当前 active mainline。
-- 当前 active 入口以 `docs/EXECUTION_PLAN.md` 与 `docs/milestones/m3/` 下的 `Pre-M3` 执行包为准。
-- `P3-03` 只有在 `Pre-M3` reviewer gate 给出 `go` 后才允许启动。
+- 当前 active 入口以 `docs/EXECUTION_PLAN.md` 与 `docs/milestones/m5/` 下的 `M5 / P3-05` 执行包为准。
+- `P3-05` 的本目录文档是设计输入，真正的执行拆分、任务边界和 reviewer gate 以 `docs/milestones/m5/` 为准。
 - `P3-04 策略社交` 与 `PRD v2.0` 的“不是社区平台 / 永远不做社区、评论、排行榜”硬边界冲突，自 `2026-04-20` 起只保留为历史 rejected design，不代表承诺实施、运行时契约或未来 milestone 默认入口。
